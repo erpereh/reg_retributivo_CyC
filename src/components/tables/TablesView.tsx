@@ -11,6 +11,60 @@ import { SectionHeader } from "@/components/common/SectionHeader";
 import type { AppView } from "@/lib/types";
 import { formatEuro } from "@/lib/utils/money";
 
+interface TableHeader {
+  readonly key: string;
+  readonly label: string;
+}
+
+const PERSONAS_HEADERS: readonly TableHeader[] = [
+  { key: "employeeNumber", label: "Matrícula" },
+  { key: "person", label: "Persona" },
+  { key: "workplace", label: "Centro" },
+  { key: "position", label: "Puesto" },
+  { key: "category", label: "Categoría" },
+  { key: "salaryRegistro", label: "Salario Registro" },
+  { key: "salaryPdf", label: "Salario PDF" },
+  { key: "salaryDiff", label: "Dif." },
+  { key: "salaryComplementRegistro", label: "C. Salarial Registro" },
+  { key: "salaryComplementPdf", label: "C. Salarial PDF" },
+  { key: "salaryComplementDiff", label: "Dif." },
+  { key: "extraSalaryRegistro", label: "Extrasalarial Registro" },
+  { key: "extraSalaryPdf", label: "Extrasalarial PDF" },
+  { key: "extraSalaryDiff", label: "Dif." },
+  { key: "registroTotal", label: "Total Registro" },
+  { key: "pdfTotal", label: "Total PDF" },
+  { key: "totalDiff", label: "Dif. Total" },
+  { key: "status", label: "Estado" },
+  { key: "detail", label: "Detalle" },
+];
+
+const CONCEPTOS_HEADERS: readonly TableHeader[] = [
+  { key: "employeeNumber", label: "Matrícula" },
+  { key: "person", label: "Persona" },
+  { key: "block", label: "Bloque" },
+  { key: "registroCode", label: "Código Registro" },
+  { key: "pdfConcept", label: "Concepto PDF" },
+  { key: "registroAmount", label: "Registro" },
+  { key: "pdfAmount", label: "PDF" },
+  { key: "difference", label: "Diferencia" },
+  { key: "status", label: "Estado" },
+  { key: "detail", label: "Detalle" },
+];
+
+const CONCEPTOS_NO_INCLUIDOS_HEADERS: readonly TableHeader[] = [
+  { key: "decisionType", label: "Tipo decisión" },
+  { key: "includedInComparison", label: "Incluido en cálculo" },
+  { key: "pdfConcept", label: "Concepto PDF" },
+  { key: "totalDetected", label: "Total detectado" },
+  { key: "peopleCount", label: "Personas" },
+  { key: "payrollCount", label: "Nóminas" },
+  { key: "exampleEmployeeNumbers", label: "Ejemplos matrículas" },
+  { key: "suggestedBlock", label: "Sugerencia bloque" },
+  { key: "suggestedRegistroCode", label: "Sugerencia código Registro" },
+  { key: "recommendedAction", label: "Acción recomendada" },
+  { key: "reason", label: "Motivo" },
+];
+
 function unique(values: readonly (string | undefined)[]): string[] {
   return [...new Set(values.filter((value): value is string => Boolean(value)))].sort((a, b) => a.localeCompare(b, "es"));
 }
@@ -108,29 +162,9 @@ function PersonasTable() {
         <table className="w-full min-w-[1500px] border-separate border-spacing-0 text-left text-sm">
           <thead className="bg-slate-50 text-muted">
             <tr>
-              {[
-                "Matrícula",
-                "Persona",
-                "Centro",
-                "Puesto",
-                "Categoría",
-                "Salario Registro",
-                "Salario PDF",
-                "Dif.",
-                "C. Salarial Registro",
-                "C. Salarial PDF",
-                "Dif.",
-                "Extrasalarial Registro",
-                "Extrasalarial PDF",
-                "Dif.",
-                "Total Registro",
-                "Total PDF",
-                "Dif. Total",
-                "Estado",
-                "Detalle",
-              ].map((header) => (
-                <th key={header} className="border-b border-line px-4 py-3 text-xs font-semibold uppercase">
-                  {header}
+              {PERSONAS_HEADERS.map((header) => (
+                <th key={header.key} className="border-b border-line px-4 py-3 text-xs font-semibold uppercase">
+                  {header.label}
                 </th>
               ))}
             </tr>
@@ -189,7 +223,13 @@ function ConceptosTable() {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[980px] text-left text-sm">
             <thead className="bg-slate-50 text-muted">
-              <tr>{["Matrícula", "Persona", "Bloque", "Código Registro", "Concepto PDF", "Registro", "PDF", "Diferencia", "Estado", "Detalle"].map((header) => <th key={header} className="border-b border-line px-4 py-3 text-xs font-semibold uppercase">{header}</th>)}</tr>
+              <tr>
+                {CONCEPTOS_HEADERS.map((header) => (
+                  <th key={header.key} className="border-b border-line px-4 py-3 text-xs font-semibold uppercase">
+                    {header.label}
+                  </th>
+                ))}
+              </tr>
             </thead>
             <tbody>
               {rows.map((row, index) => (
@@ -218,7 +258,13 @@ function ConceptosTable() {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1280px] text-left text-sm">
             <thead className="bg-slate-50 text-muted">
-              <tr>{["Tipo decision", "Incluido", "Concepto PDF", "Total detectado", "Personas", "Nominas", "Ejemplos", "Sugerencia bloque", "Sugerencia codigo", "Accion recomendada", "Motivo"].map((header) => <th key={header} className="border-b border-line px-4 py-3 text-xs font-semibold uppercase">{header}</th>)}</tr>
+              <tr>
+                {CONCEPTOS_NO_INCLUIDOS_HEADERS.map((header) => (
+                  <th key={header.key} className="border-b border-line px-4 py-3 text-xs font-semibold uppercase">
+                    {header.label}
+                  </th>
+                ))}
+              </tr>
             </thead>
             <tbody>
               {unmapped.map((row) => (
@@ -251,7 +297,7 @@ function AgrupacionesTable() {
   return (
     <EmptyState
       icon={Table2}
-      title={rows.length ? "Agrupaciones calculadas" : "Pendiente de implementacion"}
+      title={rows.length ? "Agrupaciones calculadas" : "Pendiente de implementación"}
       description="La primera fase prioriza Registro vs PDF, conceptos y normalizado vs real. Las agrupaciones se implementan despues sin bloquear la validacion de importes."
     />
   );

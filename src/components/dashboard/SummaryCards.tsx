@@ -25,9 +25,15 @@ export function SummaryCards({ summary }: SummaryCardsProps) {
       icon: Users,
     },
     {
-      label: "Pendientes revision",
-      value: `${summary?.conceptsPendingReview ?? 0} / ${formatEuro(summary?.pendingDecisionPdfTotal ?? 0)}`,
-      detail: "Importe PDF pendiente de decision, no incluido en el calculo principal",
+      label: "Conceptos pendientes de revisión",
+      value: summary?.conceptsPendingReview ?? 0,
+      detail: "Importe PDF pendiente de decisión, no incluido en el cálculo principal",
+      icon: AlertCircle,
+    },
+    {
+      label: "Importe pendiente de decisión",
+      value: formatEuro(summary?.pendingDecisionPdfTotal ?? 0),
+      detail: "No incluido en la diferencia matched",
       icon: AlertCircle,
     },
     {
@@ -39,8 +45,20 @@ export function SummaryCards({ summary }: SummaryCardsProps) {
     {
       label: "Conceptos ignorados",
       value: summary?.conceptsIgnored ?? 0,
-      detail: `No incluidos: ${summary?.conceptsNotIncluded ?? summary?.conceptsUnmapped ?? 0}`,
+      detail: "Fuera del calculo por criterio conservador",
       icon: UserX,
+    },
+    {
+      label: "Conceptos no incluidos",
+      value: summary?.conceptsNotIncluded ?? summary?.conceptsUnmapped ?? 0,
+      detail: "Pendientes, sin mapear reales e ignorados",
+      icon: Sigma,
+    },
+    {
+      label: "Conceptos sin mapear reales",
+      value: summary?.conceptsRealUnmapped ?? 0,
+      detail: "Sin codigo Registro claro",
+      icon: AlertCircle,
     },
     {
       label: "Sin PDF / Sin Registro",

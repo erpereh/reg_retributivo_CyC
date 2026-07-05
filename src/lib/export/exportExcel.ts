@@ -16,6 +16,10 @@ function moneyColumns(sheet: ExcelJS.Worksheet, columns: readonly number[]): voi
   });
 }
 
+function formatMoneyText(value: number): string {
+  return new Intl.NumberFormat("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+}
+
 function addResumen(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void {
   const sheet = workbook.addWorksheet("Resumen", { properties: { defaultRowHeight: 22 } });
   sheet.mergeCells("A1:H1");
@@ -35,12 +39,15 @@ function addResumen(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void 
     ["Personas en Registro sin PDF", analysis.summary.peopleInRegistroWithoutPdf ?? 0],
     ["Personas en PDF sin Registro", analysis.summary.peopleInPdfWithoutRegistro ?? 0],
     ["Total PDF sin Registro", analysis.summary.totalPdfWithoutRegistro ?? 0],
-    ["Importe PDF pendiente de decision", analysis.summary.pendingDecisionPdfTotal ?? 0],
-    ["Conceptos pendientes revision", analysis.summary.conceptsPendingReview ?? 0],
-    ["Conceptos sin mapear real", analysis.summary.conceptsRealUnmapped ?? 0],
+    ["Conceptos pendientes de revisión", analysis.summary.conceptsPendingReview ?? 0],
     ["Conceptos ignorados", analysis.summary.conceptsIgnored ?? 0],
     ["Conceptos no incluidos", analysis.summary.conceptsNotIncluded ?? analysis.summary.conceptsUnmapped],
-    ["Nota pendiente decision", "Importe PDF pendiente de decision, no incluido en el calculo principal"],
+    ["Conceptos sin mapear reales", analysis.summary.conceptsRealUnmapped ?? 0],
+    ["Importe pendiente de decisión", analysis.summary.pendingDecisionPdfTotal ?? 0],
+    [
+      "Nota pendiente decisión",
+      `Existen ${formatMoneyText(analysis.summary.pendingDecisionPdfTotal ?? 0)} € en conceptos PDF pendientes de decisión que no se han incluido en la diferencia matched.`,
+    ],
     ["Cuadres internos con diferencias", analysis.summary.internalExcelDifferences],
     ["Tolerancia", analysis.summary.tolerance],
   ].forEach((row) => sheet.addRow(row));
@@ -71,6 +78,7 @@ function addPersonas(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void
     "Total PDF",
     "Dif. Total",
     "Estado",
+    "Detalle",
   ]);
   styleHeaderRow(sheet.getRow(1));
   analysis.people.forEach((item) => {
@@ -93,11 +101,12 @@ function addPersonas(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void
       item.pdfTotal,
       item.totalDifference,
       item.status,
+      item.detail,
     ]);
     applyStatusStyle(row.getCell(18), item.status);
   });
   moneyColumns(sheet, [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]);
-  configureColumns(sheet, [14, 32, 24, 34, 30, 18, 18, 16, 20, 18, 18, 22, 20, 20, 18, 18, 18, 16]);
+  configureColumns(sheet, [14, 32, 24, 34, 30, 18, 18, 16, 20, 18, 18, 22, 20, 20, 18, 18, 18, 16, 72]);
   styleBodyRows(sheet);
 }
 
@@ -167,16 +176,16 @@ function addConceptosNoIncluidos(workbook: ExcelJS.Workbook, analysis: AnalysisR
   const sheet = workbook.addWorksheet("Conceptos_no_incluidos");
   sheet.views = [{ state: "frozen", ySplit: 1 }];
   sheet.addRow([
-    "Tipo decision",
-    "Incluido en calculo",
+    "Tipo decisión",
+    "Incluido en cálculo",
     "Concepto PDF",
     "Total detectado",
     "N personas",
-    "N nominas",
-    "Ejemplos matriculas",
+    "N nóminas",
+    "Ejemplos matrículas",
     "Sugerencia bloque",
-    "Sugerencia codigo Registro",
-    "Accion recomendada",
+    "Sugerencia código Registro",
+    "Acción recomendada",
     "Motivo",
   ]);
   styleHeaderRow(sheet.getRow(1));
@@ -279,7 +288,7 @@ function addAgrupaciones(workbook: ExcelJS.Workbook, analysis: AnalysisResult): 
   sheet.addRow(["Estado", "Hoja", "Grupo", "Metrica", "Bloque", "Sexo", "Registro", "PDF recalculado", "Diferencia", "Detalle"]);
   styleHeaderRow(sheet.getRow(1));
   if (!analysis.groupings.length) {
-    sheet.addRow(["Pendiente de implementacion"]);
+    sheet.addRow(["Pendiente de implementación"]);
   } else {
     analysis.groupings.forEach((item) => {
       const row = sheet.addRow([

@@ -305,6 +305,42 @@ function personStatus(input: {
   return diffStatus;
 }
 
+function hasCompensatedBlockReclassification(input: {
+  readonly salaryDifference: number;
+  readonly salaryComplementDifference: number;
+  readonly extraSalaryDifference: number;
+  readonly totalDifference: number;
+  readonly options: CompareOptions;
+}): boolean {
+  const tolerance = Math.max(0, input.options.tolerance);
+  const relevant = [input.salaryDifference, input.salaryComplementDifference, input.extraSalaryDifference].filter(
+    (difference) => Math.abs(difference) > tolerance,
+  );
+  if (relevant.length < 2 || !relevant.some((difference) => difference > 0) || !relevant.some((difference) => difference < 0)) {
+    return false;
+  }
+
+  const positiveTotal = relevant.filter((difference) => difference > 0).reduce((sum, difference) => sum + difference, 0);
+  const negativeTotal = Math.abs(relevant.filter((difference) => difference < 0).reduce((sum, difference) => sum + difference, 0));
+  const compensatedBase = Math.min(positiveTotal, negativeTotal);
+  const maxNetDifference = Math.max(input.options.incidentThreshold ?? 50, compensatedBase * 0.2);
+  return Math.abs(input.totalDifference) <= maxNetDifference;
+}
+
+function personDetail(input: {
+  readonly salaryDifference: number;
+  readonly salaryComplementDifference: number;
+  readonly extraSalaryDifference: number;
+  readonly totalDifference: number;
+  readonly options: CompareOptions;
+}): string {
+  const base = "PDF calculado como suma de conceptos incluidos por mapa. Total Devengado se conserva solo como control auxiliar.";
+  if (hasCompensatedBlockReclassification(input)) {
+    return `${base} Diferencia principalmente compensada por reclasificacion entre bloques.`;
+  }
+  return base;
+}
+
 function justification(employee: RegistroEmployee | undefined, aggregate: PayrollAggregate | undefined): string {
   if (!employee) return "Persona detectada en PDF sin línea equivalente en Registro.";
   if (!aggregate?.records.length) return "No se han detectado PDFs para la matrícula.";
@@ -509,7 +545,7 @@ export async function compareAnalysis(
       payrollCount: records.length,
       unmappedConceptsCount: unmappedCount,
       status,
-      detail: "PDF calculado como suma de conceptos incluidos por mapa. Total Devengado se conserva solo como control auxiliar.",
+      detail: personDetail({ salaryDifference, salaryComplementDifference, extraSalaryDifference, totalDifference, options }),
       periods: [...new Set(records.map((record) => record.periodLabel))],
       files: [...new Set(records.map((record) => `${record.sourceFile}${record.pageNumber ? ` p.${record.pageNumber}` : ""}`))],
     });

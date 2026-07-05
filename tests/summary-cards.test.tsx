@@ -33,7 +33,11 @@ describe("dashboard summary cards", () => {
     expect(screen.getByText("Recibos procesados").textContent).toBe("Recibos procesados");
     expect(screen.queryByText("PDFs analizados")).toBeNull();
     expect(screen.queryByText("Conceptos sin mapear")).toBeNull();
-    expect(screen.getByText("Pendientes revision")).toBeTruthy();
-    expect(screen.getByText("Importe PDF pendiente de decision, no incluido en el calculo principal")).toBeTruthy();
+    expect(screen.getByText("Conceptos pendientes de revisión")).toBeTruthy();
+    expect(screen.getByText("Conceptos ignorados")).toBeTruthy();
+    expect(screen.getByText("Conceptos no incluidos")).toBeTruthy();
+    expect(screen.getByText("Conceptos sin mapear reales")).toBeTruthy();
+    expect(screen.getByText("Importe pendiente de decisión")).toBeTruthy();
+    expect(screen.getByText("Importe PDF pendiente de decisión, no incluido en el cálculo principal")).toBeTruthy();
   });
 });

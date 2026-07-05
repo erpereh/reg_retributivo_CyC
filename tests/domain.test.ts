@@ -348,6 +348,58 @@ describe("comparison engine", () => {
     expect(result.people.find((item) => item.employeeNumber === "10048")?.pdfTotal).toBe(50);
   });
 
+  test("explains mostly compensated differences between retribution blocks", async () => {
+    const employee = emptyRegistroEmployee({
+      employeeNumber: "COMP01",
+      periodComplete: { salary: 1000, salaryComplement: 1000, extraSalary: 0, total: 2000 },
+      concepts: [
+        { block: "Salario", blockKey: "salary", code: "SAL_TEST", amount: 1000 },
+        { block: "C. Salarial", blockKey: "salaryComplement", code: "COMP_TEST", amount: 1000 },
+      ],
+    });
+    const result = await compareAnalysis(
+      [
+        {
+          sourceFile: "PDF_TEST.pdf",
+          periodLabel: "Del 1 al 31 Enero 2025",
+          workerName: "PERSONA TEST",
+          employeeNumber: "COMP01",
+          concepts: [
+            { name: "Salario Test", amount: 1200, type: "devengo" },
+            { name: "Complemento Test", amount: 800, type: "devengo" },
+          ],
+        },
+      ],
+      [employee],
+      {
+        tolerance: 1,
+        enableAI: false,
+        conceptMap: [
+          testRule({
+            pdfConcept: "Salario Test",
+            block: "Salario",
+            blockKey: "salary",
+            registroCode: "SAL_TEST",
+            status: "Incluido",
+            includedInComparison: true,
+          }),
+          testRule({
+            pdfConcept: "Complemento Test",
+            block: "C. Salarial",
+            blockKey: "salaryComplement",
+            registroCode: "COMP_TEST",
+            status: "Incluido",
+            includedInComparison: true,
+          }),
+        ],
+      },
+    );
+
+    expect(result.people.find((row) => row.employeeNumber === "COMP01")?.detail).toContain(
+      "Diferencia principalmente compensada por reclasificacion entre bloques.",
+    );
+  });
+
   test("validates known Registro vs PDF corrections on real 2025 receipts", async () => {
     const registro = await parseRegistroRetributivo(readFileSync(registroFile));
     const payrollDir = path.join(fuentes, "RECIBOS_IBER_2025");
@@ -398,6 +450,7 @@ describe("comparison engine", () => {
     expect(result.summary.conceptsPendingReview).toBe(2);
     expect(result.summary.conceptsIgnored).toBe(35);
     expect(result.summary.conceptsNotIncluded).toBe(37);
+    expect(result.summary.conceptsRealUnmapped).toBe(0);
     expect(result.summary.pendingDecisionPdfTotal).toBeCloseTo(16358.04, 2);
 
     const nonIncludedOrder = result.unmappedConcepts.map((row) => row.decisionType);
@@ -454,21 +507,37 @@ describe("Excel export", () => {
       "Cuadre_Interno_Excel",
       "Criterios",
     ]);
-    expect(workbook.getWorksheet("Agrupaciones")?.getCell("A2").value).toBe("Pendiente de implementacion");
+    expect(workbook.getWorksheet("Agrupaciones")?.getCell("A2").value).toBe("Pendiente de implementación");
+    const resumenValues = new Set(workbook.getWorksheet("Resumen")?.getColumn(1).values.map(String));
+    expect(resumenValues.has("Conceptos sin mapear")).toBe(false);
+    expect(resumenValues.has("Conceptos pendientes de revisión")).toBe(true);
+    expect(resumenValues.has("Conceptos ignorados")).toBe(true);
+    expect(resumenValues.has("Conceptos no incluidos")).toBe(true);
+    expect(resumenValues.has("Conceptos sin mapear reales")).toBe(true);
+    expect(resumenValues.has("Importe pendiente de decisión")).toBe(true);
+    expect(
+      [...(workbook.getWorksheet("Resumen")?.getColumn(2).values ?? [])].some(
+        (value) =>
+          typeof value === "string" &&
+          value.includes("conceptos PDF pendientes de decisión") &&
+          value.includes("diferencia matched"),
+      ),
+    ).toBe(true);
     expect(workbook.getWorksheet("Conceptos_no_incluidos")?.getRow(1).values).toEqual([
       undefined,
-      "Tipo decision",
-      "Incluido en calculo",
+      "Tipo decisión",
+      "Incluido en cálculo",
       "Concepto PDF",
       "Total detectado",
       "N personas",
-      "N nominas",
-      "Ejemplos matriculas",
+      "N nóminas",
+      "Ejemplos matrículas",
       "Sugerencia bloque",
-      "Sugerencia codigo Registro",
-      "Accion recomendada",
+      "Sugerencia código Registro",
+      "Acción recomendada",
       "Motivo",
     ]);
+    expect(workbook.getWorksheet("Personas")?.getRow(1).values).toContain("Detalle");
 
     const buffer = await workbook.xlsx.writeBuffer();
     const reloaded = new ExcelJS.Workbook();
