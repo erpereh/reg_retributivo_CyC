@@ -1,6 +1,6 @@
 "use client";
 
-import { Clock3, Download, FileSpreadsheet, RotateCcw, Sparkles } from "lucide-react";
+import { Download, RotateCcw } from "lucide-react";
 import { motion } from "motion/react";
 import { useAppState } from "@/components/app/AppState";
 import type { AppView } from "@/lib/types";
@@ -15,73 +15,85 @@ const TABS: ReadonlyArray<{ id: AppView; label: string }> = [
   { id: "ajustes", label: "Ajustes" },
 ];
 
+function IconAction({
+  label,
+  disabled,
+  onClick,
+  variant,
+  children,
+}: Readonly<{
+  label: string;
+  disabled?: boolean;
+  onClick: () => void;
+  variant: "primary" | "secondary";
+  children: React.ReactNode;
+}>) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      data-tooltip={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "group relative flex size-11 items-center justify-center rounded-full border shadow-subtle transition duration-150 hover:-translate-y-0.5 disabled:translate-y-0 disabled:opacity-45",
+        "after:pointer-events-none after:absolute after:right-0 after:top-[calc(100%+0.5rem)] after:z-40 after:rounded-full after:bg-ink after:px-3 after:py-1.5 after:text-xs after:font-semibold after:text-white after:opacity-0 after:shadow-lift after:transition after:duration-150 after:content-[attr(data-tooltip)] hover:after:opacity-100 focus-visible:after:opacity-100",
+        variant === "primary"
+          ? "border-primary bg-primary text-white hover:bg-primary-dark"
+          : "border-line bg-white/95 text-ink hover:border-blue-200 hover:bg-blue-50",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function TopNav() {
-  const { view, setView, result, activeAnalysis, aiStatus, exporting, exportActiveAnalysis, resetForNewAnalysis } = useAppState();
-  const analysisDate = activeAnalysis
-    ? new Intl.DateTimeFormat("es-ES", { dateStyle: "short", timeStyle: "short" }).format(new Date(activeAnalysis.createdAt))
-    : undefined;
-  const aiEnabled = Boolean(activeAnalysis?.config.enableAI && (aiStatus?.enabled ?? true));
+  const { view, setView, result, exporting, exportActiveAnalysis, resetForNewAnalysis } = useAppState();
 
   return (
-    <header className="sticky top-3 z-30">
-      <nav
-        aria-label="Navegación principal"
-        className="flex flex-col gap-4 rounded-[28px] border border-white/80 bg-white/90 p-3 shadow-nav backdrop-blur-xl md:flex-row md:items-center md:justify-between"
-      >
-        <div className="flex items-center gap-3">
-          <span className="flex h-11 w-11 items-center justify-center rounded-full bg-primary text-white shadow-blue">
-            <FileSpreadsheet className="h-5 w-5" aria-hidden="true" />
-          </span>
-          <span className="text-xl font-semibold text-ink">Retributivo</span>
+    <header className="sticky top-3 z-30 px-1">
+      <nav aria-label="Navegacion principal" className="mx-auto grid max-w-[1500px] grid-cols-[1fr_auto_1fr] items-center gap-3">
+        <div aria-hidden="true" />
+
+        <div className="max-w-[calc(100vw-7rem)] overflow-x-auto rounded-full border border-white/80 bg-white/88 p-1 shadow-subtle backdrop-blur-xl md:max-w-none md:overflow-visible">
+          <div className="flex min-w-max items-center gap-1" role="tablist" aria-label="Vistas">
+            {TABS.map((tab) => {
+              const active = view === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setView(tab.id)}
+                  className={cn(
+                    "relative min-h-10 whitespace-nowrap rounded-full px-4 text-sm font-semibold transition-colors duration-150",
+                    active ? "text-white" : "text-muted hover:text-ink",
+                  )}
+                >
+                  {active ? (
+                    <motion.span
+                      layoutId="active-tab-pill"
+                      className="absolute inset-0 rounded-full bg-ink shadow-subtle"
+                      transition={{ type: "spring", stiffness: 420, damping: 34 }}
+                    />
+                  ) : null}
+                  <span className="relative z-10">{tab.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
-        <div className="flex overflow-x-auto rounded-full bg-slate-100 p-1" role="tablist" aria-label="Vistas">
-          {TABS.map((tab) => {
-            const active = view === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => setView(tab.id)}
-                className={cn(
-                  "relative min-h-10 whitespace-nowrap rounded-full px-4 text-sm font-semibold transition-colors",
-                  active ? "text-white" : "text-muted hover:text-ink",
-                )}
-              >
-                {active ? (
-                  <motion.span
-                    layoutId="active-tab-pill"
-                    className="absolute inset-0 rounded-full bg-ink shadow-subtle"
-                    transition={{ type: "spring", stiffness: 420, damping: 34 }}
-                  />
-                ) : null}
-                <span className="relative z-10">{tab.label}</span>
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          {activeAnalysis ? (
-            <div className="flex min-h-11 items-center gap-2 rounded-full border border-line bg-white px-3 text-xs font-semibold text-muted shadow-subtle">
-              <Clock3 className="h-4 w-4 text-primary" aria-hidden="true" />
-              <span className="hidden sm:inline">Analisis activo</span>
-              <span className="text-ink">{analysisDate}</span>
-              <span className="mx-1 h-4 w-px bg-line" aria-hidden="true" />
-              <Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />
-              <span className={aiEnabled ? "text-success" : "text-muted"}>{aiEnabled ? "IA activa" : "IA inactiva"}</span>
-            </div>
-          ) : null}
-          <button type="button" onClick={() => void exportActiveAnalysis()} disabled={!result || exporting} className="btn-secondary min-w-[150px]">
-            <Download className="h-4 w-4" aria-hidden="true" />
-            {exporting ? "Exportando..." : "Exportar Excel"}
-          </button>
-          <button type="button" onClick={resetForNewAnalysis} className="btn-primary min-w-[150px]">
-            <RotateCcw className="h-4 w-4" aria-hidden="true" />
-            Nuevo análisis
-          </button>
+        <div className="flex items-center justify-end gap-2">
+          <IconAction label="Exportar Excel" disabled={!result || exporting} onClick={() => void exportActiveAnalysis()} variant="secondary">
+            <Download className="size-4" aria-hidden="true" />
+          </IconAction>
+          <IconAction label="Nuevo analisis" onClick={resetForNewAnalysis} variant="primary">
+            <RotateCcw className="size-4" aria-hidden="true" />
+          </IconAction>
         </div>
       </nav>
     </header>

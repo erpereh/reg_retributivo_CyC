@@ -66,15 +66,6 @@ export function SummaryCards({ summary }: SummaryCardsProps) {
       tooltip: "Conceptos excluidos deliberadamente del calculo, por ejemplo deducciones, retenciones o duplicados informativos.",
     },
     {
-      label: "Conceptos no incluidos",
-      value: summary?.conceptsNotIncluded ?? summary?.conceptsUnmapped ?? 0,
-      detail: "Resumen: pendientes, ignorados y sin mapear reales",
-      icon: Sigma,
-      accent: "blue" as const,
-      badge: "Resumen",
-      tooltip: "Agrupa conceptos no incluidos. No significa error por si solo: incluye pendientes, ignorados correctamente y sin mapear reales.",
-    },
-    {
       label: "Conceptos sin mapear reales",
       value: summary?.conceptsRealUnmapped ?? 0,
       detail: "Problema real de mapeo: sin codigo Registro claro",
@@ -84,8 +75,8 @@ export function SummaryCards({ summary }: SummaryCardsProps) {
       tooltip: "Conceptos detectados en PDF que no tienen un codigo Registro claro. Estos si requieren revisar el mapeo.",
     },
     {
-      label: "Sin PDF / Sin Registro",
-      value: `${summary?.peopleInRegistroWithoutPdf ?? 0} / ${summary?.peopleInPdfWithoutRegistro ?? 0}`,
+      label: "PDF sin Registro",
+      value: summary?.peopleInPdfWithoutRegistro ?? 0,
       detail: `PDF sin Registro: ${formatEuro(summary?.totalPdfWithoutRegistro ?? 0)}`,
       icon: Sigma,
       accent: "violet" as const,

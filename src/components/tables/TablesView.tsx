@@ -44,7 +44,6 @@ const PERSONAS_HEADERS: readonly TableHeader[] = [
   { key: "pdfTotal", label: "Total PDF" },
   { key: "totalDiff", label: "Dif. Total" },
   { key: "status", label: "Estado" },
-  { key: "detail", label: "Detalle" },
 ];
 
 const CONCEPTOS_HEADERS: readonly TableHeader[] = [
@@ -58,7 +57,6 @@ const CONCEPTOS_HEADERS: readonly TableHeader[] = [
   { key: "pdfAmount", label: "PDF" },
   { key: "difference", label: "Diferencia" },
   { key: "status", label: "Estado" },
-  { key: "detail", label: "Detalle" },
 ];
 
 const CONCEPTOS_NO_INCLUIDOS_HEADERS: readonly TableHeader[] = [
@@ -107,9 +105,8 @@ function cellPadding(density: TableDensity): string {
   return density === "compact" ? "px-3 py-2" : "px-4 py-4";
 }
 
-function stickyLeft(index: 0 | 1, density: TableDensity): string {
-  const width = index === 0 ? "left-0 min-w-[120px]" : "left-[120px] min-w-[220px]";
-  return cn("sticky z-10 bg-inherit", width, cellPadding(density));
+function stickyFirstColumn(density: TableDensity): string {
+  return cn("sticky left-0 z-10 min-w-[128px] bg-inherit shadow-[10px_0_16px_-16px_rgba(15,23,42,0.55)]", cellPadding(density));
 }
 
 function FiltersPanel({
@@ -229,21 +226,6 @@ function TableSummary({
   );
 }
 
-function DetailButton({ onOpen }: Readonly<{ onOpen: () => void }>) {
-  return (
-    <button
-      type="button"
-      onClick={(event) => {
-        event.stopPropagation();
-        onOpen();
-      }}
-      className="rounded-full bg-slate-100 px-3 py-2 text-xs font-semibold text-ink transition hover:bg-blue-50"
-    >
-      Detalle
-    </button>
-  );
-}
-
 function CauseBadge({ cause }: Readonly<{ cause: ProbableCause }>) {
   return <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">{cause.label}</span>;
 }
@@ -307,7 +289,7 @@ function DetailModal({ state, tolerance, onClose }: Readonly<{ state: DetailModa
       >
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase text-muted">Retributivo</p>
+            <p className="text-xs font-semibold uppercase text-muted">Detalle determinista</p>
             <h2 className="mt-1 text-2xl font-semibold text-ink">{title}</h2>
           </div>
           <button type="button" onClick={onClose} className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200">
@@ -417,7 +399,10 @@ function PersonasTable({ density, onOpen }: Readonly<{ density: TableDensity; on
                 {PERSONAS_HEADERS.map((header, index) => (
                   <th
                     key={header.key}
-                    className={cn("border-b border-line px-4 py-3 text-xs font-semibold uppercase", index === 0 && "sticky left-0 z-30 bg-slate-100", index === 1 && "sticky left-[120px] z-30 bg-slate-100")}
+                    className={cn(
+                      "border-b border-line px-4 py-3 text-xs font-semibold uppercase",
+                      index === 0 && "sticky left-0 z-30 min-w-[128px] bg-slate-100 shadow-[10px_0_16px_-16px_rgba(15,23,42,0.55)]",
+                    )}
                   >
                     {header.label}
                   </th>
@@ -440,8 +425,8 @@ function PersonasTable({ density, onOpen }: Readonly<{ density: TableDensity; on
                     transition={{ duration: 0.16, delay: Math.min(index * 0.01, 0.16) }}
                     className={cn("cursor-pointer transition", rowTone(row.status))}
                   >
-                    <td className={cn(stickyLeft(0, density), "border-b border-line/70 font-mono")}>{row.employeeNumber}</td>
-                    <td className={cn(stickyLeft(1, density), "border-b border-line/70 font-semibold")}>{row.person}</td>
+                    <td className={cn(stickyFirstColumn(density), "border-b border-line/70 font-mono")}>{row.employeeNumber}</td>
+                    <td className={cn("min-w-[220px] border-b border-line/70 font-semibold", cellPadding(density))}>{row.person}</td>
                     <td className={cn("border-b border-line/70", cellPadding(density))}><CauseBadge cause={cause} /></td>
                     <td className={cn("border-b border-line/70", cellPadding(density))}>{row.workplace}</td>
                     <td className={cn("border-b border-line/70", cellPadding(density))}>{row.position}</td>
@@ -459,7 +444,6 @@ function PersonasTable({ density, onOpen }: Readonly<{ density: TableDensity; on
                     <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density))}>{formatEuro(row.pdfTotal)}</td>
                     <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density), diffClass(row.totalDifference))}>{formatEuro(row.totalDifference)}</td>
                     <td className={cn("border-b border-line/70", cellPadding(density))}><Badge value={row.status} /></td>
-                    <td className={cn("sticky right-0 z-10 border-b border-line/70 bg-inherit", cellPadding(density))}><DetailButton onOpen={() => onOpen({ kind: "person", row })} /></td>
                   </motion.tr>
                 );
               })}
@@ -500,7 +484,13 @@ function ConceptosTable({ density, onOpen }: Readonly<{ density: TableDensity; o
             <thead className="sticky top-0 z-20 bg-slate-100 text-muted shadow-subtle">
               <tr>
                 {CONCEPTOS_HEADERS.map((header, index) => (
-                  <th key={header.key} className={cn("border-b border-line px-4 py-3 text-xs font-semibold uppercase", index === 0 && "sticky left-0 z-30 bg-slate-100", index === 1 && "sticky left-[120px] z-30 bg-slate-100")}>
+                  <th
+                    key={header.key}
+                    className={cn(
+                      "border-b border-line px-4 py-3 text-xs font-semibold uppercase",
+                      index === 0 && "sticky left-0 z-30 min-w-[128px] bg-slate-100 shadow-[10px_0_16px_-16px_rgba(15,23,42,0.55)]",
+                    )}
+                  >
                     {header.label}
                   </th>
                 ))}
@@ -519,8 +509,8 @@ function ConceptosTable({ density, onOpen }: Readonly<{ density: TableDensity; o
                     }}
                     className={cn("cursor-pointer transition", rowTone(row.status))}
                   >
-                    <td className={cn(stickyLeft(0, density), "border-b border-line/70 font-mono")}>{row.employeeNumber}</td>
-                    <td className={cn(stickyLeft(1, density), "border-b border-line/70 font-semibold")}>{row.person}</td>
+                    <td className={cn(stickyFirstColumn(density), "border-b border-line/70 font-mono")}>{row.employeeNumber}</td>
+                    <td className={cn("min-w-[220px] border-b border-line/70 font-semibold", cellPadding(density))}>{row.person}</td>
                     <td className={cn("border-b border-line/70", cellPadding(density))}><CauseBadge cause={cause} /></td>
                     <td className={cn("border-b border-line/70", cellPadding(density))}>{row.block}</td>
                     <td className={cn("border-b border-line/70 font-mono", cellPadding(density))}>{row.registroCode}</td>
@@ -529,7 +519,6 @@ function ConceptosTable({ density, onOpen }: Readonly<{ density: TableDensity; o
                     <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density))}>{formatEuro(row.pdfAmount)}</td>
                     <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density), diffClass(row.difference))}>{formatEuro(row.difference)}</td>
                     <td className={cn("border-b border-line/70", cellPadding(density))}><Badge value={row.status} /></td>
-                    <td className={cn("sticky right-0 z-10 border-b border-line/70 bg-inherit", cellPadding(density))}><DetailButton onOpen={() => onOpen({ kind: "concept", row })} /></td>
                   </tr>
                 );
               })}
@@ -556,7 +545,7 @@ function ConceptosTable({ density, onOpen }: Readonly<{ density: TableDensity; o
             <tbody>
               {unmapped.map((row) => (
                 <tr key={row.pdfConcept} tabIndex={0} onClick={() => onOpen({ kind: "unmapped", row })} className="cursor-pointer odd:bg-white even:bg-slate-50 hover:bg-blue-50/70">
-                  <td className={cn("sticky left-0 z-10 border-b border-line/70 bg-inherit", cellPadding(density))}><Badge value={row.decisionType ?? (row.action === "Ignorado" ? "Ignorado" : "Sin mapear real")} /></td>
+                  <td className={cn(stickyFirstColumn(density), "border-b border-line/70")}><Badge value={row.decisionType ?? (row.action === "Ignorado" ? "Ignorado" : "Sin mapear real")} /></td>
                   <td className={cn("border-b border-line/70", cellPadding(density))}>{row.includedInComparison ? "Si" : "No"}</td>
                   <td className={cn("border-b border-line/70 font-semibold", cellPadding(density))}>{row.pdfConcept}</td>
                   <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density))}>{formatEuro(row.totalDetected)}</td>
@@ -566,7 +555,7 @@ function ConceptosTable({ density, onOpen }: Readonly<{ density: TableDensity; o
                   <td className={cn("border-b border-line/70", cellPadding(density))}>{row.suggestedBlock}</td>
                   <td className={cn("border-b border-line/70 font-mono", cellPadding(density))}>{row.suggestedRegistroCode}</td>
                   <td className={cn("border-b border-line/70", cellPadding(density))}>{row.recommendedAction ?? row.action}</td>
-                  <td className={cn("sticky right-0 z-10 border-b border-line/70 bg-inherit", cellPadding(density))}><DetailButton onOpen={() => onOpen({ kind: "unmapped", row })} /></td>
+                  <td className={cn("max-w-[320px] border-b border-line/70", cellPadding(density))}>{row.reason}</td>
                 </tr>
               ))}
             </tbody>

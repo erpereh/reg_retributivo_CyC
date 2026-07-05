@@ -35,7 +35,7 @@ describe("dashboard summary cards", () => {
     expect(screen.queryByText("Conceptos sin mapear")).toBeNull();
     expect(screen.getByText("Conceptos pendientes de revisión")).toBeTruthy();
     expect(screen.getByText("Conceptos ignorados")).toBeTruthy();
-    expect(screen.getByText("Conceptos no incluidos")).toBeTruthy();
+    expect(screen.queryByText("Conceptos no incluidos")).toBeNull();
     expect(screen.getByText("Conceptos sin mapear reales")).toBeTruthy();
     expect(screen.getByText("Importe pendiente de decisión")).toBeTruthy();
     expect(screen.getByText("Importe PDF pendiente de decisión, no incluido en el cálculo principal")).toBeTruthy();

@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 
 import { fireEvent, render, screen } from "@testing-library/react";
-import React from "react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { TopNav } from "@/components/layout/TopNav";
 
@@ -43,16 +42,30 @@ describe("TopNav", () => {
     expect(appState.value.setView).toHaveBeenCalledWith("personas");
   });
 
-  test("disables export when there is no active analysis", () => {
+  test("renders compact premium navigation without brand or analysis badges", () => {
     render(<TopNav />);
 
-    expect(screen.getByRole("button", { name: /Exportar Excel/i }).hasAttribute("disabled")).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: /Nuevo análisis/i }));
+    expect(screen.queryByText("Retributivo")).toBeNull();
+    expect(screen.queryByText(/Analisis activo/i)).toBeNull();
+    expect(screen.queryByText(/IA activa/i)).toBeNull();
+    expect(screen.getByRole("navigation", { name: /Navegacion principal/i })).toBeTruthy();
+  });
 
+  test("uses icon-only export and reset buttons with accessible names", () => {
+    render(<TopNav />);
+
+    const exportButton = screen.getByRole("button", { name: /Exportar Excel/i });
+    const resetButton = screen.getByRole("button", { name: /Nuevo analisis/i });
+
+    expect(exportButton.textContent).toBe("");
+    expect(resetButton.textContent).toBe("");
+    expect(exportButton.hasAttribute("disabled")).toBe(true);
+
+    fireEvent.click(resetButton);
     expect(appState.value.resetForNewAnalysis).toHaveBeenCalledTimes(1);
   });
 
-  test("shows compact active analysis date and AI status", () => {
+  test("does not duplicate active analysis status in the navbar", () => {
     appState.value.result = {};
     appState.value.activeAnalysis = {
       createdAt: "2026-07-05T18:30:00.000Z",
@@ -62,7 +75,7 @@ describe("TopNav", () => {
 
     render(<TopNav />);
 
-    expect(screen.getByText(/Analisis activo/i)).toBeTruthy();
-    expect(screen.getByText(/IA activa/i)).toBeTruthy();
+    expect(screen.queryByText(/Analisis activo/i)).toBeNull();
+    expect(screen.queryByText(/IA activa/i)).toBeNull();
   });
 });

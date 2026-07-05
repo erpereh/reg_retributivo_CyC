@@ -136,13 +136,21 @@ describe("TablesView", () => {
     expect(screen.getByText(/Fase 2/i)).toBeTruthy();
   });
 
-  test("keeps the detail button as an alternate way to open the concept modal", () => {
+  test("removes detail buttons and opens the concept modal from the row", () => {
     render(<TablesView mode="conceptos" />);
 
-    fireEvent.click(screen.getAllByRole("button", { name: /Detalle/i })[0]);
+    expect(screen.queryByRole("button", { name: /^Detalle$/i })).toBeNull();
+
+    fireEvent.click(screen.getByText("CYC_SEG_SALUD"));
 
     expect(screen.getByRole("dialog", { name: /Detalle concepto/i })).toBeTruthy();
     expect(screen.getAllByText("CYC_SEG_SALUD").length).toBeGreaterThan(1);
+  });
+
+  test("does not render a Detalle table column", () => {
+    render(<TablesView mode="personas" />);
+
+    expect(screen.queryByRole("columnheader", { name: /^Detalle$/i })).toBeNull();
   });
 
   test("quick filters keep the table functional and show visible totals", () => {
