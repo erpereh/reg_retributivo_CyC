@@ -21,7 +21,7 @@ export function salaryStatus(
     return "OK";
   }
 
-  return abs >= incidentThreshold ? "Incidencia" : "Revisar";
+  return abs >= incidentThreshold ? "Diferencia" : "Revisar";
 }
 
 export function calculateDifference(actual: number, expected: number): number {

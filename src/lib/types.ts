@@ -1,7 +1,21 @@
-export type PayrollConceptType = "devengo" | "deduccion" | "informativo" | "unknown";
+export type PayrollConceptType =
+  | "devengo"
+  | "deduccion"
+  | "retencion"
+  | "cotizacion"
+  | "especie"
+  | "informativo"
+  | "coste_empresa"
+  | "unknown";
 export type Severity = "Alta" | "Media" | "Baja";
-export type SalaryStatus = "OK" | "Revisar" | "Incidencia" | "Falta en Registro";
-export type AppView = "dashboard" | "tablas" | "historial" | "ajustes";
+export type RetributionBlock = "Salario" | "C. Salarial" | "Extrasalarial";
+export type ConceptBlockKey = "salary" | "salaryComplement" | "extraSalary";
+export type MappingStatus = "Incluido" | "Ignorado" | "Pendiente revisión";
+export type ConceptMappingSourceType = "devengo" | "informativo" | "deduccion" | "retencion" | "coste_empresa" | "unknown";
+export type ConceptDedupePriority = "devengo" | "informativo";
+export type AnalysisStatus = "OK" | "Revisar" | "Diferencia" | "Sin mapear" | "Sin PDF" | "Sin Registro";
+export type SalaryStatus = AnalysisStatus;
+export type AppView = "dashboard" | "personas" | "conceptos" | "agrupaciones" | "historial" | "ajustes";
 
 export interface AnalysisThresholds {
   readonly reviewThreshold: number;
@@ -13,6 +27,14 @@ export interface AnalysisConfig {
   readonly enableAI: boolean;
   readonly aiModel: string;
   readonly thresholds: AnalysisThresholds;
+  readonly conceptMap?: readonly ConceptMappingRule[];
+}
+
+export interface MoneyByBlock {
+  readonly salary: number;
+  readonly salaryComplement: number;
+  readonly extraSalary: number;
+  readonly total: number;
 }
 
 export interface PayrollConcept {
@@ -29,7 +51,7 @@ export interface PayrollRecord {
   readonly periodEnd?: string;
   readonly companyName?: string;
   readonly cif?: string;
-  readonly workerNif: string;
+  readonly workerNif?: string;
   readonly workerName: string;
   readonly socialSecurityNumber?: string;
   readonly employeeNumber?: string;
@@ -46,20 +68,234 @@ export interface PayrollRecord {
   readonly ssFeeAccumulated?: number;
 }
 
-export interface RegistroRecord {
+export interface RegistroConceptAmount {
+  readonly block: RetributionBlock;
+  readonly blockKey: ConceptBlockKey;
+  readonly code: string;
+  readonly amount: number;
+}
+
+export interface RegistroEmployee {
   readonly sourceRow: number;
-  readonly workerNif: string;
+  readonly workerNif?: string;
   readonly workerName?: string;
-  readonly employeeNumber?: string;
+  readonly employeeNumber: string;
+  readonly sex?: string;
   readonly workplace?: string;
   readonly professionalGroup?: string;
+  readonly position?: string;
+  readonly valuation?: string;
+  readonly category?: string;
+  readonly family?: string;
+  readonly personalCategoryGroup?: string;
   readonly gt?: string;
   readonly seniorityDate?: string;
-  readonly expectedSalary?: number;
-  readonly expectedNormalizedSalary?: number;
-  readonly expectedVariableSalary?: number;
-  readonly expectedSalaryCriterion?: string;
+  readonly normalizedPlusVariables: MoneyByBlock;
+  readonly normalized: MoneyByBlock;
+  readonly periodComplete: MoneyByBlock;
+  readonly lastSituation: MoneyByBlock;
+  readonly nonNormalized: {
+    readonly salaryComplementVariable: number;
+    readonly extraSalaryVariable: number;
+    readonly salaryPpe: number;
+    readonly salaryComplementPpe: number;
+    readonly salaryIt: number;
+    readonly salaryComplementIt: number;
+  };
+  readonly excelBreakdownDiffs: Pick<MoneyByBlock, "salary" | "salaryComplement" | "extraSalary">;
+  readonly concepts: readonly RegistroConceptAmount[];
   readonly raw: Record<string, unknown>;
+}
+
+export type RegistroRecord = RegistroEmployee;
+
+export interface RegistroColumnMap {
+  readonly employeeNumber?: string;
+  readonly sex?: string;
+  readonly workerName?: string;
+  readonly nif?: string;
+  readonly workplace?: string;
+  readonly professionalGroup?: string;
+  readonly position?: string;
+  readonly valuation?: string;
+  readonly category?: string;
+  readonly family?: string;
+  readonly personalCategoryGroup?: string;
+  readonly gt?: string;
+  readonly seniorityDate?: string;
+  readonly periodSalary?: string;
+  readonly periodSalaryBreakdownDiff?: string;
+  readonly periodSalaryComplement?: string;
+  readonly periodSalaryComplementBreakdownDiff?: string;
+  readonly periodExtraSalary?: string;
+  readonly periodExtraSalaryBreakdownDiff?: string;
+}
+
+export interface AvailableConceptCodes {
+  readonly salary: readonly string[];
+  readonly salaryComplement: readonly string[];
+  readonly extraSalary: readonly string[];
+}
+
+export interface InternalExcelCheckRow {
+  readonly employeeNumber: string;
+  readonly sex?: string;
+  readonly position?: string;
+  readonly category?: string;
+  readonly workplace?: string;
+  readonly salaryPeriod: number;
+  readonly salaryBreakdown: number;
+  readonly salaryDifference: number;
+  readonly salaryComplementPeriod: number;
+  readonly salaryComplementBreakdown: number;
+  readonly salaryComplementDifference: number;
+  readonly extraSalaryPeriod: number;
+  readonly extraSalaryBreakdown: number;
+  readonly extraSalaryDifference: number;
+  readonly status: AnalysisStatus;
+  readonly detail: string;
+}
+
+export interface RegistroParseResult {
+  readonly sheetName: string;
+  readonly headerRows: { readonly group: number; readonly subheader: number; readonly firstData: number };
+  readonly columnMap: RegistroColumnMap;
+  readonly conceptCodes: AvailableConceptCodes;
+  readonly records: readonly RegistroEmployee[];
+  readonly internalChecks: readonly InternalExcelCheckRow[];
+  readonly warnings: readonly string[];
+}
+
+export interface ConceptMappingRule {
+  readonly pdfConcept: string;
+  readonly normalizedPdfConcept: string;
+  readonly block: RetributionBlock;
+  readonly blockKey: ConceptBlockKey;
+  readonly registroCode?: string;
+  readonly status: MappingStatus;
+  readonly sourceType?: ConceptMappingSourceType;
+  readonly allowInformative?: boolean;
+  readonly dedupePriority?: ConceptDedupePriority;
+  readonly includedInComparison?: boolean;
+  readonly reason?: string;
+}
+
+export interface ConceptComparisonRow {
+  readonly employeeNumber: string;
+  readonly person?: string;
+  readonly block: RetributionBlock;
+  readonly blockKey: ConceptBlockKey;
+  readonly registroCode: string;
+  readonly pdfConcept?: string;
+  readonly registroAmount: number;
+  readonly pdfAmount: number;
+  readonly difference: number;
+  readonly status: AnalysisStatus;
+  readonly detail: string;
+}
+
+export interface UnmappedConceptRow {
+  readonly pdfConcept: string;
+  readonly totalDetected: number;
+  readonly peopleCount: number;
+  readonly payrollCount: number;
+  readonly exampleEmployeeNumbers: readonly string[];
+  readonly suggestedBlock?: RetributionBlock;
+  readonly suggestedRegistroCode?: string;
+  readonly action: MappingStatus;
+}
+
+export interface IgnoredConceptRow {
+  readonly pdfConcept: string;
+  readonly totalDetected: number;
+  readonly peopleCount: number;
+  readonly payrollCount: number;
+  readonly reason: string;
+}
+
+export interface PersonComparisonRow {
+  readonly employeeNumber: string;
+  readonly person?: string;
+  readonly workplace?: string;
+  readonly position?: string;
+  readonly category?: string;
+  readonly salaryRegistro: number;
+  readonly salaryPdf: number;
+  readonly salaryDifference: number;
+  readonly salaryComplementRegistro: number;
+  readonly salaryComplementPdf: number;
+  readonly salaryComplementDifference: number;
+  readonly extraSalaryRegistro: number;
+  readonly extraSalaryPdf: number;
+  readonly extraSalaryDifference: number;
+  readonly registroTotal: number;
+  readonly pdfTotal: number;
+  readonly totalDifference: number;
+  readonly pdfControlTotalDevengado: number;
+  readonly payrollCount: number;
+  readonly unmappedConceptsCount: number;
+  readonly status: AnalysisStatus;
+  readonly detail: string;
+  readonly periods: readonly string[];
+  readonly files: readonly string[];
+}
+
+export interface NormalizedVsRealRow {
+  readonly employeeNumber: string;
+  readonly person?: string;
+  readonly workplace?: string;
+  readonly position?: string;
+  readonly category?: string;
+  readonly normalizedPlusVariables: number;
+  readonly normalized: number;
+  readonly periodComplete: number;
+  readonly realPdf: number;
+  readonly diffPdfVsPeriodComplete: number;
+  readonly diffPdfVsNormalizedPlusVariables: number;
+  readonly diffPdfVsNormalized: number;
+  readonly possibleJustification: string;
+  readonly status: AnalysisStatus;
+  readonly detail: string;
+}
+
+export interface GroupingComparisonRow {
+  readonly sheet: string;
+  readonly group: string;
+  readonly metric: string;
+  readonly block: RetributionBlock;
+  readonly sex: string;
+  readonly registro: number;
+  readonly pdfRecalculated: number;
+  readonly difference: number;
+  readonly status: AnalysisStatus;
+  readonly detail: string;
+}
+
+export interface AnalysisSummary {
+  readonly generatedAt: string;
+  readonly pdfsAnalyzed: number;
+  readonly pdfsFailed: number;
+  readonly uniquePeople: number;
+  readonly peopleWithDifferences: number;
+  readonly totalSalaryDifference: number;
+  readonly totalSalaryComplementDifference: number;
+  readonly totalExtraSalaryDifference: number;
+  readonly totalGlobalDifference: number;
+  readonly conceptsUnmapped: number;
+  readonly internalExcelDifferences: number;
+  readonly groupingDifferences: number;
+  readonly tolerance: number;
+  readonly aiEnabled?: boolean;
+  readonly aiModel?: string;
+  readonly reviewThreshold?: number;
+  readonly incidentThreshold?: number;
+}
+
+export interface AnalysisError {
+  readonly file: string;
+  readonly type: "validation" | "pdf" | "excel" | "comparison" | "export";
+  readonly message: string;
+  readonly recommendedAction: string;
 }
 
 export interface FieldIssue {
@@ -80,7 +316,7 @@ export interface FieldIssue {
 }
 
 export interface SalaryDifference {
-  readonly workerNif: string;
+  readonly workerNif?: string;
   readonly workerName: string;
   readonly employeeNumber?: string;
   readonly workplace?: string;
@@ -95,42 +331,25 @@ export interface SalaryDifference {
   readonly observations: string;
 }
 
-export interface AnalysisSummary {
-  readonly generatedAt: string;
-  readonly pdfsAnalyzed: number;
-  readonly pdfsFailed: number;
-  readonly uniquePeople: number;
-  readonly peopleWithIssues: number;
-  readonly fieldIssuesCount: number;
-  readonly salaryIssuesCount: number;
-  readonly salaryDifferenceTotal: number;
-  readonly salaryDifferenceAbsTotal: number;
-  readonly tolerance: number;
-  readonly aiEnabled?: boolean;
-  readonly aiModel?: string;
-  readonly reviewThreshold?: number;
-  readonly incidentThreshold?: number;
-}
-
-export interface AnalysisError {
-  readonly file: string;
-  readonly type: "validation" | "pdf" | "excel" | "comparison" | "export";
-  readonly message: string;
-  readonly recommendedAction: string;
-}
-
 export interface AnalysisResult {
   readonly summary: AnalysisSummary;
   readonly payrollRecords: readonly PayrollRecord[];
-  readonly registroRecords: readonly RegistroRecord[];
-  readonly fieldIssues: readonly FieldIssue[];
-  readonly salaryDifferences: readonly SalaryDifference[];
+  readonly registroEmployees: readonly RegistroEmployee[];
+  readonly people: readonly PersonComparisonRow[];
+  readonly normalizedVsReal: readonly NormalizedVsRealRow[];
+  readonly concepts: readonly ConceptComparisonRow[];
+  readonly unmappedConcepts: readonly UnmappedConceptRow[];
+  readonly ignoredConcepts: readonly IgnoredConceptRow[];
+  readonly groupings: readonly GroupingComparisonRow[];
+  readonly internalExcelChecks: readonly InternalExcelCheckRow[];
+  readonly conceptMap: readonly ConceptMappingRule[];
   readonly errors: readonly AnalysisError[];
   readonly criteria: readonly string[];
 }
 
 export interface StoredAnalysis {
   readonly id: string;
+  readonly schemaVersion?: number;
   readonly createdAt: string;
   readonly registroFileName: string;
   readonly pdfCount: number;

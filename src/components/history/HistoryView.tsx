@@ -35,14 +35,10 @@ function HistoryCard({
   onExport: () => void;
   index: number;
 }>) {
-  const summary = analysis.result.summary;
+  const summary = analysis.result?.summary;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 14 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.24, delay: Math.min(index * 0.04, 0.22), ease: "easeOut" }}
-    >
+    <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.24, delay: Math.min(index * 0.04, 0.22), ease: "easeOut" }}>
       <Card interactive className={cn("p-5", active && "ring-2 ring-primary/70")}>
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="min-w-0">
@@ -61,10 +57,10 @@ function HistoryCard({
             <dl className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
               {[
                 ["PDFs", analysis.pdfCount],
-                ["Personas únicas", summary.uniquePeople],
-                ["Con incidencias", summary.peopleWithIssues],
-                ["Campos mal", summary.fieldIssuesCount],
-                ["Diferencia total", formatEuro(summary.salaryDifferenceTotal)],
+                ["Personas", summary?.uniquePeople ?? 0],
+                ["Con diferencias", summary?.peopleWithDifferences ?? 0],
+                ["Sin mapear", summary?.conceptsUnmapped ?? 0],
+                ["Dif. total", formatEuro(summary?.totalGlobalDifference ?? 0)],
               ].map(([label, value]) => (
                 <div key={label as string} className="rounded-2xl bg-slate-50 px-4 py-3">
                   <dt className="text-xs font-semibold uppercase text-muted">{label as string}</dt>
@@ -95,15 +91,7 @@ function HistoryCard({
 }
 
 export function HistoryView() {
-  const {
-    history,
-    activeAnalysis,
-    exporting,
-    openStoredAnalysis,
-    removeStoredAnalysis,
-    clearStoredHistory,
-    exportStoredAnalysis,
-  } = useAppState();
+  const { history, activeAnalysis, exporting, openStoredAnalysis, removeStoredAnalysis, clearStoredHistory, exportStoredAnalysis } = useAppState();
 
   return (
     <div className="space-y-6">

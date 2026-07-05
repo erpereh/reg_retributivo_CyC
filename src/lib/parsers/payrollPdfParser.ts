@@ -1,7 +1,7 @@
 import { extractText } from "unpdf";
 import type { AnalysisError, PayrollConcept, PayrollRecord } from "@/lib/types";
 import { parseSpanishMoney } from "@/lib/utils/money";
-import { normalizeNif } from "@/lib/utils/normalize";
+import { normalizeComparableText, normalizeNif } from "@/lib/utils/normalize";
 import { parsePayrollPeriod, toIsoDate } from "@/lib/utils/spanishDates";
 
 export interface PayrollParseResult {
@@ -10,7 +10,7 @@ export interface PayrollParseResult {
 }
 
 const NIF_PATTERN = /^[0-9XYZ]\d{7}[A-Z]$/i;
-const BANKING_PATTERNS = [/IBAN/i, /DATOS DEL BANCO/i, /\bES\d{2}\s?\d{4}/i, /\bCUENTA\b/i];
+const BANKING_PATTERNS = [/IBAN/i, /DATOS DEL BANCO/i, /\bES\d{2}\s?\d{4}/i, /DATOS DEL BANCO BENEFICIARIO/i];
 
 function sanitizeText(text: string): string {
   return text
@@ -25,11 +25,13 @@ function findMoneySequenceAfter(text: string, anchor: RegExp): number[] {
     return [];
   }
 
-  return text
-    .slice(match.index)
-    .match(/-?\d{1,3}(?:\.\d{3})*,\d{2}/g)
-    ?.map((value) => parseSpanishMoney(value))
-    .filter((value): value is number => value !== undefined) ?? [];
+  return (
+    text
+      .slice(match.index)
+      .match(/-?\d{1,3}(?:\.\d{3})*,\d{2}/g)
+      ?.map((value) => parseSpanishMoney(value))
+      .filter((value): value is number => value !== undefined) ?? []
+  );
 }
 
 function findTotalsBeforeLabels(text: string): { totalDevengado?: number; totalDeducir?: number } {
@@ -46,10 +48,87 @@ function findTotalsBeforeLabels(text: string): { totalDevengado?: number; totalD
   };
 }
 
+function isKnownInformativeConcept(name: string): boolean {
+  const normalized = normalizeComparableText(name);
+  return [
+    "seguro medico mensual",
+    "seguro de vida mensual",
+    "seguro de accidente mensual",
+    "plan de pensiones mensual",
+    "plan de pensiones extraordinario mensual",
+  ].includes(normalized);
+}
+
+function isResidualConceptName(name: string): boolean {
+  const normalized = normalizeComparableText(name);
+  return (
+    !normalized ||
+    /suministrados en periodo de liquidacion|periodo de liquidacion|datos del banco|liquido total a percibir|base irpf acumulada/.test(
+      normalized,
+    )
+  );
+}
+
+function classifyConcept(name: string, isInformativeSection = false): PayrollConcept["type"] {
+  const normalized = normalizeComparableText(name);
+  if (
+    /\bcoste empresa\b|cotiz.*empresa|contingencias comunes empresa|desempleo empresa|fogasa empresa|formacion profesional empresa|it ims|mei empresa/.test(
+      normalized,
+    )
+  ) {
+    return "coste_empresa";
+  }
+  if (/^kilometraje (con|sin) retencion\b/.test(normalized)) {
+    return "devengo";
+  }
+  if (/retencion|irpf/.test(normalized)) {
+    return "retencion";
+  }
+  if (/cotizacion|cotiz/.test(normalized)) {
+    return "cotizacion";
+  }
+  if (/descuento|aportacion personal|cancelacion prov/.test(normalized)) {
+    return "deduccion";
+  }
+  if (/especie/.test(normalized)) {
+    return "especie";
+  }
+  if (
+    isInformativeSection ||
+    isKnownInformativeConcept(name) ||
+    /conceptos informativos|devengos superiores|retribucion en especie/.test(normalized)
+  ) {
+    return "informativo";
+  }
+  return "devengo";
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function cleanConceptName(line: string, amountText: string): string {
+  return line
+    .replace(/\s*-?\d{1,3}(?:\.\d{3})*,\d{2}\s*$/, "")
+    .replace(/^\d{1,2},\d{2}\s+%\s+\d{1,3}(?:\.\d{3})*,\d{2}\s+/, "")
+    .replace(/^\d{1,2},\d{2}\s+/, "")
+    .replace(/^\d{1,3}(?:\.\d{3})*,\d{2}\s+/, "")
+    .replace(new RegExp(escapeRegExp(amountText), "g"), "")
+    .replace(/\*{3}/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function parseConcepts(text: string): PayrollConcept[] {
   const concepts: PayrollConcept[] = [];
+  let isInformativeSection = false;
   for (const line of text.split(/\r?\n/)) {
-    if (/^\*{3}/.test(line) || /TOTAL|BASE|CUOTA|DATOS|L[IÍ]QUIDO/i.test(line)) {
+    if (/conceptos informativos/i.test(line)) {
+      isInformativeSection = true;
+      continue;
+    }
+
+    if (/TOTAL PRORRATA|BASE TOTAL|BASE IRPF|CUOTA IRPF|CUOTA S\.S\.|DATOS DEL BANCO|L[IÍ]QUIDO|REMUNERAC\./i.test(line)) {
       continue;
     }
 
@@ -59,19 +138,12 @@ function parseConcepts(text: string): PayrollConcept[] {
     }
 
     const amount = parseSpanishMoney(amountMatch[1]);
-    const name = line
-      .replace(/^\d{1,2},\d{2}\s+(?:%?\s*)?/, "")
-      .replace(/^\d{1,3}(?:\.\d{3})*,\d{2}\s+/, "")
-      .replace(/\s*-?\d{1,3}(?:\.\d{3})*,\d{2}\s*$/, "")
-      .replace(/^\d{1,2},\d{2}\s+%\s+\d{1,3}(?:\.\d{3})*,\d{2}\s+/, "")
-      .trim();
-
-    if (!amount || !name || name.length < 3) {
+    const name = cleanConceptName(line, amountMatch[1]);
+    if (amount === undefined || !name || name.length < 3 || !/\p{L}/u.test(name) || isResidualConceptName(name)) {
       continue;
     }
 
-    const type = /retenci[oó]n|cotiz/i.test(name) ? "deduccion" : /\*\*\*|coste empresa|seguro de vida/i.test(name) ? "informativo" : "devengo";
-    concepts.push({ name, amount, type });
+    concepts.push({ name, amount, type: classifyConcept(name, isInformativeSection) });
   }
 
   return concepts;
@@ -95,7 +167,7 @@ function parsePayrollPage(rawText: string, sourceFile: string, pageNumber: numbe
 
   const headerBeforeLabels = lines.slice(0, lines.findIndex((line) => line.startsWith("EMPRESA"))).filter(Boolean);
   const cif = headerBeforeLabels[0]?.match(/[A-Z]\d{8}/i)?.[0]?.toUpperCase();
-  const workerNif = normalizeNif(lines[nifIndex]);
+  const workerNif = normalizeNif(lines[nifIndex]) || undefined;
   const workerName = lines[nifIndex + 1]?.trim();
   const professionalGroup = lines[nifIndex + 2]?.trim();
   const gt = lines[nifIndex + 3]?.trim();

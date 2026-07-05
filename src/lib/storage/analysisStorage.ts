@@ -1,4 +1,4 @@
-import type { AnalysisConfig, StoredAnalysis } from "@/lib/types";
+import type { AnalysisConfig, ConceptMappingRule, StoredAnalysis } from "@/lib/types";
 
 const DB_NAME = "retributivo-analysis-v1";
 const STORE_NAME = "analyses";
@@ -6,12 +6,15 @@ const FALLBACK_HISTORY_KEY = "retributivo.history.v1";
 const ACTIVE_ANALYSIS_KEY = "retributivo.activeAnalysisId.v1";
 const SETTINGS_KEY = "retributivo.settings.v1";
 
+export const STORAGE_SCHEMA_VERSION = 2;
+
 export interface AppSettings {
   readonly defaultTolerance: number;
   readonly enableAIByDefault: boolean;
   readonly reviewThreshold: number;
   readonly incidentThreshold: number;
   readonly aiModel: string;
+  readonly conceptMap: readonly ConceptMappingRule[];
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -20,6 +23,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   reviewThreshold: 1,
   incidentThreshold: 50,
   aiModel: "gemini-3.1-flash-lite",
+  conceptMap: [],
 };
 
 export function configFromSettings(settings: AppSettings): AnalysisConfig {
@@ -27,6 +31,7 @@ export function configFromSettings(settings: AppSettings): AnalysisConfig {
     tolerance: settings.defaultTolerance,
     enableAI: settings.enableAIByDefault,
     aiModel: settings.aiModel,
+    conceptMap: settings.conceptMap,
     thresholds: {
       reviewThreshold: settings.reviewThreshold,
       incidentThreshold: settings.incidentThreshold,
@@ -54,7 +59,61 @@ function normalizeSettings(value: Partial<AppSettings> | undefined): AppSettings
     reviewThreshold: normalizeNumber(value?.reviewThreshold, DEFAULT_SETTINGS.reviewThreshold),
     incidentThreshold: normalizeNumber(value?.incidentThreshold, DEFAULT_SETTINGS.incidentThreshold),
     aiModel: value?.aiModel || DEFAULT_SETTINGS.aiModel,
+    conceptMap: Array.isArray(value?.conceptMap) ? value.conceptMap : DEFAULT_SETTINGS.conceptMap,
   };
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isCompatibleAnalysis(record: unknown): record is StoredAnalysis {
+  if (!isObject(record) || !isObject(record.result) || !isObject(record.result.summary)) {
+    return false;
+  }
+
+  const result = record.result as Record<string, unknown>;
+  const summary = result.summary as Record<string, unknown>;
+  return (
+    Array.isArray(result.people) &&
+    Array.isArray(result.normalizedVsReal) &&
+    Array.isArray(result.concepts) &&
+    Array.isArray(result.unmappedConcepts) &&
+    Array.isArray(result.internalExcelChecks) &&
+    Array.isArray(result.payrollRecords) &&
+    Array.isArray(result.registroEmployees) &&
+    isFiniteNumber(summary.pdfsAnalyzed) &&
+    isFiniteNumber(summary.uniquePeople) &&
+    isFiniteNumber(summary.peopleWithDifferences) &&
+    isFiniteNumber(summary.totalSalaryDifference) &&
+    isFiniteNumber(summary.totalSalaryComplementDifference) &&
+    isFiniteNumber(summary.totalExtraSalaryDifference) &&
+    isFiniteNumber(summary.totalGlobalDifference) &&
+    isFiniteNumber(summary.conceptsUnmapped)
+  );
+}
+
+function normalizeStoredAnalysis(record: unknown): StoredAnalysis | undefined {
+  if (!isCompatibleAnalysis(record)) {
+    return undefined;
+  }
+
+  return {
+    ...record,
+    schemaVersion: STORAGE_SCHEMA_VERSION,
+  };
+}
+
+function filterCompatibleAnalyses(records: readonly unknown[]): StoredAnalysis[] {
+  return records.map(normalizeStoredAnalysis).filter((item): item is StoredAnalysis => Boolean(item));
+}
+
+function countIncompatible(records: readonly unknown[]): number {
+  return records.length - filterCompatibleAnalyses(records).length;
 }
 
 export function loadSettings(): AppSettings {
@@ -157,30 +216,56 @@ function writeFallbackHistory(records: readonly StoredAnalysis[]): void {
 }
 
 export async function saveAnalysis(record: StoredAnalysis): Promise<void> {
+  const normalized = { ...record, schemaVersion: STORAGE_SCHEMA_VERSION };
   if (hasIndexedDb()) {
-    await withStore("readwrite", (store) => store.put(record));
+    await withStore("readwrite", (store) => store.put(normalized));
     return;
   }
 
-  const records = readFallbackHistory().filter((item) => item.id !== record.id);
-  writeFallbackHistory([record, ...records]);
+  const records = readFallbackHistory().filter((item) => item.id !== normalized.id);
+  writeFallbackHistory([normalized, ...records]);
 }
 
 export async function listAnalyses(): Promise<StoredAnalysis[]> {
+  const activeId = loadActiveAnalysisId();
   if (!hasIndexedDb()) {
-    return readFallbackHistory().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const compatible = filterCompatibleAnalyses(readFallbackHistory()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    if (activeId && !compatible.some((item) => item.id === activeId)) {
+      saveActiveAnalysisId(undefined);
+    }
+    return compatible;
   }
 
-  const records = await withStore<StoredAnalysis[]>("readonly", (store) => store.getAll());
-  return (records ?? []).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const records = await withStore<unknown[]>("readonly", (store) => store.getAll());
+  const compatible = filterCompatibleAnalyses(records ?? []).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  if (activeId && !compatible.some((item) => item.id === activeId)) {
+    saveActiveAnalysisId(undefined);
+  }
+  return compatible;
+}
+
+export async function countIncompatibleAnalyses(): Promise<number> {
+  if (!hasIndexedDb()) {
+    return countIncompatible(readFallbackHistory());
+  }
+
+  const records = await withStore<unknown[]>("readonly", (store) => store.getAll());
+  return countIncompatible(records ?? []);
 }
 
 export async function getAnalysis(id: string): Promise<StoredAnalysis | undefined> {
+  let record: unknown;
   if (!hasIndexedDb()) {
-    return readFallbackHistory().find((item) => item.id === id);
+    record = readFallbackHistory().find((item) => item.id === id);
+  } else {
+    record = await withStore<unknown>("readonly", (store) => store.get(id));
   }
 
-  return withStore<StoredAnalysis | undefined>("readonly", (store) => store.get(id));
+  const compatible = normalizeStoredAnalysis(record);
+  if (!compatible && loadActiveAnalysisId() === id) {
+    saveActiveAnalysisId(undefined);
+  }
+  return compatible;
 }
 
 export async function deleteAnalysis(id: string): Promise<void> {

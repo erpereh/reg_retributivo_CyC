@@ -49,7 +49,7 @@ export function styleBodyRows(sheet: ExcelJS.Worksheet): void {
 
 export function applyStatusStyle(cell: ExcelJS.Cell, value: unknown): void {
   const text = String(value ?? "").toLowerCase();
-  if (text.includes("alta") || text.includes("incidencia") || text.includes("falta")) {
+  if (text.includes("alta") || text.includes("incidencia") || text.includes("falta") || text.includes("diferencia")) {
     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${COLORS.dangerBg}` } };
     cell.font = { bold: true, color: { argb: `FF${COLORS.dangerText}` } };
   } else if (text.includes("media") || text.includes("revisar")) {
@@ -58,7 +58,7 @@ export function applyStatusStyle(cell: ExcelJS.Cell, value: unknown): void {
   } else if (text.includes("ok")) {
     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${COLORS.successBg}` } };
     cell.font = { bold: true, color: { argb: `FF${COLORS.successText}` } };
-  } else if (text.includes("baja")) {
+  } else if (text.includes("baja") || text.includes("sin ")) {
     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${COLORS.infoBg}` } };
     cell.font = { bold: true, color: { argb: `FF${COLORS.infoText}` } };
   }

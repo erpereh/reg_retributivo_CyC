@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { getGeminiModel, isGeminiEnabled } from "@/lib/ai/geminiClient";
 import { compareAnalysis } from "@/lib/compare/comparePeople";
+import { buildDefaultConceptMap, mergeConceptMap, validateConceptMapForCodes } from "@/lib/compare/conceptMapping";
 import { DEFAULT_INCIDENT_THRESHOLD, DEFAULT_REVIEW_THRESHOLD } from "@/lib/compare/salaryDiff";
 import { parsePayrollPdf } from "@/lib/parsers/payrollPdfParser";
 import { parseRegistroRetributivo } from "@/lib/parsers/registroRetributivoParser";
 import type { AnalysisError, AnalysisResult, PayrollRecord } from "@/lib/types";
+import type { ConceptMappingRule } from "@/lib/types";
 import { validationError } from "@/lib/utils/fileValidation";
 
 export const runtime = "nodejs";
@@ -16,6 +18,18 @@ async function fileToBuffer(file: File): Promise<Buffer> {
 function finiteNumber(value: FormDataEntryValue | null, fallback: number): number {
   const parsed = Number(value ?? fallback);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parseConceptMap(value: FormDataEntryValue | null): ConceptMappingRule[] {
+  if (typeof value !== "string" || !value.trim()) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? (parsed as ConceptMappingRule[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function POST(request: Request) {
@@ -40,6 +54,11 @@ export async function POST(request: Request) {
 
     const registroParsed = await parseRegistroRetributivo(await fileToBuffer(registro));
     errors.push(...registroParsed.warnings.map((message) => validationError(registro.name, message)));
+    const userConceptMap = parseConceptMap(formData.get("conceptMap"));
+    const conceptMap = validateConceptMapForCodes(
+      mergeConceptMap([...buildDefaultConceptMap(registroParsed.conceptCodes), ...userConceptMap]),
+      registroParsed.conceptCodes,
+    );
 
     const payrollRecords: PayrollRecord[] = [];
     for (const pdf of pdfs) {
@@ -63,6 +82,8 @@ export async function POST(request: Request) {
       aiModel,
       reviewThreshold,
       incidentThreshold,
+      conceptMap,
+      internalExcelChecks: registroParsed.internalChecks,
     });
     const response: AnalysisResult = {
       ...result,

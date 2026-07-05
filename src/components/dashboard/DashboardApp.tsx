@@ -12,8 +12,10 @@ function ActiveView() {
   const { view } = useAppState();
 
   switch (view) {
-    case "tablas":
-      return <TablesView />;
+    case "personas":
+    case "conceptos":
+    case "agrupaciones":
+      return <TablesView mode={view} />;
     case "historial":
       return <HistoryView />;
     case "ajustes":

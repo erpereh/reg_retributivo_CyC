@@ -4,167 +4,235 @@ import { applyStatusStyle, styleBodyRows, styleHeaderRow, styleTitle } from "@/l
 
 const EURO_FORMAT = '#,##0.00 [$€-es-ES]';
 
-function asList(values: readonly string[] | undefined): string {
-  return values?.join("; ") ?? "";
-}
-
 function configureColumns(sheet: ExcelJS.Worksheet, widths: readonly number[]): void {
   widths.forEach((width, index) => {
     sheet.getColumn(index + 1).width = width;
   });
 }
 
-function addResumen(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void {
-  const sheet = workbook.addWorksheet("Resumen", { properties: { defaultRowHeight: 22 } });
-  sheet.mergeCells("A1:K1");
-  sheet.getCell("A1").value = "Comparativa nominas vs Registro Retributivo";
-  styleTitle(sheet.getCell("A1"));
-  sheet.mergeCells("A2:K2");
-  sheet.getCell("A2").value =
-    "Se añade la diferencia salarial: Total deberia segun Registro vs Total esta segun nominas/PDF aportados.";
-
-  sheet.addRow([]);
-  sheet.addRow(["Resumen", "", "", "", "Personas por estado", "", "", "Nota de lectura"]);
-  sheet.getRow(4).font = { bold: true };
-  sheet.addRow([]);
-  sheet.addRow(["Metrica", "Valor", "Lectura", "", "Estado", "Personas", "", "Detalle"]);
-  styleHeaderRow(sheet.getRow(6));
-
-  const rows = [
-    ["Nominas/PDF revisadas", analysis.summary.pdfsAnalyzed, "Paginas con persona detectada"],
-    ["PDF con error", analysis.summary.pdfsFailed, "Paginas o archivos no procesados"],
-    ["Personas en nominas", analysis.summary.uniquePeople, "Personas unicas detectadas"],
-    ["Personas con incidencias", analysis.summary.peopleWithIssues, "Personas con campos o salario a revisar"],
-    ["Campos incorrectos", analysis.summary.fieldIssuesCount, "Incidencias de dato maestro"],
-    ["Diferencias salariales", analysis.summary.salaryIssuesCount, "Personas fuera de tolerancia"],
-    ["Diferencia salarial total", analysis.summary.salaryDifferenceTotal, "Total esta - total deberia"],
-    ["Diferencia salarial absoluta total", analysis.summary.salaryDifferenceAbsTotal, "Suma de diferencias absolutas"],
-    ["Tolerancia usada", analysis.summary.tolerance, "EUR"],
-  ];
-
-  rows.forEach((row) => sheet.addRow(row));
-  sheet.getCell("H6").value =
-    "La diferencia salarial compara el total del Registro Retributivo con el total devengado real de las nominas/PDF aportados. Los datos bancarios se ignoran por privacidad.";
-  sheet.mergeCells("H6:K14");
-  sheet.getCell("H6").alignment = { wrapText: true, vertical: "top" };
-  configureColumns(sheet, [30, 18, 60, 4, 28, 14, 4, 18, 18, 18, 18]);
-}
-
-function addCamposMal(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void {
-  const sheet = workbook.addWorksheet("Campos_mal");
-  sheet.views = [{ state: "frozen", ySplit: 1 }];
-  sheet.addRow([
-    "Prioridad",
-    "NIF",
-    "Matricula",
-    "Trabajador",
-    "Campo",
-    "Deberia estar (dato)",
-    "Como esta (dato)",
-    "Salario deberia (€)",
-    "Salario esta (€)",
-    "Diferencia salarial (€)",
-    "N registros afectados",
-    "Archivos / periodos afectados",
-    "Observaciones",
-    "Accion recomendada",
-  ]);
-  styleHeaderRow(sheet.getRow(1));
-
-  analysis.fieldIssues.forEach((issue) => {
-    const row = sheet.addRow([
-      issue.severity,
-      issue.workerNif,
-      issue.employeeNumber,
-      issue.workerName,
-      issue.field,
-      issue.shouldBe,
-      issue.actual,
-      issue.salaryShouldBe,
-      issue.salaryActual,
-      issue.salaryDifference,
-      issue.affectedFiles.length,
-      `${asList(issue.affectedFiles)} (${asList(issue.affectedPeriods)})`,
-      issue.observations,
-      issue.recommendedAction,
-    ]);
-    applyStatusStyle(row.getCell(1), issue.severity);
-  });
-
-  [8, 9, 10].forEach((col) => {
+function moneyColumns(sheet: ExcelJS.Worksheet, columns: readonly number[]): void {
+  columns.forEach((col) => {
     sheet.getColumn(col).numFmt = EURO_FORMAT;
   });
-  configureColumns(sheet, [12, 14, 12, 30, 28, 40, 34, 18, 18, 20, 14, 60, 58, 42]);
+}
+
+function addResumen(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void {
+  const sheet = workbook.addWorksheet("Resumen", { properties: { defaultRowHeight: 22 } });
+  sheet.mergeCells("A1:H1");
+  sheet.getCell("A1").value = "Comparativa Nominas vs Registro Retributivo";
+  styleTitle(sheet.getCell("A1"));
+  sheet.addRow([]);
+  sheet.addRow(["Metrica", "Valor"]);
+  styleHeaderRow(sheet.getRow(3));
+  [
+    ["Personas analizadas", analysis.summary.uniquePeople],
+    ["Personas con diferencias", analysis.summary.peopleWithDifferences],
+    ["Dif. total salario", analysis.summary.totalSalaryDifference],
+    ["Dif. total C. salarial", analysis.summary.totalSalaryComplementDifference],
+    ["Dif. total extrasalarial", analysis.summary.totalExtraSalaryDifference],
+    ["Dif. total global", analysis.summary.totalGlobalDifference],
+    ["Conceptos sin mapear", analysis.summary.conceptsUnmapped],
+    ["Cuadres internos con diferencias", analysis.summary.internalExcelDifferences],
+    ["Tolerancia", analysis.summary.tolerance],
+  ].forEach((row) => sheet.addRow(row));
+  moneyColumns(sheet, [2]);
+  configureColumns(sheet, [34, 22, 20, 20, 20, 20, 20, 20]);
   styleBodyRows(sheet);
 }
 
-function addDiferenciaSalarial(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void {
-  const sheet = workbook.addWorksheet("Diferencia_Salarial");
+function addPersonas(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void {
+  const sheet = workbook.addWorksheet("Personas");
   sheet.views = [{ state: "frozen", ySplit: 1 }];
   sheet.addRow([
-    "Estado",
-    "NIF",
     "Matricula",
-    "Trabajador",
+    "Persona",
     "Centro",
-    "Grupo profesional",
-    "GT",
-    "Total deberia (Registro €)",
-    "Total esta (nominas €)",
-    "Diferencia (€)",
-    "N nominas/PDF",
-    "Periodos incluidos",
-    "Observaciones",
+    "Puesto",
+    "Categoria",
+    "Salario Registro",
+    "Salario PDF",
+    "Dif. Salario",
+    "C. Salarial Registro",
+    "C. Salarial PDF",
+    "Dif. C. Salarial",
+    "Extrasalarial Registro",
+    "Extrasalarial PDF",
+    "Dif. Extrasalarial",
+    "Total Registro",
+    "Total PDF",
+    "Dif. Total",
+    "Estado",
   ]);
   styleHeaderRow(sheet.getRow(1));
-
-  analysis.salaryDifferences.forEach((item) => {
+  analysis.people.forEach((item) => {
     const row = sheet.addRow([
-      item.status,
-      item.workerNif,
       item.employeeNumber,
-      item.workerName,
+      item.person,
       item.workplace,
-      item.professionalGroup,
-      item.gt,
-      item.totalShouldBe,
-      item.totalActual,
-      item.difference,
-      item.payrollCount,
-      asList(item.periodsIncluded),
-      item.observations,
+      item.position,
+      item.category,
+      item.salaryRegistro,
+      item.salaryPdf,
+      item.salaryDifference,
+      item.salaryComplementRegistro,
+      item.salaryComplementPdf,
+      item.salaryComplementDifference,
+      item.extraSalaryRegistro,
+      item.extraSalaryPdf,
+      item.extraSalaryDifference,
+      item.registroTotal,
+      item.pdfTotal,
+      item.totalDifference,
+      item.status,
     ]);
-    applyStatusStyle(row.getCell(1), item.status);
+    applyStatusStyle(row.getCell(18), item.status);
   });
+  moneyColumns(sheet, [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]);
+  configureColumns(sheet, [14, 32, 24, 34, 30, 18, 18, 16, 20, 18, 18, 22, 20, 20, 18, 18, 18, 16]);
+  styleBodyRows(sheet);
+}
 
-  [8, 9, 10].forEach((col) => {
-    sheet.getColumn(col).numFmt = EURO_FORMAT;
+function addNormalizado(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void {
+  const sheet = workbook.addWorksheet("Normalizado_vs_Real");
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
+  sheet.addRow([
+    "Matricula",
+    "Persona",
+    "Normalizado + variables",
+    "Normalizado",
+    "Periodo completo",
+    "Real PDF",
+    "Dif. PDF vs periodo completo",
+    "Dif. PDF vs normalizado + variables",
+    "Dif. PDF vs normalizado",
+    "Justificacion",
+    "Estado",
+  ]);
+  styleHeaderRow(sheet.getRow(1));
+  analysis.normalizedVsReal.forEach((item) => {
+    const row = sheet.addRow([
+      item.employeeNumber,
+      item.person,
+      item.normalizedPlusVariables,
+      item.normalized,
+      item.periodComplete,
+      item.realPdf,
+      item.diffPdfVsPeriodComplete,
+      item.diffPdfVsNormalizedPlusVariables,
+      item.diffPdfVsNormalized,
+      item.possibleJustification,
+      item.status,
+    ]);
+    applyStatusStyle(row.getCell(11), item.status);
   });
-  configureColumns(sheet, [18, 14, 12, 32, 24, 34, 10, 22, 22, 18, 14, 54, 62]);
+  moneyColumns(sheet, [3, 4, 5, 6, 7, 8, 9]);
+  configureColumns(sheet, [14, 32, 24, 18, 18, 18, 26, 32, 28, 58, 16]);
+  styleBodyRows(sheet);
+}
+
+function addConceptos(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void {
+  const sheet = workbook.addWorksheet("Conceptos");
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
+  sheet.addRow(["Matricula", "Persona", "Bloque", "Codigo Registro", "Concepto PDF", "Importe Registro", "Importe PDF", "Diferencia", "Estado"]);
+  styleHeaderRow(sheet.getRow(1));
+  analysis.concepts.forEach((item) => {
+    const row = sheet.addRow([
+      item.employeeNumber,
+      item.person,
+      item.block,
+      item.registroCode,
+      item.pdfConcept,
+      item.registroAmount,
+      item.pdfAmount,
+      item.difference,
+      item.status,
+    ]);
+    applyStatusStyle(row.getCell(9), item.status);
+  });
+  moneyColumns(sheet, [6, 7, 8]);
+  configureColumns(sheet, [14, 32, 18, 34, 44, 18, 18, 18, 16]);
+  styleBodyRows(sheet);
+}
+
+function addSinMapear(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void {
+  const sheet = workbook.addWorksheet("Conceptos_sin_mapear");
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
+  sheet.addRow(["Concepto PDF", "Total detectado", "N personas", "N nominas", "Sugerencia bloque", "Sugerencia codigo Registro", "Accion"]);
+  styleHeaderRow(sheet.getRow(1));
+  analysis.unmappedConcepts.forEach((item) => {
+    const row = sheet.addRow([
+      item.pdfConcept,
+      item.totalDetected,
+      item.peopleCount,
+      item.payrollCount,
+      item.suggestedBlock,
+      item.suggestedRegistroCode,
+      item.action,
+    ]);
+    applyStatusStyle(row.getCell(7), item.action);
+  });
+  moneyColumns(sheet, [2]);
+  configureColumns(sheet, [44, 18, 14, 14, 22, 32, 22]);
+  styleBodyRows(sheet);
+}
+
+function addCuadreInterno(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void {
+  const sheet = workbook.addWorksheet("Cuadre_Interno_Excel");
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
+  sheet.addRow([
+    "Matricula",
+    "Salario periodo completo",
+    "Salario desglose",
+    "Dif. Salario",
+    "C. Salarial periodo completo",
+    "C. Salarial desglose",
+    "Dif. C. Salarial",
+    "Extrasalarial periodo completo",
+    "Extrasalarial desglose",
+    "Dif. Extrasalarial",
+    "Estado",
+  ]);
+  styleHeaderRow(sheet.getRow(1));
+  analysis.internalExcelChecks.forEach((item) => {
+    const row = sheet.addRow([
+      item.employeeNumber,
+      item.salaryPeriod,
+      item.salaryBreakdown,
+      item.salaryDifference,
+      item.salaryComplementPeriod,
+      item.salaryComplementBreakdown,
+      item.salaryComplementDifference,
+      item.extraSalaryPeriod,
+      item.extraSalaryBreakdown,
+      item.extraSalaryDifference,
+      item.status,
+    ]);
+    applyStatusStyle(row.getCell(11), item.status);
+  });
+  moneyColumns(sheet, [2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  configureColumns(sheet, [14, 26, 20, 16, 28, 22, 18, 30, 24, 20, 16]);
   styleBodyRows(sheet);
 }
 
 function addCriterios(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void {
   const sheet = workbook.addWorksheet("Criterios");
-  sheet.mergeCells("A1:G1");
+  sheet.mergeCells("A1:B1");
   sheet.getCell("A1").value = "Criterios aplicados";
   styleTitle(sheet.getCell("A1"));
   sheet.addRow([]);
   sheet.addRow(["Tema", "Detalle"]);
   styleHeaderRow(sheet.getRow(3));
-
-  const criteria = [
-    ["Cruce", "Cruce principal por NIF; fallback por matricula y nombre normalizado + centro."],
-    ["Comparacion salarial", "Total deberia = suma de Salario + C. Salarial + Extrasalarial del bloque TOTAL RETRIBUCIONES NORMALIZADAS + VARIABLES."],
-    ["Como esta", "Suma del campo TOTAL DEVENGADO de todos los PDF de nomina aportados para cada persona."],
-    ["Tolerancia", `${analysis.summary.tolerance} EUR.`],
-    ["Umbrales", "OK dentro de tolerancia; Revisar hasta 50 EUR; Incidencia por encima de 50 EUR."],
-    ["IA", "Gemini solo se usa para observaciones y acciones recomendadas, nunca para calculos."],
-    ["Privacidad", "Los datos bancarios se ignoran por privacidad."],
+  [
+    ["Clave principal", "Matricula / ID RH."],
+    ["Privacidad", "No se muestra ni exporta NIF, IBAN, cuentas ni datos bancarios."],
+    ["Registro", "Importes de periodo completo y conceptos leidos de Empleados por cabeceras reales."],
+    ["PDF", "Importe comparativo calculado como suma de conceptos incluidos por mapa editable."],
+    ["Control auxiliar", "Total Devengado PDF solo se usa como control auxiliar en detalle, no como total comparativo."],
+    ["Mapa de conceptos", "Las reglas por defecto solo incluyen codigos que existen en el Excel cargado."],
+    ["IA", "Gemini no calcula importes; solo puede sugerir textos o mapeos si esta activado."],
     ...analysis.criteria.map((criterion) => ["Criterio adicional", criterion]),
-  ];
-  criteria.forEach((row) => sheet.addRow(row));
-  configureColumns(sheet, [28, 110]);
+  ].forEach((row) => sheet.addRow(row));
+  configureColumns(sheet, [28, 120]);
   styleBodyRows(sheet);
 }
 
@@ -175,8 +243,11 @@ export async function exportAnalysisToWorkbook(analysis: AnalysisResult): Promis
   workbook.modified = new Date();
 
   addResumen(workbook, analysis);
-  addCamposMal(workbook, analysis);
-  addDiferenciaSalarial(workbook, analysis);
+  addPersonas(workbook, analysis);
+  addNormalizado(workbook, analysis);
+  addConceptos(workbook, analysis);
+  addSinMapear(workbook, analysis);
+  addCuadreInterno(workbook, analysis);
   addCriterios(workbook, analysis);
 
   return workbook;

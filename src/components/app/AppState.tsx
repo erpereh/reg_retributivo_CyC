@@ -5,6 +5,7 @@ import type { AnalysisConfig, AnalysisResult, AppView, StoredAnalysis } from "@/
 import {
   clearAnalyses,
   configFromSettings,
+  countIncompatibleAnalyses,
   deleteAnalysis,
   DEFAULT_SETTINGS,
   getAnalysis,
@@ -14,6 +15,7 @@ import {
   saveActiveAnalysisId,
   saveAnalysis,
   saveSettings,
+  STORAGE_SCHEMA_VERSION,
   type AppSettings,
 } from "@/lib/storage/analysisStorage";
 import { normalizeComparableText } from "@/lib/utils/normalize";
@@ -22,8 +24,6 @@ export interface DashboardFilters {
   readonly query: string;
   readonly center: string;
   readonly group: string;
-  readonly gt: string;
-  readonly severity: string;
   readonly status: string;
 }
 
@@ -31,8 +31,6 @@ export const EMPTY_FILTERS: DashboardFilters = {
   query: "",
   center: "",
   group: "",
-  gt: "",
-  severity: "",
   status: "",
 };
 
@@ -98,6 +96,7 @@ function normalizeSettingsPatch(current: AppSettings, patch: Partial<AppSettings
     reviewThreshold: Math.max(0, reviewThreshold),
     incidentThreshold: Math.max(Math.max(0, reviewThreshold), incidentThreshold),
     aiModel: next.aiModel || DEFAULT_SETTINGS.aiModel,
+    conceptMap: Array.isArray(next.conceptMap) ? next.conceptMap : DEFAULT_SETTINGS.conceptMap,
   };
 }
 
@@ -170,6 +169,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
     async function hydrate() {
       const loadedSettings = loadSettings();
       const activeId = loadActiveAnalysisId();
+      const incompatibleCount = await countIncompatibleAnalyses();
       const analyses = await listAnalyses();
       const active = activeId ? (await getAnalysis(activeId)) ?? analyses[0] : analyses[0];
 
@@ -181,6 +181,11 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       setHistory(analyses);
       setActiveAnalysis(active);
       setStatus(active ? "Análisis activo cargado desde el historial" : "Pendiente de archivos");
+      setSuccess(
+        incompatibleCount
+          ? "Se ignoraron análisis guardados con formato anterior. Vuelve a analizar con la nueva lógica retributiva."
+          : undefined,
+      );
       setHydrating(false);
       void refreshAiStatus();
     }
@@ -213,6 +218,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
     formData.append("enableAI", String(config.enableAI));
     formData.append("reviewThreshold", String(config.thresholds.reviewThreshold));
     formData.append("incidentThreshold", String(config.thresholds.incidentThreshold));
+    formData.append("conceptMap", JSON.stringify(config.conceptMap ?? []));
     pdfFiles.forEach((file) => formData.append("pdfs", file));
 
     setAnalyzing(true);
@@ -230,6 +236,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       const result = (await response.json()) as AnalysisResult;
       const record: StoredAnalysis = {
         id: createId(),
+        schemaVersion: STORAGE_SCHEMA_VERSION,
         createdAt: new Date().toISOString(),
         registroFileName: registroFile.name,
         pdfCount: pdfFiles.length,

@@ -1,17 +1,50 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import ExcelJS from "exceljs";
 import { describe, expect, test } from "vitest";
 import { compareAnalysis } from "@/lib/compare/comparePeople";
+import { buildDefaultConceptMap } from "@/lib/compare/conceptMapping";
 import { exportAnalysisToWorkbook } from "@/lib/export/exportExcel";
 import { parsePayrollPdf } from "@/lib/parsers/payrollPdfParser";
 import { parseRegistroRetributivo } from "@/lib/parsers/registroRetributivoParser";
+import type { ConceptMappingRule, PayrollRecord, RegistroEmployee } from "@/lib/types";
 import { formatEuro, parseSpanishMoney } from "@/lib/utils/money";
 import { normalizeComparableText, normalizeProfessionalGroup } from "@/lib/utils/normalize";
 import { parsePayrollPeriod, toIsoDate } from "@/lib/utils/spanishDates";
 
 const root = process.cwd();
 const fuentes = path.join(root, "fuentes");
+const registroFile = path.join(fuentes, "IBER_Registro_Retributivo_(heredado)_20260630100936.xlsx");
+
+function emptyRegistroEmployee(overrides: Partial<RegistroEmployee>): RegistroEmployee {
+  return {
+    sourceRow: 1,
+    employeeNumber: "10048",
+    normalizedPlusVariables: { salary: 0, salaryComplement: 0, extraSalary: 0, total: 0 },
+    normalized: { salary: 0, salaryComplement: 0, extraSalary: 0, total: 0 },
+    periodComplete: { salary: 0, salaryComplement: 0, extraSalary: 0, total: 0 },
+    lastSituation: { salary: 0, salaryComplement: 0, extraSalary: 0, total: 0 },
+    nonNormalized: {
+      salaryComplementVariable: 0,
+      extraSalaryVariable: 0,
+      salaryPpe: 0,
+      salaryComplementPpe: 0,
+      salaryIt: 0,
+      salaryComplementIt: 0,
+    },
+    excelBreakdownDiffs: { salary: 0, salaryComplement: 0, extraSalary: 0 },
+    concepts: [],
+    raw: {},
+    ...overrides,
+  };
+}
+
+function testRule(rule: Partial<ConceptMappingRule> & Pick<ConceptMappingRule, "pdfConcept" | "block" | "blockKey" | "status">) {
+  return {
+    normalizedPdfConcept: normalizeComparableText(rule.pdfConcept),
+    ...rule,
+  } as ConceptMappingRule;
+}
 
 describe("money utilities", () => {
   test("parses Spanish money formats", () => {
@@ -54,159 +87,292 @@ describe("Spanish date utilities", () => {
 });
 
 describe("Registro Retributivo parser", () => {
-  test("detects Empleados sheet, real header rows and salary columns", async () => {
-    const file = readFileSync(
-      path.join(fuentes, "IBER_Registro_Retributivo_(heredado)_20260630100936.xlsx"),
-    );
-    const result = await parseRegistroRetributivo(file);
+  test("detects Empleados headers by real labels and extracts concept codes dynamically", async () => {
+    const result = await parseRegistroRetributivo(readFileSync(registroFile));
     const first = result.records[0];
 
     expect(result.sheetName).toBe("Empleados");
     expect(result.headerRows).toEqual({ group: 11, subheader: 12, firstData: 13 });
-    expect(result.columnMap.salary).toEqual(["F", "G", "H"]);
-    expect(result.columnMap.gt).toEqual(["BV", "BW"]);
-    expect(result.columnMap.workplace).toEqual(["CE", "CF"]);
-    expect(result.columnMap.professionalGroup).toEqual(["AW", "AX"]);
+    expect(result.columnMap.employeeNumber).toBe("A");
+    expect(result.columnMap.sex).toBe("E");
+    expect(result.columnMap.periodSalary).toBe("R");
+    expect(result.columnMap.periodSalaryBreakdownDiff).toBe("S");
+    expect(result.conceptCodes.salary).toContain("SSP_SAL_BASE");
+    expect(result.conceptCodes.salaryComplement).toContain("SSP_ANTIGUEDAD");
+    expect(result.conceptCodes.extraSalary).toContain("CYC_SEG_SALUD");
     expect(first.employeeNumber).toBe("10048");
-    expect(first.expectedSalary).toBeGreaterThan(60000);
+    expect(first.sex).toBe("Mujer");
+    expect(first.periodComplete.salary).toBe(29090.72);
+    expect(first.concepts.some((concept) => concept.block === "Salario" && concept.code === "SSP_SAL_BASE")).toBe(true);
+    expect(result.internalChecks.find((row) => row.employeeNumber === "10048")?.status).toBe("OK");
   });
 });
 
 describe("Payroll PDF parser", () => {
-  test("extracts first payroll page and excludes banking data", async () => {
-    const file = readFileSync(path.join(fuentes, "RECIBOS_IBER_2025", "PDF_ENERO.pdf"));
-    const result = await parsePayrollPdf(file, "PDF_ENERO.pdf");
+  test("extracts payroll concepts by employee number and classifies non-comparable lines conservatively", async () => {
+    const result = await parsePayrollPdf(
+      readFileSync(path.join(fuentes, "RECIBOS_IBER_2025", "PDF_ENERO.pdf")),
+      "PDF_ENERO.pdf",
+    );
     const first = result.records[0];
 
     expect(result.records.length).toBeGreaterThan(60);
-    expect(first.workerNif).toBe("00397416E");
-    expect(first.workerName).toBe("ISABEL CHAVERO TORRADO");
     expect(first.employeeNumber).toBe("10048");
+    expect(first.workerName).toBe("ISABEL CHAVERO TORRADO");
     expect(first.workplace).toBe("Bilbao");
-    expect(first.professionalGroup).toBe("Jefe de Primera");
-    expect(first.gt).toBe("3");
     expect(first.totalDevengado).toBe(3641.26);
-    expect(JSON.stringify(first)).not.toMatch(/ES\d{2}\s?\d{4}/);
+    expect(first.concepts.find((concept) => concept.name === "Salario Base")?.type).toBe("devengo");
+    expect(first.concepts.find((concept) => normalizeComparableText(concept.name).includes("retencion a cuenta"))?.type).toBe("retencion");
+    expect(first.concepts.find((concept) => normalizeComparableText(concept.name).includes("cotizacion regimen"))?.type).toBe("cotizacion");
+    expect(first.concepts.find((concept) => normalizeComparableText(concept.name).includes("coste empresa"))?.type).toBe("coste_empresa");
+    expect(first.concepts.find((concept) => normalizeComparableText(concept.name).includes("especie seguro"))?.type).toBe("especie");
+    expect(first.concepts.find((concept) => normalizeComparableText(concept.name) === "seguro medico mensual")?.type).toBe("informativo");
+    expect(first.concepts.map((concept) => normalizeComparableText(concept.name))).not.toContain(
+      "suministrados en periodo de liquidacion",
+    );
+    expect(JSON.stringify(first)).not.toMatch(/ES\d{2}\s?\d{4}|IBAN|0128\s?8700/i);
+  });
+});
+
+describe("concept mapping", () => {
+  test("builds default mapping only with concept codes present in the loaded Excel", async () => {
+    const registro = await parseRegistroRetributivo(readFileSync(registroFile));
+    const map = buildDefaultConceptMap(registro.conceptCodes);
+
+    expect(map.find((rule) => rule.pdfConcept === "Salario Base")).toMatchObject({
+      status: "Incluido",
+      block: "Salario",
+      registroCode: "SSP_SAL_BASE",
+    });
+    expect(map.find((rule) => normalizeComparableText(rule.pdfConcept) === "retencion a cuenta del irpf")?.status).toBe("Ignorado");
+    expect(map.every((rule) => rule.status !== "Incluido" || rule.registroCode)).toBe(true);
+    expect(map.every((rule) => rule.status !== "Incluido" || Boolean(rule.registroCode && registro.conceptCodes[rule.blockKey].includes(rule.registroCode)))).toBe(true);
+    expect(map.find((rule) => normalizeComparableText(rule.pdfConcept) === "seguro medico mensual")).toMatchObject({
+      registroCode: "CYC_SEG_SALUD",
+      allowInformative: true,
+      includedInComparison: true,
+      sourceType: "informativo",
+    });
+    expect(map.find((rule) => normalizeComparableText(rule.pdfConcept) === "kilometraje con retencion")).toMatchObject({
+      status: "Incluido",
+      registroCode: "SSP_KM_CON_RETEN",
+    });
+    expect(map.find((rule) => normalizeComparableText(rule.pdfConcept) === "kilometraje sin retencion")).toMatchObject({
+      status: "Incluido",
+      registroCode: "SSP_KM_SIN_RETEN",
+    });
   });
 });
 
 describe("comparison engine", () => {
-  test("detects missing registro people and deterministic salary status", async () => {
+  test("uses employee number as key and calculates PDF totals from included mapped concepts", async () => {
+    const registro = await parseRegistroRetributivo(readFileSync(registroFile));
     const result = await compareAnalysis(
       [
         {
           sourceFile: "PDF_TEST.pdf",
           periodLabel: "Del 1 al 31 Enero 2025",
           workerNif: "11111111H",
-          workerName: "PERSONA AUSENTE",
-          employeeNumber: "X1",
-          concepts: [],
-          totalDevengado: 100,
-        },
-        {
-          sourceFile: "PDF_TEST.pdf",
-          periodLabel: "Del 1 al 31 Enero 2025",
-          workerNif: "22222222J",
-          workerName: "PERSONA OK",
-          employeeNumber: "X2",
-          gt: "5",
-          professionalGroup: "Jefe de Primera",
-          concepts: [],
-          totalDevengado: 150,
+          workerName: "PERSONA TEST",
+          employeeNumber: "10048",
+          concepts: [
+            { name: "Salario Base", amount: 1000, type: "devengo" },
+            { name: "Antiguedad", amount: 200, type: "devengo" },
+            { name: "Retención a Cuenta del IRPF", amount: 300, type: "retencion" },
+            { name: "Concepto Raro", amount: 50, type: "unknown" },
+          ],
+          totalDevengado: 1550,
         },
       ],
-      [
-        {
-          sourceRow: 13,
-          workerNif: "22222222J",
-          workerName: "PERSONA OK",
-          employeeNumber: "X2",
-          gt: "7",
-          professionalGroup: "Jefe de Primera",
-          expectedSalary: 120,
-          raw: {},
-        },
-      ],
-      { tolerance: 1 },
+      registro.records,
+      {
+        tolerance: 1,
+        conceptMap: buildDefaultConceptMap(registro.conceptCodes),
+        enableAI: false,
+      },
     );
 
-    expect(result.fieldIssues.some((issue) => issue.workerNif === "11111111H" && issue.severity === "Alta")).toBe(
-      true,
+    const person = result.people.find((row) => row.employeeNumber === "10048");
+    expect(person?.pdfTotal).toBe(1200);
+    expect(person?.pdfControlTotalDevengado).toBe(1550);
+    expect(person?.salaryPdf).toBe(1000);
+    expect(person?.salaryComplementPdf).toBe(200);
+    expect(person?.unmappedConceptsCount).toBe(1);
+    expect(result.unmappedConcepts.find((row) => row.pdfConcept === "Concepto Raro")).toMatchObject({
+      totalDetected: 50,
+      peopleCount: 1,
+      payrollCount: 1,
+    });
+    expect(result.normalizedVsReal.find((row) => row.employeeNumber === "10048")?.realPdf).toBe(1200);
+  });
+
+  test("deduplicates informative health insurance when a real devengo exists in the same receipt only", async () => {
+    const employee = emptyRegistroEmployee({
+      employeeNumber: "10048",
+      periodComplete: { salary: 0, salaryComplement: 0, extraSalary: 240, total: 240 },
+      concepts: [{ block: "Extrasalarial", blockKey: "extraSalary", code: "CYC_SEG_SALUD", amount: 240 }],
+    });
+    const result = await compareAnalysis(
+      [
+        {
+          sourceFile: "PDF_ENERO.pdf",
+          pageNumber: 1,
+          periodLabel: "Del 1 al 31 Enero 2025",
+          workerName: "PERSONA TEST",
+          employeeNumber: "10048",
+          concepts: [
+            { name: "Seguro Médico", amount: 120, type: "devengo" },
+            { name: "Seguro Médico mensual", amount: 120, type: "informativo" },
+          ],
+        },
+        {
+          sourceFile: "PDF_FEBRERO.pdf",
+          pageNumber: 1,
+          periodLabel: "Del 1 al 28 Febrero 2025",
+          workerName: "PERSONA TEST",
+          employeeNumber: "10048",
+          concepts: [
+            { name: "Seguro Médico", amount: 120, type: "devengo" },
+            { name: "Seguro Médico mensual", amount: 120, type: "informativo" },
+          ],
+        },
+      ],
+      [employee],
+      {
+        tolerance: 1,
+        enableAI: false,
+        conceptMap: [
+          testRule({
+            pdfConcept: "Seguro Médico",
+            block: "Extrasalarial",
+            blockKey: "extraSalary",
+            registroCode: "CYC_SEG_SALUD",
+            status: "Incluido",
+            sourceType: "devengo",
+            allowInformative: false,
+            dedupePriority: "devengo",
+            includedInComparison: true,
+          } as Partial<ConceptMappingRule> & Pick<ConceptMappingRule, "pdfConcept" | "block" | "blockKey" | "status">),
+          testRule({
+            pdfConcept: "Seguro Médico mensual",
+            block: "Extrasalarial",
+            blockKey: "extraSalary",
+            registroCode: "CYC_SEG_SALUD",
+            status: "Incluido",
+            sourceType: "informativo",
+            allowInformative: true,
+            dedupePriority: "informativo",
+            includedInComparison: true,
+          } as Partial<ConceptMappingRule> & Pick<ConceptMappingRule, "pdfConcept" | "block" | "blockKey" | "status">),
+        ],
+      },
     );
-    expect(result.fieldIssues.some((issue) => issue.workerNif === "22222222J" && issue.field.includes("GT"))).toBe(
-      true,
+
+    const row = result.concepts.find((item) => item.registroCode === "CYC_SEG_SALUD");
+    expect(row?.pdfAmount).toBe(240);
+    expect(row?.pdfConcept).toContain("Seguro Médico");
+    expect(result.ignoredConcepts.find((item) => item.pdfConcept === "Seguro Médico mensual")?.totalDetected).toBe(240);
+  });
+
+  test("allows explicitly mapped informative concepts when no real devengo exists", async () => {
+    const employee = emptyRegistroEmployee({
+      employeeNumber: "10048",
+      periodComplete: { salary: 0, salaryComplement: 0, extraSalary: 50, total: 50 },
+      concepts: [{ block: "Extrasalarial", blockKey: "extraSalary", code: "CYC_PLAN_PENSIONES_ORD", amount: 50 }],
+    });
+    const result = await compareAnalysis(
+      [
+        {
+          sourceFile: "PDF_ENERO.pdf",
+          pageNumber: 1,
+          periodLabel: "Del 1 al 31 Enero 2025",
+          workerName: "PERSONA TEST",
+          employeeNumber: "10048",
+          concepts: [{ name: "Plan de Pensiones Mensual", amount: 50, type: "informativo" }],
+        },
+      ],
+      [employee],
+      {
+        tolerance: 1,
+        enableAI: false,
+        conceptMap: [
+          testRule({
+            pdfConcept: "Plan de Pensiones Mensual",
+            block: "Extrasalarial",
+            blockKey: "extraSalary",
+            registroCode: "CYC_PLAN_PENSIONES_ORD",
+            status: "Incluido",
+            sourceType: "informativo",
+            allowInformative: true,
+            dedupePriority: "informativo",
+            includedInComparison: true,
+          } as Partial<ConceptMappingRule> & Pick<ConceptMappingRule, "pdfConcept" | "block" | "blockKey" | "status">),
+        ],
+      },
     );
-    expect(result.salaryDifferences.find((item) => item.workerNif === "22222222J")?.status).toBe("Revisar");
+
+    expect(result.concepts.find((item) => item.registroCode === "CYC_PLAN_PENSIONES_ORD")?.pdfAmount).toBe(50);
+    expect(result.people.find((item) => item.employeeNumber === "10048")?.pdfTotal).toBe(50);
+  });
+
+  test("validates known Registro vs PDF corrections on real 2025 receipts", async () => {
+    const registro = await parseRegistroRetributivo(readFileSync(registroFile));
+    const payrollDir = path.join(fuentes, "RECIBOS_IBER_2025");
+    const payrollRecords: PayrollRecord[] = [];
+    for (const fileName of readdirSync(payrollDir).filter((file) => file.toLowerCase().endsWith(".pdf")).sort()) {
+      const parsed = await parsePayrollPdf(readFileSync(path.join(payrollDir, fileName)), fileName);
+      payrollRecords.push(...parsed.records);
+    }
+    const result = await compareAnalysis(payrollRecords, registro.records, {
+      tolerance: 1,
+      conceptMap: buildDefaultConceptMap(registro.conceptCodes),
+      enableAI: false,
+    });
+
+    const concept10048Health = result.concepts.find((row) => row.employeeNumber === "10048" && row.registroCode === "CYC_SEG_SALUD");
+    const person10048 = result.people.find((row) => row.employeeNumber === "10048");
+    const person10050 = result.people.find((row) => row.employeeNumber === "10050");
+    const person10072 = result.people.find((row) => row.employeeNumber === "10072");
+    const kmWithRetention = result.concepts.find((row) => row.employeeNumber === "10048" && row.registroCode === "SSP_KM_CON_RETEN");
+    const kmWithoutRetention = result.concepts.find((row) => row.employeeNumber === "10048" && row.registroCode === "SSP_KM_SIN_RETEN");
+
+    expect(concept10048Health?.registroAmount).toBeCloseTo(817.11, 2);
+    expect(concept10048Health?.pdfAmount).toBeCloseTo(817.11, 2);
+    expect(Math.abs(person10048?.extraSalaryDifference ?? 0)).toBeGreaterThan(180);
+    expect(Math.abs(person10048?.extraSalaryDifference ?? 0)).toBeLessThan(240);
+    expect(Math.abs(person10050?.extraSalaryDifference ?? 0)).toBeGreaterThan(180);
+    expect(Math.abs(person10050?.extraSalaryDifference ?? 0)).toBeLessThan(240);
+    expect(Math.abs(person10072?.salaryComplementDifference ?? 0)).toBeCloseTo(841.92, 2);
+    expect(kmWithRetention?.pdfAmount).toBeGreaterThan(0);
+    expect(kmWithoutRetention?.pdfAmount).toBeGreaterThan(0);
   });
 });
 
+
 describe("Excel export", () => {
-  test("creates the four required sheets with styled headers and no banking data", async () => {
-    const workbook = await exportAnalysisToWorkbook({
-      summary: {
-        generatedAt: "2026-07-02T10:00:00.000Z",
-        pdfsAnalyzed: 1,
-        pdfsFailed: 0,
-        uniquePeople: 1,
-        peopleWithIssues: 1,
-        fieldIssuesCount: 1,
-        salaryIssuesCount: 1,
-        salaryDifferenceTotal: 30,
-        salaryDifferenceAbsTotal: 30,
-        tolerance: 1,
-      },
-      payrollRecords: [],
-      registroRecords: [],
-      fieldIssues: [
-        {
-          workerNif: "22222222J",
-          workerName: "PERSONA OK",
-          employeeNumber: "X2",
-          field: "GT / Grupo de cotizacion",
-          shouldBe: "7",
-          actual: "5",
-          affectedPeriods: ["Del 1 al 31 Enero 2025"],
-          affectedFiles: ["PDF_TEST.pdf"],
-          salaryShouldBe: 120,
-          salaryActual: 150,
-          salaryDifference: 30,
-          severity: "Alta",
-          observations: "Observacion sin datos bancarios.",
-          recommendedAction: "Revisar dato maestro.",
-        },
-      ],
-      salaryDifferences: [
-        {
-          workerNif: "22222222J",
-          workerName: "PERSONA OK",
-          employeeNumber: "X2",
-          totalShouldBe: 120,
-          totalActual: 150,
-          difference: 30,
-          payrollCount: 1,
-          periodsIncluded: ["Del 1 al 31 Enero 2025"],
-          status: "Revisar",
-          observations: "Diferencia informativa.",
-        },
-      ],
-      errors: [],
-      criteria: ["Los datos bancarios se ignoran por privacidad."],
+  test("creates phase 1 sheets and excludes NIF and banking data", async () => {
+    const registro = await parseRegistroRetributivo(readFileSync(registroFile));
+    const analysis = await compareAnalysis([], [registro.records[0]], {
+      tolerance: 1,
+      conceptMap: buildDefaultConceptMap(registro.conceptCodes),
+      enableAI: false,
     });
+    const workbook = await exportAnalysisToWorkbook(analysis);
 
     expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual([
       "Resumen",
-      "Campos_mal",
-      "Diferencia_Salarial",
+      "Personas",
+      "Normalizado_vs_Real",
+      "Conceptos",
+      "Conceptos_sin_mapear",
+      "Cuadre_Interno_Excel",
       "Criterios",
     ]);
-    expect(workbook.getWorksheet("Campos_mal")?.views[0]?.state).toBe("frozen");
-    expect(workbook.getWorksheet("Campos_mal")?.getCell("A1").fill).toMatchObject({
-      type: "pattern",
-    });
 
     const buffer = await workbook.xlsx.writeBuffer();
     const reloaded = new ExcelJS.Workbook();
     await reloaded.xlsx.load(buffer);
-    expect(JSON.stringify(reloaded.model)).not.toMatch(/IBAN|CUENTA|BANCO|ES\d{2}\s?\d{4}/i);
+    const serialized = JSON.stringify(reloaded.model);
+    expect(serialized).not.toMatch(/ES\d{2}\s?\d{4}|00397416E|0128\s?8700/i);
   });
 });

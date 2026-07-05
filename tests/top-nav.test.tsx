@@ -34,9 +34,9 @@ describe("TopNav", () => {
     render(<TopNav />);
 
     expect(screen.getByRole("tab", { name: "Dashboard" }).getAttribute("aria-selected")).toBe("true");
-    fireEvent.click(screen.getByRole("tab", { name: "Tablas" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Personas" }));
 
-    expect(appState.value.setView).toHaveBeenCalledWith("tablas");
+    expect(appState.value.setView).toHaveBeenCalledWith("personas");
   });
 
   test("disables export when there is no active analysis", () => {

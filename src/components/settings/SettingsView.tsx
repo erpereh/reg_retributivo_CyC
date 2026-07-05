@@ -1,12 +1,14 @@
 "use client";
 
 import { BrainCircuit, CheckCircle2, LockKeyhole, ShieldCheck, SlidersHorizontal, Wifi } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useAppState } from "@/components/app/AppState";
 import { Badge } from "@/components/common/Badge";
 import { Card } from "@/components/common/Card";
 import { SectionHeader } from "@/components/common/SectionHeader";
 import { Toggle } from "@/components/common/Toggle";
+import { normalizePdfConcept } from "@/lib/compare/conceptMapping";
+import type { ConceptMappingRule } from "@/lib/types";
 
 function NumberSetting({
   id,
@@ -42,10 +44,76 @@ export function SettingsView() {
     refreshAiStatus,
     testAiConnection,
   } = useAppState();
+  const [mapDraft, setMapDraft] = useState("");
+  const [mapMessage, setMapMessage] = useState<string | undefined>();
 
   useEffect(() => {
     void refreshAiStatus();
   }, [refreshAiStatus]);
+
+  useEffect(() => {
+    setMapDraft(JSON.stringify(settings.conceptMap ?? [], null, 2));
+  }, [settings.conceptMap]);
+
+  function normalizeRules(input: unknown): ConceptMappingRule[] {
+    if (!Array.isArray(input)) {
+      throw new Error("El mapa debe ser un array JSON.");
+    }
+    return input.map((item) => {
+      const rule = item as Partial<ConceptMappingRule>;
+      if (!rule.pdfConcept || !rule.block || !rule.blockKey || !rule.status) {
+        throw new Error("Cada regla necesita pdfConcept, block, blockKey y status.");
+      }
+      return {
+        pdfConcept: rule.pdfConcept,
+        normalizedPdfConcept: rule.normalizedPdfConcept || normalizePdfConcept(rule.pdfConcept),
+        block: rule.block,
+        blockKey: rule.blockKey,
+        registroCode: rule.registroCode,
+        status: rule.status,
+        sourceType: rule.sourceType,
+        allowInformative: rule.allowInformative,
+        dedupePriority: rule.dedupePriority,
+        includedInComparison: rule.includedInComparison,
+        reason: rule.reason,
+      };
+    });
+  }
+
+  function saveConceptMap() {
+    try {
+      const rules = normalizeRules(JSON.parse(mapDraft));
+      updateSettings({ conceptMap: rules });
+      setMapMessage("Mapa de conceptos guardado. Reanaliza para aplicar cambios.");
+    } catch (error) {
+      setMapMessage(error instanceof Error ? error.message : "No se pudo guardar el mapa.");
+    }
+  }
+
+  function exportConceptMap() {
+    const blob = new Blob([JSON.stringify(settings.conceptMap ?? [], null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "mapa_conceptos_retributivo.json";
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function importConceptMap() {
+    const pasted = window.prompt("Pega el JSON del mapa de conceptos");
+    if (!pasted) {
+      return;
+    }
+    setMapDraft(pasted);
+    try {
+      const rules = normalizeRules(JSON.parse(pasted));
+      updateSettings({ conceptMap: rules });
+      setMapMessage("Mapa importado. Reanaliza para aplicar cambios.");
+    } catch (error) {
+      setMapMessage(error instanceof Error ? error.message : "No se pudo importar el mapa.");
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -130,6 +198,46 @@ export function SettingsView() {
           </div>
         </Card>
       </section>
+
+      <Card className="p-6">
+        <div className="flex items-center gap-3">
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-primary">
+            <SlidersHorizontal className="h-5 w-5" aria-hidden="true" />
+          </span>
+          <div>
+            <h2 className="text-xl font-semibold text-ink">Mapa de conceptos</h2>
+            <p className="text-sm text-muted">Reglas manuales PDF → código Registro. Los códigos se revalidan contra el Excel cargado antes de analizar.</p>
+          </div>
+        </div>
+        <textarea
+          value={mapDraft}
+          onChange={(event) => setMapDraft(event.target.value)}
+          className="mt-5 min-h-64 w-full rounded-2xl border border-line bg-white p-4 font-mono text-xs text-ink shadow-subtle"
+          spellCheck={false}
+        />
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button type="button" onClick={saveConceptMap} className="btn-primary">
+            Guardar mapa
+          </button>
+          <button type="button" onClick={exportConceptMap} className="btn-secondary">
+            Exportar mapa
+          </button>
+          <button type="button" onClick={importConceptMap} className="btn-secondary">
+            Importar mapa
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              updateSettings({ conceptMap: [] });
+              setMapMessage("Mapa manual restaurado. Se usará el mapa por defecto dinámico.");
+            }}
+            className="btn-danger"
+          >
+            Restaurar defecto
+          </button>
+        </div>
+        {mapMessage ? <p className="mt-4 rounded-2xl bg-blue-50 px-4 py-3 text-sm font-semibold text-primary">{mapMessage}</p> : null}
+      </Card>
 
       <Card className="p-6">
         <div className="flex items-center gap-3">
