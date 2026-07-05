@@ -97,6 +97,94 @@ function addGrouped(
   map.set(key, current);
 }
 
+function decisionTypeOrder(decisionType: UnmappedConceptRow["decisionType"]): number {
+  if (decisionType === "Pendiente revision") return 0;
+  if (decisionType === "Sin mapear real") return 1;
+  return 2;
+}
+
+function pendingReviewAction(pdfConcept: string): string {
+  const normalized = normalizeComparableText(pdfConcept);
+  if (normalized === "prestacion teorica maternidad") {
+    return "Revisar y activar manualmente solo si debe compararse contra el Registro.";
+  }
+  if (normalized === "paga 40 anos") {
+    return "Revisar manualmente; no existe codigo Registro exacto para incluirla por defecto.";
+  }
+  return "Revisar y activar manualmente desde Ajustes si procede.";
+}
+
+function nonIncludedReason(input: {
+  readonly pdfConcept: string;
+  readonly decisionType: UnmappedConceptRow["decisionType"];
+  readonly fallback?: string;
+}): string {
+  const normalized = normalizeComparableText(input.pdfConcept);
+  if (normalized === "prestacion teorica maternidad") {
+    return "Concepto teorica con codigo similar en Registro a 0; no se incluye automaticamente.";
+  }
+  if (normalized === "paga 40 anos") {
+    return "No existe codigo exacto de Paga 40 Anos en Registro; no se mapea a paga 25 anos ni a gratificacion.";
+  }
+  if (normalized === "coste empresa" || normalized.includes("cotizacion") && normalized.includes("empresa")) {
+    return "Coste empresa, no retribucion del trabajador.";
+  }
+  if (normalized.includes("retencion a cuenta")) {
+    return "Retencion fiscal, no devengo.";
+  }
+  if (normalized.includes("cotiz") || normalized.includes("cotizacion")) {
+    return normalized.includes("empresa")
+      ? "Cotizaciones empresa: coste empresa, no retribucion comparable."
+      : "Cotizaciones empleado: deduccion, no retribucion comparable.";
+  }
+  if (normalized === "aportacion personal al ppse") {
+    return "Aportacion o deduccion personal, no retribucion comparable.";
+  }
+  if (normalized === "descuento seguro medico") {
+    return "Descuento o deduccion, no devengo.";
+  }
+  if (normalized === "especie seguro medico") {
+    return "Ajuste negativo de especie, no sumar.";
+  }
+  if (normalized === "seguro medico mensual") {
+    return "Informativo duplicado; CYC_SEG_SALUD ya cuadra con Seguro Medico.";
+  }
+  if (normalized === "anticipo prorrateado") {
+    return "Anticipo o deduccion, no retribucion comparable.";
+  }
+  if (normalized === "descuento renting") {
+    return "Descuento o deduccion.";
+  }
+  if (normalized === "rendimientos irregulares") {
+    return "Dato fiscal o informativo, no concepto retributivo comparable.";
+  }
+  if (normalized === "descuento seguro ahorro jubilacion") {
+    return "Descuento o deduccion.";
+  }
+  if (normalized === "especie tarjeta") {
+    return "Informativo de especie; Comida Tarjeta ya se compara aparte.";
+  }
+  if (normalized === "descuento transporte") {
+    return "Descuento o deduccion.";
+  }
+  if (normalized === "cuota gimnasio") {
+    return "Cuota, deduccion o beneficio no presente en Registro; no incluir por defecto.";
+  }
+  if (normalized === "exceso defecto paga anterior") {
+    return "Ajuste de nomina anterior; no incluir por defecto.";
+  }
+  if (normalized.includes("vacaciones") && (normalized.includes("cotiz") || normalized.includes("cotizacion"))) {
+    return "Cotizaciones vacaciones: cotizaciones o deducciones, no retribucion.";
+  }
+  if (normalized === "especie renting") {
+    return "Especie o informativo; no incluir por defecto.";
+  }
+  if (input.decisionType === "Sin mapear real") {
+    return "No hay regla ni codigo claro en Registro para incluir este concepto automaticamente.";
+  }
+  return input.fallback ?? "Concepto no incluido en el calculo principal.";
+}
+
 function shouldIncludeConcept(rule: ConceptMappingRule | undefined, concept: PayrollConcept): rule is ConceptMappingRule & { registroCode: string } {
   if (!rule?.registroCode || rule.status !== "Incluido" || rule.includedInComparison === false || DISALLOWED_INCLUDED_TYPES.has(concept.type)) {
     return false;
@@ -238,6 +326,7 @@ function createConceptRows(
   employee: RegistroEmployee,
   aggregate: PayrollAggregate | undefined,
   options: CompareOptions,
+  personFallback?: string,
 ): ConceptComparisonRow[] {
   const rows: ConceptComparisonRow[] = [];
   employee.concepts.forEach((concept) => {
@@ -249,7 +338,7 @@ function createConceptRows(
     const difference = roundMoney(pdfAmount - concept.amount);
     rows.push({
       employeeNumber: employee.employeeNumber,
-      person: employee.workerName,
+      person: employee.workerName || personFallback,
       block: concept.block,
       blockKey: concept.blockKey,
       registroCode: concept.code,
@@ -264,28 +353,80 @@ function createConceptRows(
   return rows;
 }
 
-function createUnmappedRows(aggregates: readonly PayrollAggregate[]): UnmappedConceptRow[] {
-  const combined = new Map<string, { amount: number; people: Set<string>; payrolls: Set<string> }>();
+function createUnmappedRows(aggregates: readonly PayrollAggregate[], conceptMap: readonly ConceptMappingRule[]): UnmappedConceptRow[] {
+  const combined = new Map<
+    string,
+    {
+      amount: number;
+      people: Set<string>;
+      payrolls: Set<string>;
+      suggestedBlock?: UnmappedConceptRow["suggestedBlock"];
+      suggestedRegistroCode?: string;
+      action: UnmappedConceptRow["action"];
+      decisionType: UnmappedConceptRow["decisionType"];
+      includedInComparison: boolean;
+      recommendedAction: string;
+      reason?: string;
+    }
+  >();
   aggregates.forEach((aggregate) => {
     aggregate.unmapped.forEach((value, key) => {
-      const current = combined.get(key) ?? { amount: 0, people: new Set<string>(), payrolls: new Set<string>() };
+      const rule = findConceptRule(conceptMap, key);
+      const normalized = normalizeComparableText(key);
+      const isPending = Boolean(rule?.registroCode) || normalized === "paga 40 anos";
+      const decisionType: UnmappedConceptRow["decisionType"] = isPending ? "Pendiente revision" : "Sin mapear real";
+      const current = combined.get(key) ?? {
+        amount: 0,
+        people: new Set<string>(),
+        payrolls: new Set<string>(),
+        suggestedBlock: rule?.registroCode ? rule.block : normalized === "paga 40 anos" ? "C. Salarial" : undefined,
+        suggestedRegistroCode: rule?.registroCode,
+        action: rule?.status ?? "Pendiente revisión",
+        decisionType,
+        includedInComparison: false,
+        recommendedAction: decisionType === "Pendiente revision" ? pendingReviewAction(key) : "Mantener en revision hasta identificar codigo Registro.",
+        reason: nonIncludedReason({ pdfConcept: key, decisionType, fallback: rule?.reason }),
+      };
       current.amount = roundMoney(current.amount + value.amount);
       value.people.forEach((item) => current.people.add(item));
       value.payrolls.forEach((item) => current.payrolls.add(item));
+      combined.set(key, current);
+    });
+    aggregate.ignored.forEach((value, key) => {
+      const current = combined.get(key) ?? {
+        amount: 0,
+        people: new Set<string>(),
+        payrolls: new Set<string>(),
+        action: "Ignorado" as const,
+        decisionType: "Ignorado" as const,
+        includedInComparison: false,
+        recommendedAction: "No incluir en comparativa.",
+        reason: nonIncludedReason({ pdfConcept: key, decisionType: "Ignorado", fallback: value.reason }),
+      };
+      current.amount = roundMoney(current.amount + value.amount);
+      value.people.forEach((item) => current.people.add(item));
+      value.payrolls.forEach((item) => current.payrolls.add(item));
+      current.reason = nonIncludedReason({ pdfConcept: key, decisionType: "Ignorado", fallback: value.reason });
       combined.set(key, current);
     });
   });
 
   return [...combined.entries()]
     .map(([pdfConcept, value]) => ({
+      decisionType: value.decisionType,
+      includedInComparison: value.includedInComparison,
       pdfConcept,
       totalDetected: value.amount,
       peopleCount: value.people.size,
       payrollCount: value.payrolls.size,
       exampleEmployeeNumbers: [...value.people].slice(0, 5),
-      action: "Pendiente revisión" as const,
+      suggestedBlock: value.suggestedBlock,
+      suggestedRegistroCode: value.suggestedRegistroCode,
+      action: value.action,
+      recommendedAction: value.recommendedAction,
+      reason: value.reason,
     }))
-    .sort((a, b) => Math.abs(b.totalDetected) - Math.abs(a.totalDetected));
+    .sort((a, b) => decisionTypeOrder(a.decisionType) - decisionTypeOrder(b.decisionType) || Math.abs(b.totalDetected) - Math.abs(a.totalDetected));
 }
 
 function createIgnoredRows(aggregates: readonly PayrollAggregate[]): IgnoredConceptRow[] {
@@ -374,7 +515,7 @@ export async function compareAnalysis(
     });
 
     if (employee) {
-      concepts.push(...createConceptRows(employee, aggregate, options));
+      concepts.push(...createConceptRows(employee, aggregate, options, person));
       const normalizedPlusVariables = employee.normalizedPlusVariables.total;
       const normalized = employee.normalized.total;
       const periodComplete = employee.periodComplete.total;
@@ -405,11 +546,26 @@ export async function compareAnalysis(
     }
   });
 
-  const unmappedConcepts = createUnmappedRows(aggregates);
+  const unmappedConcepts = createUnmappedRows(aggregates, conceptMap);
   const ignoredConcepts = createIgnoredRows(aggregates);
-  const peopleWithDifferences = people.filter((row) => row.status !== "OK").length;
+  const matchedPeopleRows = people.filter((row) => row.status !== "Sin Registro" && row.status !== "Sin PDF");
+  const pdfWithoutRegistro = people.filter((row) => row.status === "Sin Registro");
+  const registroWithoutPdf = people.filter((row) => row.status === "Sin PDF");
+  const peopleWithDifferences = matchedPeopleRows.filter((row) => row.status !== "OK").length;
   const reviewThreshold = options.reviewThreshold ?? options.tolerance;
   const incidentThreshold = options.incidentThreshold ?? 50;
+  const matchedSalaryDifference = roundMoney(matchedPeopleRows.reduce((sum, row) => sum + row.salaryDifference, 0));
+  const matchedSalaryComplementDifference = roundMoney(matchedPeopleRows.reduce((sum, row) => sum + row.salaryComplementDifference, 0));
+  const matchedExtraSalaryDifference = roundMoney(matchedPeopleRows.reduce((sum, row) => sum + row.extraSalaryDifference, 0));
+  const matchedTotalDifference = roundMoney(matchedPeopleRows.reduce((sum, row) => sum + row.totalDifference, 0));
+  const conceptsPendingReview = unmappedConcepts.filter((row) => row.decisionType === "Pendiente revision").length;
+  const conceptsIgnored = unmappedConcepts.filter((row) => row.decisionType === "Ignorado").length;
+  const conceptsRealUnmapped = unmappedConcepts.filter((row) => row.decisionType === "Sin mapear real").length;
+  const pendingDecisionPdfTotal = roundMoney(
+    unmappedConcepts
+      .filter((row) => row.decisionType === "Pendiente revision")
+      .reduce((sum, row) => sum + row.totalDetected, 0),
+  );
 
   return {
     summary: {
@@ -418,11 +574,25 @@ export async function compareAnalysis(
       pdfsFailed: 0,
       uniquePeople: allEmployeeNumbers.size,
       peopleWithDifferences,
-      totalSalaryDifference: roundMoney(people.reduce((sum, row) => sum + row.salaryDifference, 0)),
-      totalSalaryComplementDifference: roundMoney(people.reduce((sum, row) => sum + row.salaryComplementDifference, 0)),
-      totalExtraSalaryDifference: roundMoney(people.reduce((sum, row) => sum + row.extraSalaryDifference, 0)),
-      totalGlobalDifference: roundMoney(people.reduce((sum, row) => sum + row.totalDifference, 0)),
+      totalSalaryDifference: matchedSalaryDifference,
+      totalSalaryComplementDifference: matchedSalaryComplementDifference,
+      totalExtraSalaryDifference: matchedExtraSalaryDifference,
+      totalGlobalDifference: matchedTotalDifference,
+      matchedPeople: matchedPeopleRows.length,
+      matchedTotalDifference,
+      matchedSalaryDifference,
+      matchedSalaryComplementDifference,
+      matchedExtraSalaryDifference,
+      peopleInRegistroWithoutPdf: registroWithoutPdf.length,
+      peopleInPdfWithoutRegistro: pdfWithoutRegistro.length,
+      totalPdfWithoutRegistro: roundMoney(pdfWithoutRegistro.reduce((sum, row) => sum + row.pdfTotal, 0)),
       conceptsUnmapped: unmappedConcepts.length,
+      conceptsNotIncluded: unmappedConcepts.length,
+      conceptsIgnored,
+      conceptsPendingReview,
+      conceptsRealUnmapped,
+      pendingReviewAmount: pendingDecisionPdfTotal,
+      pendingDecisionPdfTotal,
       internalExcelDifferences: (options.internalExcelChecks ?? []).filter((row) => row.status !== "OK").length,
       groupingDifferences: 0,
       tolerance: options.tolerance,
@@ -438,6 +608,8 @@ export async function compareAnalysis(
     concepts,
     unmappedConcepts,
     ignoredConcepts,
+    pdfWithoutRegistro,
+    registroWithoutPdf,
     groupings: [],
     internalExcelChecks: options.internalExcelChecks ?? [],
     conceptMap,

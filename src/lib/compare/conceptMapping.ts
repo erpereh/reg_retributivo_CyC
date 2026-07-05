@@ -9,51 +9,70 @@ import type {
 } from "@/lib/types";
 import { normalizeComparableText } from "@/lib/utils/normalize";
 
-interface DefaultRule {
-  readonly pdfConcept: string;
+interface CodeLocation {
   readonly block: RetributionBlock;
   readonly blockKey: ConceptBlockKey;
+}
+
+interface DefaultRule {
+  readonly pdfConcept: string;
   readonly registroCode: string;
+  readonly status?: MappingStatus;
   readonly sourceType?: ConceptMappingSourceType;
   readonly allowInformative?: boolean;
   readonly dedupePriority?: ConceptDedupePriority;
 }
 
-const DEFAULT_INCLUDED: readonly DefaultRule[] = [
-  { pdfConcept: "Salario Base", block: "Salario", blockKey: "salary", registroCode: "SSP_SAL_BASE" },
-  { pdfConcept: "Paga Extra Prorrateada", block: "Salario", blockKey: "salary", registroCode: "CSP_P_EXT_PRORRAT_NN" },
-  { pdfConcept: "Paga Extra Junio", block: "Salario", blockKey: "salary", registroCode: "SSP_PAGA_EXTRA_1" },
-  { pdfConcept: "Paga Extra Diciembre", block: "Salario", blockKey: "salary", registroCode: "SSP_PAGA_EXTRA_2" },
-  { pdfConcept: "Paga 25 anos", block: "Salario", blockKey: "salary", registroCode: "CSP_I_PAGA_25_ANYOS" },
-  { pdfConcept: "Antiguedad", block: "C. Salarial", blockKey: "salaryComplement", registroCode: "SSP_ANTIGUEDAD" },
-  { pdfConcept: "Complemento Puesto de trabajo", block: "C. Salarial", blockKey: "salaryComplement", registroCode: "CSP_I_COMP_PTO_TRA" },
-  { pdfConcept: "Complemento Personal", block: "C. Salarial", blockKey: "salaryComplement", registroCode: "CSP_I_COMP_PERSONAL" },
-  { pdfConcept: "Plus Convenio", block: "C. Salarial", blockKey: "salaryComplement", registroCode: "SSP_PLUS_CONVENIO" },
-  { pdfConcept: "Plus de Transporte", block: "C. Salarial", blockKey: "salaryComplement", registroCode: "SSP_PLUS_TRANSPORTE" },
-  { pdfConcept: "Retribucion Variable", block: "C. Salarial", blockKey: "salaryComplement", registroCode: "CSP_I_RETRIB_VARIABLE" },
-  { pdfConcept: "Variable Comercial", block: "C. Salarial", blockKey: "salaryComplement", registroCode: "CSP_I_VARIABLE_COMERCIAL" },
-  { pdfConcept: "Comisiones Cross Sell", block: "C. Salarial", blockKey: "salaryComplement", registroCode: "CSP_I_COMISI_CROSS_SELL" },
-  { pdfConcept: "Participacion en Resultados", block: "C. Salarial", blockKey: "salaryComplement", registroCode: "CSP_I_PART_RESULTADOS" },
-  { pdfConcept: "Gratificacion una sola Vez", block: "C. Salarial", blockKey: "salaryComplement", registroCode: "CSP_I_GRATIF_1_VEZ" },
-  { pdfConcept: "Bolsa de Vacaciones", block: "C. Salarial", blockKey: "salaryComplement", registroCode: "SSP_VACACIONES" },
-  { pdfConcept: "Complementos de I.T.", block: "C. Salarial", blockKey: "salaryComplement", registroCode: "SSP_COMP_TOT_IT" },
-  { pdfConcept: "Compensacion Comida", block: "Extrasalarial", blockKey: "extraSalary", registroCode: "CSP_I_COMPENSACION_COMIDA" },
-  { pdfConcept: "Abono teletrabajo", block: "Extrasalarial", blockKey: "extraSalary", registroCode: "CSP_I_COMP_TELETR_COVID" },
-  { pdfConcept: "Lote de Navidad", block: "Extrasalarial", blockKey: "extraSalary", registroCode: "CSP_I_LOTE_NAVIDAD" },
-  { pdfConcept: "Seguro Medico", block: "Extrasalarial", blockKey: "extraSalary", registroCode: "CYC_SEG_SALUD" },
-  {
-    pdfConcept: "Seguro Medico mensual",
-    block: "Extrasalarial",
-    blockKey: "extraSalary",
-    registroCode: "CYC_SEG_SALUD",
-    sourceType: "informativo",
-    allowInformative: true,
-    dedupePriority: "informativo",
-  },
+interface IgnoredRule {
+  readonly pdfConcept: string;
+  readonly sourceType?: ConceptMappingSourceType;
+  readonly reason?: string;
+}
+
+const BLOCKS: ReadonlyArray<CodeLocation> = [
+  { block: "Salario", blockKey: "salary" },
+  { block: "C. Salarial", blockKey: "salaryComplement" },
+  { block: "Extrasalarial", blockKey: "extraSalary" },
+];
+
+const DEFAULT_RULES: readonly DefaultRule[] = [
+  { pdfConcept: "Salario Base", registroCode: "SSP_SAL_BASE" },
+  { pdfConcept: "Paga Extra Prorrateada", registroCode: "CSP_P_EXT_PRORRAT_NN" },
+  { pdfConcept: "Paga Extra Junio", registroCode: "SSP_PAGA_EXTRA_1" },
+  { pdfConcept: "Paga Extra Diciembre", registroCode: "SSP_PAGA_EXTRA_2" },
+  { pdfConcept: "Paga 25 anos", registroCode: "CSP_I_PAGA_25_ANYOS" },
+  { pdfConcept: "Antiguedad", registroCode: "SSP_ANTIGUEDAD" },
+  { pdfConcept: "Complemento Puesto de trabajo", registroCode: "CSP_I_COMP_PTO_TRA" },
+  { pdfConcept: "Complemento Personal", registroCode: "CSP_I_COMP_PERSONAL" },
+  { pdfConcept: "Complemento salario base organigrama", registroCode: "CSP_I_COMP_SB_ORG" },
+  { pdfConcept: "Complemento personal por no absentismo", registroCode: "CSP_I_COMP_PERS_N_ABS" },
+  { pdfConcept: "Plus Convenio", registroCode: "SSP_PLUS_CONVENIO" },
+  { pdfConcept: "Plus de Transporte", registroCode: "SSP_PLUS_TRANSPORTE" },
+  { pdfConcept: "Retribucion Variable", registroCode: "CSP_I_RETRIB_VARIABLE" },
+  { pdfConcept: "Variable Comercial", registroCode: "CSP_I_VARIABLE_COMERCIAL" },
+  { pdfConcept: "Comisiones Cross Sell", registroCode: "CSP_I_COMISI_CROSS_SELL" },
+  { pdfConcept: "Participacion en Resultados", registroCode: "CSP_I_PART_RESULTADOS" },
+  { pdfConcept: "Gratificacion una sola Vez", registroCode: "CSP_I_GRATIF_1_VEZ" },
+  { pdfConcept: "Bolsa de Vacaciones", registroCode: "SSP_VACACIONES" },
+  { pdfConcept: "Vacaciones", registroCode: "SSP_VACACIONES" },
+  { pdfConcept: "Complementos de I.T.", registroCode: "SSP_COMP_TOT_IT" },
+  { pdfConcept: "Prestacion de Enfermedad al 75", registroCode: "SSP_PREST_ENF_75" },
+  { pdfConcept: "Prestacion de Enfermedad al 60", registroCode: "SSP_PREST_ENF_60" },
+  { pdfConcept: "Enfermedad Cargo Empresa", registroCode: "SSP_TOT_E_CARGO_EMP" },
+  { pdfConcept: "Finiquito Primera Paga Extra", registroCode: "SSP_FINIQ_PAGA_1" },
+  { pdfConcept: "Finiquito Segunda Paga Extra", registroCode: "SSP_FINIQ_PAGA_2" },
+  { pdfConcept: "Finiquito Cuarta Paga Extra", registroCode: "SSP_FINIQ_PAGA_4" },
+  { pdfConcept: "Importe Beca Curricular", registroCode: "CSP_BECA_CURRICULAR" },
+  { pdfConcept: "Indemnizacion", registroCode: "SSP_INDEM_PAGO" },
+  { pdfConcept: "Reajuste", registroCode: "CSP_I_REAJUSTE" },
+  { pdfConcept: "Compensacion Comida", registroCode: "CSP_I_COMPENSACION_COMIDA" },
+  { pdfConcept: "Comida Tarjeta", registroCode: "CSP_I_TARJETA_COMIDA" },
+  { pdfConcept: "Ayuda Escolar hijos", registroCode: "CSP_I_AYU_ESCOLAR_HIJOS" },
+  { pdfConcept: "Abono teletrabajo", registroCode: "CSP_I_COMP_TELETR_COVID" },
+  { pdfConcept: "Lote de Navidad", registroCode: "CSP_I_LOTE_NAVIDAD" },
+  { pdfConcept: "Seguro Medico", registroCode: "CYC_SEG_SALUD" },
   {
     pdfConcept: "Seguro de vida mensual",
-    block: "Extrasalarial",
-    blockKey: "extraSalary",
     registroCode: "CSP_COT_SEG_VIDA_MENS",
     sourceType: "informativo",
     allowInformative: true,
@@ -61,8 +80,6 @@ const DEFAULT_INCLUDED: readonly DefaultRule[] = [
   },
   {
     pdfConcept: "Seguro de accidente mensual",
-    block: "Extrasalarial",
-    blockKey: "extraSalary",
     registroCode: "CSP_COT_PRIMA_ACC_MENS",
     sourceType: "informativo",
     allowInformative: true,
@@ -70,8 +87,6 @@ const DEFAULT_INCLUDED: readonly DefaultRule[] = [
   },
   {
     pdfConcept: "Plan de Pensiones Mensual",
-    block: "Extrasalarial",
-    blockKey: "extraSalary",
     registroCode: "CYC_PLAN_PENSIONES_ORD",
     sourceType: "informativo",
     allowInformative: true,
@@ -79,23 +94,31 @@ const DEFAULT_INCLUDED: readonly DefaultRule[] = [
   },
   {
     pdfConcept: "Plan de Pensiones Extraordinario Mensual",
-    block: "Extrasalarial",
-    blockKey: "extraSalary",
     registroCode: "CYC_PLAN_PENSIONES_EXTRAO_NN",
     sourceType: "informativo",
     allowInformative: true,
     dedupePriority: "informativo",
   },
-  { pdfConcept: "Kilometraje con Retencion", block: "Extrasalarial", blockKey: "extraSalary", registroCode: "SSP_KM_CON_RETEN" },
-  { pdfConcept: "Kilometraje sin Retencion", block: "Extrasalarial", blockKey: "extraSalary", registroCode: "SSP_KM_SIN_RETEN" },
+  { pdfConcept: "Kilometraje con Retencion", registroCode: "SSP_KM_CON_RETEN" },
+  { pdfConcept: "Kilometraje sin Retencion", registroCode: "SSP_KM_SIN_RETEN" },
+  {
+    pdfConcept: "Prestacion Teorica Maternidad",
+    registroCode: "CSP_I_AJUSTE_MATERNIDAD",
+    status: "Pendiente revisión",
+  },
 ];
 
-const IGNORED_CONCEPTS: ReadonlyArray<{ pdfConcept: string; sourceType?: ConceptMappingSourceType }> = [
+const IGNORED_CONCEPTS: readonly IgnoredRule[] = [
+  { pdfConcept: "Seguro Medico mensual", sourceType: "informativo", reason: "Informativo mensual excluido para no duplicar el devengo Seguro Medico." },
   { pdfConcept: "Especie Seguro Medico", sourceType: "unknown" },
   { pdfConcept: "Descuento Seguro Medico", sourceType: "deduccion" },
   { pdfConcept: "Descuento Transporte", sourceType: "deduccion" },
   { pdfConcept: "Cancelacion Prov (Dieta y KM)", sourceType: "deduccion" },
   { pdfConcept: "Aportacion Personal al PPSE", sourceType: "deduccion" },
+  { pdfConcept: "Anticipo Prorrateado", sourceType: "deduccion" },
+  { pdfConcept: "Rendimientos Irregulares", sourceType: "informativo" },
+  { pdfConcept: "Cuota Gimnasio", sourceType: "deduccion" },
+  { pdfConcept: "Exceso defecto paga anterior", sourceType: "unknown" },
   { pdfConcept: "Retencion a Cuenta del IRPF", sourceType: "retencion" },
   { pdfConcept: "Retencion a Cuenta IRPF Pagos", sourceType: "retencion" },
   { pdfConcept: "Cotizacion Regimen General Ind", sourceType: "retencion" },
@@ -108,29 +131,24 @@ export function normalizePdfConcept(value: string): string {
   return normalizeComparableText(value);
 }
 
-const INFORMATIVE_ALLOWED = new Set(
-  DEFAULT_INCLUDED.filter((rule) => rule.allowInformative).map((rule) => normalizePdfConcept(rule.pdfConcept)),
-);
-
-function hasCode(codes: AvailableConceptCodes, blockKey: ConceptBlockKey, code: string): boolean {
-  return codes[blockKey].some((available) => normalizeComparableText(available) === normalizeComparableText(code));
+function findCodeLocation(codes: AvailableConceptCodes, code: string): CodeLocation | undefined {
+  return BLOCKS.find(({ blockKey }) =>
+    codes[blockKey].some((available) => normalizeComparableText(available) === normalizeComparableText(code)),
+  );
 }
 
-function defaultSourceTypeForRule(rule: Pick<ConceptMappingRule, "pdfConcept" | "status" | "sourceType">): ConceptMappingSourceType {
+function fallbackLocation(): CodeLocation {
+  return { block: "C. Salarial", blockKey: "salaryComplement" };
+}
+
+function defaultSourceTypeForRule(rule: Pick<ConceptMappingRule, "status" | "sourceType">): ConceptMappingSourceType {
   if (rule.sourceType) {
     return rule.sourceType;
-  }
-  if (INFORMATIVE_ALLOWED.has(normalizePdfConcept(rule.pdfConcept))) {
-    return "informativo";
   }
   return rule.status === "Incluido" ? "devengo" : "unknown";
 }
 
-function defaultAllowInformative(rule: Pick<ConceptMappingRule, "pdfConcept" | "allowInformative">): boolean {
-  return rule.allowInformative ?? INFORMATIVE_ALLOWED.has(normalizePdfConcept(rule.pdfConcept));
-}
-
-function defaultDedupePriority(rule: Pick<ConceptMappingRule, "pdfConcept" | "dedupePriority" | "sourceType" | "status">): ConceptDedupePriority {
+function defaultDedupePriority(rule: Pick<ConceptMappingRule, "dedupePriority" | "sourceType" | "status">): ConceptDedupePriority {
   if (rule.dedupePriority) {
     return rule.dedupePriority;
   }
@@ -142,7 +160,7 @@ function normalizeRule(rule: ConceptMappingRule): ConceptMappingRule {
     ...rule,
     normalizedPdfConcept: rule.normalizedPdfConcept || normalizePdfConcept(rule.pdfConcept),
     sourceType: defaultSourceTypeForRule(rule),
-    allowInformative: defaultAllowInformative(rule),
+    allowInformative: rule.allowInformative ?? false,
     dedupePriority: defaultDedupePriority(rule),
     includedInComparison: rule.includedInComparison ?? rule.status === "Incluido",
   };
@@ -151,24 +169,31 @@ function normalizeRule(rule: ConceptMappingRule): ConceptMappingRule {
 export function buildDefaultConceptMap(codes: AvailableConceptCodes): ConceptMappingRule[] {
   const rules: ConceptMappingRule[] = [];
 
-  DEFAULT_INCLUDED.forEach((rule) => {
-    const exists = hasCode(codes, rule.blockKey, rule.registroCode);
+  DEFAULT_RULES.forEach((rule) => {
+    const location = findCodeLocation(codes, rule.registroCode);
+    const status = rule.status ?? (location ? "Incluido" : "Pendiente revisión");
+    const included = Boolean(location && status === "Incluido");
+    const visibleLocation = location ?? fallbackLocation();
     rules.push({
       pdfConcept: rule.pdfConcept,
       normalizedPdfConcept: normalizePdfConcept(rule.pdfConcept),
-      block: rule.block,
-      blockKey: rule.blockKey,
-      registroCode: exists ? rule.registroCode : undefined,
-      status: exists ? "Incluido" : "Pendiente revisión",
+      block: visibleLocation.block,
+      blockKey: visibleLocation.blockKey,
+      registroCode: location ? rule.registroCode : undefined,
+      status,
       sourceType: rule.sourceType ?? "devengo",
       allowInformative: rule.allowInformative ?? false,
       dedupePriority: rule.dedupePriority ?? "devengo",
-      includedInComparison: exists,
-      reason: exists ? "Mapeo por defecto validado contra codigos del Excel." : `El codigo ${rule.registroCode} no existe en el Excel cargado.`,
+      includedInComparison: included,
+      reason: location
+        ? status === "Incluido"
+          ? "Mapeo por defecto validado contra codigos del Excel."
+          : "Sugerencia de mapeo pendiente de revision; no incluida automaticamente."
+        : `El codigo ${rule.registroCode} no existe en el Excel cargado.`,
     });
   });
 
-  IGNORED_CONCEPTS.forEach(({ pdfConcept, sourceType }) => {
+  IGNORED_CONCEPTS.forEach(({ pdfConcept, sourceType, reason }) => {
     rules.push({
       pdfConcept,
       normalizedPdfConcept: normalizePdfConcept(pdfConcept),
@@ -179,7 +204,7 @@ export function buildDefaultConceptMap(codes: AvailableConceptCodes): ConceptMap
       allowInformative: false,
       dedupePriority: "informativo",
       includedInComparison: false,
-      reason: "Concepto conservadoramente excluido por ser deduccion, retencion, cotizacion, especie, informativo o coste empresa.",
+      reason: reason ?? "Concepto conservadoramente excluido por ser deduccion, retencion, cotizacion, especie, informativo o coste empresa.",
     });
   });
 
@@ -213,19 +238,25 @@ export function validateConceptMapForCodes(
 ): ConceptMappingRule[] {
   return mergeConceptMap(
     rules.map((rule) => {
-      if (rule.status !== "Incluido") {
+      if (!rule.registroCode) {
         return rule;
       }
-      const valid = Boolean(rule.registroCode && hasCode(codes, rule.blockKey, rule.registroCode));
-      return valid
-        ? rule
-        : {
-            ...rule,
-            registroCode: undefined,
-            status: "Pendiente revisión",
-            includedInComparison: false,
-            reason: "Regla no incluida porque el codigo no existe en el Excel cargado.",
-          };
+      const location = findCodeLocation(codes, rule.registroCode);
+      if (!location) {
+        return {
+          ...rule,
+          registroCode: undefined,
+          status: "Pendiente revisión",
+          includedInComparison: false,
+          reason: "Regla no incluida porque el codigo no existe en el Excel cargado.",
+        };
+      }
+      return {
+        ...rule,
+        block: location.block,
+        blockKey: location.blockKey,
+        includedInComparison: rule.status === "Incluido" && rule.includedInComparison !== false,
+      };
     }),
   );
 }

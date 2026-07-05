@@ -51,7 +51,16 @@ export function ChartsPanel({ result }: Readonly<{ result?: AnalysisResult }>) {
     .sort((a, b) => Math.abs(b.totalDifference) - Math.abs(a.totalDifference))
     .slice(0, 10)
     .map((item) => ({ name: item.employeeNumber, value: Math.abs(item.totalDifference) }));
-  const unmapped = (result.unmappedConcepts ?? []).slice(0, 10).map((item) => ({ name: item.pdfConcept, value: Math.abs(item.totalDetected) }));
+  const nonIncludedByDecision = (result.unmappedConcepts ?? []).reduce<Array<{ name: string; value: number }>>((rows, item) => {
+    const name = item.decisionType ?? (item.action === "Ignorado" ? "Ignorado" : "Sin mapear real");
+    const existing = rows.find((row) => row.name === name);
+    if (existing) {
+      existing.value += 1;
+    } else {
+      rows.push({ name, value: 1 });
+    }
+    return rows;
+  }, []);
 
   return (
     <section className="grid gap-4 xl:grid-cols-2">
@@ -88,9 +97,9 @@ export function ChartsPanel({ result }: Readonly<{ result?: AnalysisResult }>) {
           </BarChart>
         </ResponsiveContainer>
       </ChartCard>
-      <ChartCard title="Conceptos sin mapear por importe">
+      <ChartCard title="Conceptos no incluidos por tipo">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={unmapped} layout="vertical" margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+          <BarChart data={nonIncludedByDecision} layout="vertical" margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
             <CartesianGrid stroke="#E5E7EB" horizontal={false} />
             <XAxis type="number" tickLine={false} axisLine={false} />
             <YAxis dataKey="name" type="category" width={120} tickLine={false} axisLine={false} />

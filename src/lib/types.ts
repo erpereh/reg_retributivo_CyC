@@ -13,6 +13,7 @@ export type ConceptBlockKey = "salary" | "salaryComplement" | "extraSalary";
 export type MappingStatus = "Incluido" | "Ignorado" | "Pendiente revisión";
 export type ConceptMappingSourceType = "devengo" | "informativo" | "deduccion" | "retencion" | "coste_empresa" | "unknown";
 export type ConceptDedupePriority = "devengo" | "informativo";
+export type NonIncludedDecisionType = "Pendiente revision" | "Sin mapear real" | "Ignorado";
 export type AnalysisStatus = "OK" | "Revisar" | "Diferencia" | "Sin mapear" | "Sin PDF" | "Sin Registro";
 export type SalaryStatus = AnalysisStatus;
 export type AppView = "dashboard" | "personas" | "conceptos" | "agrupaciones" | "historial" | "ajustes";
@@ -195,6 +196,8 @@ export interface ConceptComparisonRow {
 }
 
 export interface UnmappedConceptRow {
+  readonly decisionType?: NonIncludedDecisionType;
+  readonly includedInComparison?: boolean;
   readonly pdfConcept: string;
   readonly totalDetected: number;
   readonly peopleCount: number;
@@ -203,6 +206,8 @@ export interface UnmappedConceptRow {
   readonly suggestedBlock?: RetributionBlock;
   readonly suggestedRegistroCode?: string;
   readonly action: MappingStatus;
+  readonly recommendedAction?: string;
+  readonly reason?: string;
 }
 
 export interface IgnoredConceptRow {
@@ -281,7 +286,21 @@ export interface AnalysisSummary {
   readonly totalSalaryComplementDifference: number;
   readonly totalExtraSalaryDifference: number;
   readonly totalGlobalDifference: number;
+  readonly matchedPeople?: number;
+  readonly matchedTotalDifference?: number;
+  readonly matchedSalaryDifference?: number;
+  readonly matchedSalaryComplementDifference?: number;
+  readonly matchedExtraSalaryDifference?: number;
+  readonly peopleInRegistroWithoutPdf?: number;
+  readonly peopleInPdfWithoutRegistro?: number;
+  readonly totalPdfWithoutRegistro?: number;
   readonly conceptsUnmapped: number;
+  readonly conceptsNotIncluded?: number;
+  readonly conceptsIgnored?: number;
+  readonly conceptsPendingReview?: number;
+  readonly conceptsRealUnmapped?: number;
+  readonly pendingReviewAmount?: number;
+  readonly pendingDecisionPdfTotal?: number;
   readonly internalExcelDifferences: number;
   readonly groupingDifferences: number;
   readonly tolerance: number;
@@ -340,6 +359,8 @@ export interface AnalysisResult {
   readonly concepts: readonly ConceptComparisonRow[];
   readonly unmappedConcepts: readonly UnmappedConceptRow[];
   readonly ignoredConcepts: readonly IgnoredConceptRow[];
+  readonly pdfWithoutRegistro?: readonly PersonComparisonRow[];
+  readonly registroWithoutPdf?: readonly PersonComparisonRow[];
   readonly groupings: readonly GroupingComparisonRow[];
   readonly internalExcelChecks: readonly InternalExcelCheckRow[];
   readonly conceptMap: readonly ConceptMappingRule[];

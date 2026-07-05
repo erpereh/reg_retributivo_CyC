@@ -148,10 +148,28 @@ describe("concept mapping", () => {
     expect(map.every((rule) => rule.status !== "Incluido" || rule.registroCode)).toBe(true);
     expect(map.every((rule) => rule.status !== "Incluido" || Boolean(rule.registroCode && registro.conceptCodes[rule.blockKey].includes(rule.registroCode)))).toBe(true);
     expect(map.find((rule) => normalizeComparableText(rule.pdfConcept) === "seguro medico mensual")).toMatchObject({
-      registroCode: "CYC_SEG_SALUD",
-      allowInformative: true,
-      includedInComparison: true,
+      status: "Ignorado",
+      includedInComparison: false,
       sourceType: "informativo",
+    });
+    expect(map.find((rule) => normalizeComparableText(rule.pdfConcept) === "complemento salario base organigrama")).toMatchObject({
+      status: "Incluido",
+      block: "C. Salarial",
+      blockKey: "salaryComplement",
+      registroCode: "CSP_I_COMP_SB_ORG",
+    });
+    expect(map.find((rule) => normalizeComparableText(rule.pdfConcept) === "prestacion de enfermedad al 75")).toMatchObject({
+      status: "Incluido",
+      block: "Salario",
+      blockKey: "salary",
+      registroCode: "SSP_PREST_ENF_75",
+    });
+    expect(map.find((rule) => normalizeComparableText(rule.pdfConcept) === "prestacion teorica maternidad")).toMatchObject({
+      status: "Pendiente revisión",
+      block: "C. Salarial",
+      blockKey: "salaryComplement",
+      registroCode: "CSP_I_AJUSTE_MATERNIDAD",
+      includedInComparison: false,
     });
     expect(map.find((rule) => normalizeComparableText(rule.pdfConcept) === "kilometraje con retencion")).toMatchObject({
       status: "Incluido",
@@ -160,6 +178,21 @@ describe("concept mapping", () => {
     expect(map.find((rule) => normalizeComparableText(rule.pdfConcept) === "kilometraje sin retencion")).toMatchObject({
       status: "Incluido",
       registroCode: "SSP_KM_SIN_RETEN",
+    });
+  });
+
+  test("resolves rule block from the Excel concept code location instead of hardcoded defaults", () => {
+    const map = buildDefaultConceptMap({
+      salary: [],
+      salaryComplement: ["CSP_I_PAGA_25_ANYOS"],
+      extraSalary: [],
+    });
+
+    expect(map.find((rule) => normalizeComparableText(rule.pdfConcept) === "paga 25 anos")).toMatchObject({
+      status: "Incluido",
+      block: "C. Salarial",
+      blockKey: "salaryComplement",
+      registroCode: "CSP_I_PAGA_25_ANYOS",
     });
   });
 });
@@ -335,16 +368,66 @@ describe("comparison engine", () => {
     const person10072 = result.people.find((row) => row.employeeNumber === "10072");
     const kmWithRetention = result.concepts.find((row) => row.employeeNumber === "10048" && row.registroCode === "SSP_KM_CON_RETEN");
     const kmWithoutRetention = result.concepts.find((row) => row.employeeNumber === "10048" && row.registroCode === "SSP_KM_SIN_RETEN");
+    const km10099WithRetention = result.concepts.find((row) => row.employeeNumber === "10099" && row.registroCode === "SSP_KM_CON_RETEN");
+    const km10099WithoutRetention = result.concepts.find((row) => row.employeeNumber === "10099" && row.registroCode === "SSP_KM_SIN_RETEN");
+    const org10075 = result.concepts.find((row) => row.employeeNumber === "10075" && row.registroCode === "CSP_I_COMP_SB_ORG");
+    const sick10123 = result.concepts.find((row) => row.employeeNumber === "10123" && row.registroCode === "SSP_PREST_ENF_75");
+    const employee10358 = result.concepts.filter((row) => row.employeeNumber === "10358");
 
     expect(concept10048Health?.registroAmount).toBeCloseTo(817.11, 2);
     expect(concept10048Health?.pdfAmount).toBeCloseTo(817.11, 2);
-    expect(Math.abs(person10048?.extraSalaryDifference ?? 0)).toBeGreaterThan(180);
-    expect(Math.abs(person10048?.extraSalaryDifference ?? 0)).toBeLessThan(240);
-    expect(Math.abs(person10050?.extraSalaryDifference ?? 0)).toBeGreaterThan(180);
-    expect(Math.abs(person10050?.extraSalaryDifference ?? 0)).toBeLessThan(240);
-    expect(Math.abs(person10072?.salaryComplementDifference ?? 0)).toBeCloseTo(841.92, 2);
+    expect(Math.abs(person10048?.totalDifference ?? 0)).toBeCloseTo(208.05, 2);
+    expect(Math.abs(person10050?.totalDifference ?? 0)).toBeCloseTo(208.01, 2);
+    expect(person10072?.salaryComplementDifference).toBeCloseTo(841.92, 2);
+    expect(Math.abs(person10072?.extraSalaryDifference ?? 0)).toBeCloseTo(208.01, 2);
     expect(kmWithRetention?.pdfAmount).toBeGreaterThan(0);
     expect(kmWithoutRetention?.pdfAmount).toBeGreaterThan(0);
+    expect(km10099WithRetention?.pdfAmount).toBeCloseTo(km10099WithRetention?.registroAmount ?? 0, 2);
+    expect(km10099WithoutRetention?.pdfAmount).toBeCloseTo(km10099WithoutRetention?.registroAmount ?? 0, 2);
+    expect(org10075?.pdfAmount).toBeGreaterThan(0);
+    expect(result.unmappedConcepts.map((row) => normalizeComparableText(row.pdfConcept))).not.toContain("complemento salario base organigrama");
+    expect(sick10123?.pdfAmount).toBeGreaterThan(0);
+    expect(result.unmappedConcepts.map((row) => normalizeComparableText(row.pdfConcept))).not.toContain("prestacion de enfermedad al 75");
+    expect(employee10358.find((row) => row.registroCode === "SSP_SAL_BASE")?.pdfAmount).toBeGreaterThan(0);
+    expect(employee10358.find((row) => row.registroCode === "SSP_ANTIGUEDAD")?.pdfAmount).toBeGreaterThan(0);
+    expect(employee10358.find((row) => row.registroCode === "CSP_P_EXT_PRORRAT_NN")?.pdfAmount).toBeGreaterThan(0);
+    expect(employee10358.find((row) => row.registroCode === "CSP_I_COMP_PTO_TRA")?.pdfAmount).toBeGreaterThan(0);
+    expect(result.summary.totalGlobalDifference).toBe(result.summary.matchedTotalDifference);
+    expect(result.summary.peopleInPdfWithoutRegistro).toBe(9);
+    expect(result.summary.peopleInRegistroWithoutPdf).toBeGreaterThanOrEqual(0);
+    expect(result.summary.conceptsPendingReview).toBe(2);
+    expect(result.summary.conceptsIgnored).toBe(35);
+    expect(result.summary.conceptsNotIncluded).toBe(37);
+    expect(result.summary.pendingDecisionPdfTotal).toBeCloseTo(16358.04, 2);
+
+    const nonIncludedOrder = result.unmappedConcepts.map((row) => row.decisionType);
+    expect(nonIncludedOrder.slice(0, 2)).toEqual(["Pendiente revision", "Pendiente revision"]);
+    expect(nonIncludedOrder.lastIndexOf("Pendiente revision")).toBe(1);
+
+    const maternity = result.unmappedConcepts.find((row) => normalizeComparableText(row.pdfConcept) === "prestacion teorica maternidad");
+    expect(maternity).toMatchObject({
+      decisionType: "Pendiente revision",
+      includedInComparison: false,
+      suggestedBlock: "C. Salarial",
+      suggestedRegistroCode: "CSP_I_AJUSTE_MATERNIDAD",
+    });
+    expect(maternity?.reason).toContain("teorica");
+
+    const fortyYears = result.unmappedConcepts.find((row) => normalizeComparableText(row.pdfConcept) === "paga 40 anos");
+    expect(fortyYears).toMatchObject({
+      decisionType: "Pendiente revision",
+      includedInComparison: false,
+      suggestedBlock: "C. Salarial",
+    });
+    expect(fortyYears?.suggestedRegistroCode).toBeUndefined();
+    expect(fortyYears?.reason).toContain("No existe codigo exacto");
+
+    const ignoredHealth = result.unmappedConcepts.find((row) => normalizeComparableText(row.pdfConcept) === "seguro medico mensual");
+    expect(ignoredHealth).toMatchObject({
+      decisionType: "Ignorado",
+      includedInComparison: false,
+    });
+    expect(ignoredHealth?.reason).toContain("duplicado");
   });
 });
 
@@ -364,9 +447,27 @@ describe("Excel export", () => {
       "Personas",
       "Normalizado_vs_Real",
       "Conceptos",
-      "Conceptos_sin_mapear",
+      "Conceptos_no_incluidos",
+      "PDF_sin_Registro",
+      "Registro_sin_PDF",
+      "Agrupaciones",
       "Cuadre_Interno_Excel",
       "Criterios",
+    ]);
+    expect(workbook.getWorksheet("Agrupaciones")?.getCell("A2").value).toBe("Pendiente de implementacion");
+    expect(workbook.getWorksheet("Conceptos_no_incluidos")?.getRow(1).values).toEqual([
+      undefined,
+      "Tipo decision",
+      "Incluido en calculo",
+      "Concepto PDF",
+      "Total detectado",
+      "N personas",
+      "N nominas",
+      "Ejemplos matriculas",
+      "Sugerencia bloque",
+      "Sugerencia codigo Registro",
+      "Accion recomendada",
+      "Motivo",
     ]);
 
     const buffer = await workbook.xlsx.writeBuffer();

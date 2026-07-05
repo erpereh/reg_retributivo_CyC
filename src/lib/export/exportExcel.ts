@@ -30,8 +30,17 @@ function addResumen(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void 
     ["Dif. total salario", analysis.summary.totalSalaryDifference],
     ["Dif. total C. salarial", analysis.summary.totalSalaryComplementDifference],
     ["Dif. total extrasalarial", analysis.summary.totalExtraSalaryDifference],
-    ["Dif. total global", analysis.summary.totalGlobalDifference],
-    ["Conceptos sin mapear", analysis.summary.conceptsUnmapped],
+    ["Dif. total matched Registro/PDF", analysis.summary.matchedTotalDifference ?? analysis.summary.totalGlobalDifference],
+    ["Personas matched Registro/PDF", analysis.summary.matchedPeople ?? 0],
+    ["Personas en Registro sin PDF", analysis.summary.peopleInRegistroWithoutPdf ?? 0],
+    ["Personas en PDF sin Registro", analysis.summary.peopleInPdfWithoutRegistro ?? 0],
+    ["Total PDF sin Registro", analysis.summary.totalPdfWithoutRegistro ?? 0],
+    ["Importe PDF pendiente de decision", analysis.summary.pendingDecisionPdfTotal ?? 0],
+    ["Conceptos pendientes revision", analysis.summary.conceptsPendingReview ?? 0],
+    ["Conceptos sin mapear real", analysis.summary.conceptsRealUnmapped ?? 0],
+    ["Conceptos ignorados", analysis.summary.conceptsIgnored ?? 0],
+    ["Conceptos no incluidos", analysis.summary.conceptsNotIncluded ?? analysis.summary.conceptsUnmapped],
+    ["Nota pendiente decision", "Importe PDF pendiente de decision, no incluido en el calculo principal"],
     ["Cuadres internos con diferencias", analysis.summary.internalExcelDifferences],
     ["Tolerancia", analysis.summary.tolerance],
   ].forEach((row) => sheet.addRow(row));
@@ -154,25 +163,41 @@ function addConceptos(workbook: ExcelJS.Workbook, analysis: AnalysisResult): voi
   styleBodyRows(sheet);
 }
 
-function addSinMapear(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void {
-  const sheet = workbook.addWorksheet("Conceptos_sin_mapear");
+function addConceptosNoIncluidos(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void {
+  const sheet = workbook.addWorksheet("Conceptos_no_incluidos");
   sheet.views = [{ state: "frozen", ySplit: 1 }];
-  sheet.addRow(["Concepto PDF", "Total detectado", "N personas", "N nominas", "Sugerencia bloque", "Sugerencia codigo Registro", "Accion"]);
+  sheet.addRow([
+    "Tipo decision",
+    "Incluido en calculo",
+    "Concepto PDF",
+    "Total detectado",
+    "N personas",
+    "N nominas",
+    "Ejemplos matriculas",
+    "Sugerencia bloque",
+    "Sugerencia codigo Registro",
+    "Accion recomendada",
+    "Motivo",
+  ]);
   styleHeaderRow(sheet.getRow(1));
   analysis.unmappedConcepts.forEach((item) => {
     const row = sheet.addRow([
+      item.decisionType ?? (item.action === "Ignorado" ? "Ignorado" : "Sin mapear real"),
+      item.includedInComparison ? "Si" : "No",
       item.pdfConcept,
       item.totalDetected,
       item.peopleCount,
       item.payrollCount,
+      item.exampleEmployeeNumbers.join("; "),
       item.suggestedBlock,
       item.suggestedRegistroCode,
-      item.action,
+      item.recommendedAction ?? item.action,
+      item.reason,
     ]);
-    applyStatusStyle(row.getCell(7), item.action);
+    applyStatusStyle(row.getCell(1), item.action);
   });
-  moneyColumns(sheet, [2]);
-  configureColumns(sheet, [44, 18, 14, 14, 22, 32, 22]);
+  moneyColumns(sheet, [4]);
+  configureColumns(sheet, [22, 18, 44, 18, 14, 14, 24, 22, 32, 44, 72]);
   styleBodyRows(sheet);
 }
 
@@ -214,6 +239,69 @@ function addCuadreInterno(workbook: ExcelJS.Workbook, analysis: AnalysisResult):
   styleBodyRows(sheet);
 }
 
+function addPersonasSinRegistro(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void {
+  const sheet = workbook.addWorksheet("PDF_sin_Registro");
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
+  sheet.addRow(["Matricula", "Persona", "Centro", "Total PDF", "Recibos", "Periodos", "Archivos"]);
+  styleHeaderRow(sheet.getRow(1));
+  (analysis.pdfWithoutRegistro ?? analysis.people.filter((item) => item.status === "Sin Registro")).forEach((item) => {
+    sheet.addRow([
+      item.employeeNumber,
+      item.person,
+      item.workplace,
+      item.pdfTotal,
+      item.payrollCount,
+      item.periods.join("; "),
+      item.files.join("; "),
+    ]);
+  });
+  moneyColumns(sheet, [4]);
+  configureColumns(sheet, [14, 32, 24, 18, 14, 42, 60]);
+  styleBodyRows(sheet);
+}
+
+function addRegistroSinPdf(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void {
+  const sheet = workbook.addWorksheet("Registro_sin_PDF");
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
+  sheet.addRow(["Matricula", "Persona", "Centro", "Puesto", "Categoria", "Total Registro"]);
+  styleHeaderRow(sheet.getRow(1));
+  (analysis.registroWithoutPdf ?? analysis.people.filter((item) => item.status === "Sin PDF")).forEach((item) => {
+    sheet.addRow([item.employeeNumber, item.person, item.workplace, item.position, item.category, item.registroTotal]);
+  });
+  moneyColumns(sheet, [6]);
+  configureColumns(sheet, [14, 32, 24, 34, 30, 18]);
+  styleBodyRows(sheet);
+}
+
+function addAgrupaciones(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void {
+  const sheet = workbook.addWorksheet("Agrupaciones");
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
+  sheet.addRow(["Estado", "Hoja", "Grupo", "Metrica", "Bloque", "Sexo", "Registro", "PDF recalculado", "Diferencia", "Detalle"]);
+  styleHeaderRow(sheet.getRow(1));
+  if (!analysis.groupings.length) {
+    sheet.addRow(["Pendiente de implementacion"]);
+  } else {
+    analysis.groupings.forEach((item) => {
+      const row = sheet.addRow([
+        item.status,
+        item.sheet,
+        item.group,
+        item.metric,
+        item.block,
+        item.sex,
+        item.registro,
+        item.pdfRecalculated,
+        item.difference,
+        item.detail,
+      ]);
+      applyStatusStyle(row.getCell(1), item.status);
+    });
+    moneyColumns(sheet, [7, 8, 9]);
+  }
+  configureColumns(sheet, [46, 24, 30, 28, 18, 14, 18, 18, 18, 60]);
+  styleBodyRows(sheet);
+}
+
 function addCriterios(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void {
   const sheet = workbook.addWorksheet("Criterios");
   sheet.mergeCells("A1:B1");
@@ -246,7 +334,10 @@ export async function exportAnalysisToWorkbook(analysis: AnalysisResult): Promis
   addPersonas(workbook, analysis);
   addNormalizado(workbook, analysis);
   addConceptos(workbook, analysis);
-  addSinMapear(workbook, analysis);
+  addConceptosNoIncluidos(workbook, analysis);
+  addPersonasSinRegistro(workbook, analysis);
+  addRegistroSinPdf(workbook, analysis);
+  addAgrupaciones(workbook, analysis);
   addCuadreInterno(workbook, analysis);
   addCriterios(workbook, analysis);
 

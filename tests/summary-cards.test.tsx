@@ -18,6 +18,11 @@ describe("dashboard summary cards", () => {
       totalExtraSalaryDifference: 0,
       totalGlobalDifference: 0,
       conceptsUnmapped: 0,
+      conceptsNotIncluded: 37,
+      conceptsIgnored: 35,
+      conceptsPendingReview: 2,
+      conceptsRealUnmapped: 0,
+      pendingDecisionPdfTotal: 16358.04,
       internalExcelDifferences: 0,
       groupingDifferences: 0,
       tolerance: 1,
@@ -27,5 +32,8 @@ describe("dashboard summary cards", () => {
 
     expect(screen.getByText("Recibos procesados").textContent).toBe("Recibos procesados");
     expect(screen.queryByText("PDFs analizados")).toBeNull();
+    expect(screen.queryByText("Conceptos sin mapear")).toBeNull();
+    expect(screen.getByText("Pendientes revision")).toBeTruthy();
+    expect(screen.getByText("Importe PDF pendiente de decision, no incluido en el calculo principal")).toBeTruthy();
   });
 });

@@ -213,27 +213,32 @@ function ConceptosTable() {
       </Card>
       <Card className="overflow-hidden p-0">
         <div className="border-b border-line px-5 py-4">
-          <h2 className="text-lg font-semibold text-ink">Conceptos sin mapear</h2>
+          <h2 className="text-lg font-semibold text-ink">Conceptos no incluidos</h2>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-left text-sm">
+          <table className="w-full min-w-[1280px] text-left text-sm">
             <thead className="bg-slate-50 text-muted">
-              <tr>{["Concepto PDF", "Total detectado", "Personas", "Nóminas", "Ejemplos", "Acción"].map((header) => <th key={header} className="border-b border-line px-4 py-3 text-xs font-semibold uppercase">{header}</th>)}</tr>
+              <tr>{["Tipo decision", "Incluido", "Concepto PDF", "Total detectado", "Personas", "Nominas", "Ejemplos", "Sugerencia bloque", "Sugerencia codigo", "Accion recomendada", "Motivo"].map((header) => <th key={header} className="border-b border-line px-4 py-3 text-xs font-semibold uppercase">{header}</th>)}</tr>
             </thead>
             <tbody>
               {unmapped.map((row) => (
                 <tr key={row.pdfConcept} className="hover:bg-blue-50/70">
+                  <td className="border-b border-line/70 px-4 py-4"><Badge value={row.decisionType ?? (row.action === "Ignorado" ? "Ignorado" : "Sin mapear real")} /></td>
+                  <td className="border-b border-line/70 px-4 py-4">{row.includedInComparison ? "Si" : "No"}</td>
                   <td className="border-b border-line/70 px-4 py-4 font-semibold">{row.pdfConcept}</td>
                   <td className="border-b border-line/70 px-4 py-4 text-right font-mono">{formatEuro(row.totalDetected)}</td>
                   <td className="border-b border-line/70 px-4 py-4 text-right font-mono">{row.peopleCount}</td>
                   <td className="border-b border-line/70 px-4 py-4 text-right font-mono">{row.payrollCount}</td>
                   <td className="border-b border-line/70 px-4 py-4 font-mono">{row.exampleEmployeeNumbers.join("; ")}</td>
-                  <td className="border-b border-line/70 px-4 py-4"><Badge value={row.action} /></td>
+                  <td className="border-b border-line/70 px-4 py-4">{row.suggestedBlock}</td>
+                  <td className="border-b border-line/70 px-4 py-4 font-mono">{row.suggestedRegistroCode}</td>
+                  <td className="border-b border-line/70 px-4 py-4">{row.recommendedAction ?? row.action}</td>
+                  <td className="border-b border-line/70 px-4 py-4"><DetailButton detail={row.reason ?? ""} /></td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {!unmapped.length ? <p className="p-6 text-sm text-muted">No hay conceptos sin mapear.</p> : null}
+          {!unmapped.length ? <p className="p-6 text-sm text-muted">No hay conceptos no incluidos.</p> : null}
         </div>
       </Card>
     </div>
@@ -246,8 +251,8 @@ function AgrupacionesTable() {
   return (
     <EmptyState
       icon={Table2}
-      title={rows.length ? "Agrupaciones calculadas" : "Agrupaciones en fase posterior"}
-      description="La primera fase prioriza Registro vs PDF, conceptos y normalizado vs real. Las agrupaciones se implementan después sin bloquear la validación de importes."
+      title={rows.length ? "Agrupaciones calculadas" : "Pendiente de implementacion"}
+      description="La primera fase prioriza Registro vs PDF, conceptos y normalizado vs real. Las agrupaciones se implementan despues sin bloquear la validacion de importes."
     />
   );
 }

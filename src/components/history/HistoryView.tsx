@@ -59,8 +59,9 @@ function HistoryCard({
                 ["PDFs", analysis.pdfCount],
                 ["Personas", summary?.uniquePeople ?? 0],
                 ["Con diferencias", summary?.peopleWithDifferences ?? 0],
-                ["Sin mapear", summary?.conceptsUnmapped ?? 0],
-                ["Dif. total", formatEuro(summary?.totalGlobalDifference ?? 0)],
+                ["Pendientes", summary?.conceptsPendingReview ?? 0],
+                ["Ignorados", summary?.conceptsIgnored ?? 0],
+                ["Dif. matched", formatEuro(summary?.matchedTotalDifference ?? summary?.totalGlobalDifference ?? 0)],
               ].map(([label, value]) => (
                 <div key={label as string} className="rounded-2xl bg-slate-50 px-4 py-3">
                   <dt className="text-xs font-semibold uppercase text-muted">{label as string}</dt>

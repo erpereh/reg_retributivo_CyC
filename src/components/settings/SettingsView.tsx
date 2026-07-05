@@ -10,6 +10,34 @@ import { Toggle } from "@/components/common/Toggle";
 import { normalizePdfConcept } from "@/lib/compare/conceptMapping";
 import type { ConceptMappingRule } from "@/lib/types";
 
+const PENDING_REVIEW_RULE_TEMPLATES: readonly ConceptMappingRule[] = [
+  {
+    pdfConcept: "Prestacion Teorica Maternidad",
+    normalizedPdfConcept: normalizePdfConcept("Prestacion Teorica Maternidad"),
+    block: "C. Salarial",
+    blockKey: "salaryComplement",
+    registroCode: "CSP_I_AJUSTE_MATERNIDAD",
+    status: "Pendiente revisión",
+    sourceType: "devengo",
+    allowInformative: false,
+    dedupePriority: "devengo",
+    includedInComparison: false,
+    reason: "Concepto teorica con codigo similar en Registro a 0; no se incluye automaticamente.",
+  },
+  {
+    pdfConcept: "Paga 40 Anos",
+    normalizedPdfConcept: normalizePdfConcept("Paga 40 Anos"),
+    block: "C. Salarial",
+    blockKey: "salaryComplement",
+    status: "Pendiente revisión",
+    sourceType: "devengo",
+    allowInformative: false,
+    dedupePriority: "devengo",
+    includedInComparison: false,
+    reason: "No existe codigo exacto de Paga 40 Anos en Registro; no se mapea automaticamente.",
+  },
+];
+
 function NumberSetting({
   id,
   label,
@@ -115,6 +143,17 @@ export function SettingsView() {
     }
   }
 
+  function addPendingReviewTemplates() {
+    const existing = new Set((settings.conceptMap ?? []).map((rule) => normalizePdfConcept(rule.pdfConcept)));
+    const next = [
+      ...(settings.conceptMap ?? []),
+      ...PENDING_REVIEW_RULE_TEMPLATES.filter((rule) => !existing.has(normalizePdfConcept(rule.pdfConcept))),
+    ];
+    updateSettings({ conceptMap: next });
+    setMapDraft(JSON.stringify(next, null, 2));
+    setMapMessage("Plantillas pendientes añadidas fuera del calculo. Edita includedInComparison/status solo si procede.");
+  }
+
   return (
     <div className="space-y-6">
       <SectionHeader
@@ -207,6 +246,17 @@ export function SettingsView() {
           <div>
             <h2 className="text-xl font-semibold text-ink">Mapa de conceptos</h2>
             <p className="text-sm text-muted">Reglas manuales PDF → código Registro. Los códigos se revalidan contra el Excel cargado antes de analizar.</p>
+          </div>
+        </div>
+        <div className="mt-5 rounded-2xl bg-slate-50 p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-ink">Pendientes activables manualmente</p>
+              <p className="mt-1 text-sm text-muted">Prestacion Teorica Maternidad y Paga 40 Anos quedan fuera del calculo por defecto.</p>
+            </div>
+            <button type="button" onClick={addPendingReviewTemplates} className="btn-secondary">
+              Añadir plantillas pendientes
+            </button>
           </div>
         </div>
         <textarea

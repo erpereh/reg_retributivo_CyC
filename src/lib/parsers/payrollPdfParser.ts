@@ -107,16 +107,30 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function cleanConceptName(line: string, amountText: string): string {
-  return line
-    .replace(/\s*-?\d{1,3}(?:\.\d{3})*,\d{2}\s*$/, "")
+function extractConceptAmount(line: string): { amount: number; amountText: string; trailingText: string } | undefined {
+  const match = line.match(/(-?\d{1,3}(?:\.\d{3})*,\d{2})(?:0,\d{4})?\s*$/);
+  if (!match) {
+    return undefined;
+  }
+  const amount = parseSpanishMoney(match[1]);
+  if (amount === undefined) {
+    return undefined;
+  }
+  return { amount, amountText: match[1], trailingText: match[0].trim() };
+}
+
+function cleanConceptName(line: string, amountText: string, trailingText = amountText): string {
+  let name = line
+    .replace(new RegExp(`\\s*${escapeRegExp(trailingText)}\\s*$`), "")
     .replace(/^\d{1,2},\d{2}\s+%\s+\d{1,3}(?:\.\d{3})*,\d{2}\s+/, "")
-    .replace(/^\d{1,2},\d{2}\s+/, "")
-    .replace(/^\d{1,3}(?:\.\d{3})*,\d{2}\s+/, "")
     .replace(new RegExp(escapeRegExp(amountText), "g"), "")
     .replace(/\*{3}/g, "")
     .replace(/\s+/g, " ")
     .trim();
+  while (/^\d{1,3}(?:\.\d{3})*,\d{2}\s+/.test(name)) {
+    name = name.replace(/^\d{1,3}(?:\.\d{3})*,\d{2}\s+/, "").trim();
+  }
+  return name;
 }
 
 function parseConcepts(text: string): PayrollConcept[] {
@@ -132,18 +146,17 @@ function parseConcepts(text: string): PayrollConcept[] {
       continue;
     }
 
-    const amountMatch = line.match(/(-?\d{1,3}(?:\.\d{3})*,\d{2})\s*$/);
-    if (!amountMatch) {
+    const parsedAmount = extractConceptAmount(line);
+    if (!parsedAmount) {
       continue;
     }
 
-    const amount = parseSpanishMoney(amountMatch[1]);
-    const name = cleanConceptName(line, amountMatch[1]);
-    if (amount === undefined || !name || name.length < 3 || !/\p{L}/u.test(name) || isResidualConceptName(name)) {
+    const name = cleanConceptName(line, parsedAmount.amountText, parsedAmount.trailingText);
+    if (!name || name.length < 3 || !/\p{L}/u.test(name) || isResidualConceptName(name)) {
       continue;
     }
 
-    concepts.push({ name, amount, type: classifyConcept(name, isInformativeSection) });
+    concepts.push({ name, amount: parsedAmount.amount, type: classifyConcept(name, isInformativeSection) });
   }
 
   return concepts;
