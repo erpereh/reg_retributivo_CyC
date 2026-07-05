@@ -39,5 +39,8 @@ describe("dashboard summary cards", () => {
     expect(screen.getByText("Conceptos sin mapear reales")).toBeTruthy();
     expect(screen.getByText("Importe pendiente de decisión")).toBeTruthy();
     expect(screen.getByText("Importe PDF pendiente de decisión, no incluido en el cálculo principal")).toBeTruthy();
+    expect(screen.getByText(/requieren decision/i)).toBeTruthy();
+    expect(screen.getByText(/excluidos correctamente/i)).toBeTruthy();
+    expect(screen.getByText(/problema real de mapeo/i)).toBeTruthy();
   });
 });

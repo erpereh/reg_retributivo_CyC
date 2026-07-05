@@ -81,10 +81,13 @@ export function UploadPanel() {
     updateSettings,
     analyze,
     status,
+    aiStatus,
   } = useAppState();
   const reduceMotion = useReducedMotion();
   const disabled = analyzing;
   const canAnalyze = pdfFiles.length > 0 && Boolean(registroFile) && !analyzing;
+  const missingReason = !pdfFiles.length ? "Faltan PDFs de nomina." : !registroFile ? "Falta el Excel Registro." : "Listo para analizar.";
+  const aiLabel = aiStatus?.configured ? (settings.enableAIByDefault ? "IA activa" : "IA desactivada") : "IA sin API";
 
   return (
     <Card className="p-5 sm:p-6">
@@ -198,6 +201,7 @@ export function UploadPanel() {
               description="Gemini solo redacta observaciones si hay API key."
               disabled={disabled}
             />
+            <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-muted">{aiLabel}</p>
           </div>
 
           <button type="button" onClick={analyze} disabled={!canAnalyze} className="btn-primary mt-5 w-full">
@@ -205,7 +209,7 @@ export function UploadPanel() {
             {analyzing ? "Analizando..." : "Analizar"}
           </button>
           <p className={cn("mt-3 text-sm leading-5 text-muted", analyzing && "animate-pulse")} aria-live="polite">
-            {analyzing ? "Analizando nóminas..." : status}
+            {analyzing ? "Analizando nóminas..." : canAnalyze ? status : missingReason}
           </p>
         </div>
       </div>

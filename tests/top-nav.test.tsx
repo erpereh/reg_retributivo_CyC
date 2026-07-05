@@ -9,6 +9,8 @@ const appState = vi.hoisted(() => ({
   value: {
     view: "dashboard",
     result: undefined,
+    activeAnalysis: undefined,
+    aiStatus: undefined,
     exporting: false,
     setView: vi.fn(),
     exportActiveAnalysis: vi.fn(),
@@ -24,6 +26,8 @@ describe("TopNav", () => {
   beforeEach(() => {
     appState.value.view = "dashboard";
     appState.value.result = undefined;
+    appState.value.activeAnalysis = undefined;
+    appState.value.aiStatus = undefined;
     appState.value.exporting = false;
     appState.value.setView.mockClear();
     appState.value.exportActiveAnalysis.mockClear();
@@ -46,5 +50,19 @@ describe("TopNav", () => {
     fireEvent.click(screen.getByRole("button", { name: /Nuevo análisis/i }));
 
     expect(appState.value.resetForNewAnalysis).toHaveBeenCalledTimes(1);
+  });
+
+  test("shows compact active analysis date and AI status", () => {
+    appState.value.result = {};
+    appState.value.activeAnalysis = {
+      createdAt: "2026-07-05T18:30:00.000Z",
+      config: { enableAI: true },
+    };
+    appState.value.aiStatus = { configured: true, enabled: true, model: "gemini-test" };
+
+    render(<TopNav />);
+
+    expect(screen.getByText(/Analisis activo/i)).toBeTruthy();
+    expect(screen.getByText(/IA activa/i)).toBeTruthy();
   });
 });

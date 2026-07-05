@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, FileSpreadsheet, RotateCcw } from "lucide-react";
+import { Clock3, Download, FileSpreadsheet, RotateCcw, Sparkles } from "lucide-react";
 import { motion } from "motion/react";
 import { useAppState } from "@/components/app/AppState";
 import type { AppView } from "@/lib/types";
@@ -16,13 +16,17 @@ const TABS: ReadonlyArray<{ id: AppView; label: string }> = [
 ];
 
 export function TopNav() {
-  const { view, setView, result, exporting, exportActiveAnalysis, resetForNewAnalysis } = useAppState();
+  const { view, setView, result, activeAnalysis, aiStatus, exporting, exportActiveAnalysis, resetForNewAnalysis } = useAppState();
+  const analysisDate = activeAnalysis
+    ? new Intl.DateTimeFormat("es-ES", { dateStyle: "short", timeStyle: "short" }).format(new Date(activeAnalysis.createdAt))
+    : undefined;
+  const aiEnabled = Boolean(activeAnalysis?.config.enableAI && (aiStatus?.enabled ?? true));
 
   return (
-    <header className="relative z-30">
+    <header className="sticky top-3 z-30">
       <nav
         aria-label="Navegación principal"
-        className="flex flex-col gap-4 rounded-[32px] border border-white/80 bg-white/95 p-4 shadow-nav backdrop-blur md:flex-row md:items-center md:justify-between"
+        className="flex flex-col gap-4 rounded-[28px] border border-white/80 bg-white/90 p-3 shadow-nav backdrop-blur-xl md:flex-row md:items-center md:justify-between"
       >
         <div className="flex items-center gap-3">
           <span className="flex h-11 w-11 items-center justify-center rounded-full bg-primary text-white shadow-blue">
@@ -31,7 +35,7 @@ export function TopNav() {
           <span className="text-xl font-semibold text-ink">Retributivo</span>
         </div>
 
-        <div className="flex flex-wrap rounded-full bg-slate-100 p-1" role="tablist" aria-label="Vistas">
+        <div className="flex overflow-x-auto rounded-full bg-slate-100 p-1" role="tablist" aria-label="Vistas">
           {TABS.map((tab) => {
             const active = view === tab.id;
             return (
@@ -59,12 +63,22 @@ export function TopNav() {
           })}
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => void exportActiveAnalysis()} disabled={!result || exporting} className="btn-secondary">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {activeAnalysis ? (
+            <div className="flex min-h-11 items-center gap-2 rounded-full border border-line bg-white px-3 text-xs font-semibold text-muted shadow-subtle">
+              <Clock3 className="h-4 w-4 text-primary" aria-hidden="true" />
+              <span className="hidden sm:inline">Analisis activo</span>
+              <span className="text-ink">{analysisDate}</span>
+              <span className="mx-1 h-4 w-px bg-line" aria-hidden="true" />
+              <Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />
+              <span className={aiEnabled ? "text-success" : "text-muted"}>{aiEnabled ? "IA activa" : "IA inactiva"}</span>
+            </div>
+          ) : null}
+          <button type="button" onClick={() => void exportActiveAnalysis()} disabled={!result || exporting} className="btn-secondary min-w-[150px]">
             <Download className="h-4 w-4" aria-hidden="true" />
             {exporting ? "Exportando..." : "Exportar Excel"}
           </button>
-          <button type="button" onClick={resetForNewAnalysis} className="btn-primary">
+          <button type="button" onClick={resetForNewAnalysis} className="btn-primary min-w-[150px]">
             <RotateCcw className="h-4 w-4" aria-hidden="true" />
             Nuevo análisis
           </button>

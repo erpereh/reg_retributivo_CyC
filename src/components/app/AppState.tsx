@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { AnalysisConfig, AnalysisResult, AppView, StoredAnalysis } from "@/lib/types";
+import type { ToastItem, ToastKind } from "@/components/common/ToastViewport";
 import {
   clearAnalyses,
   configFromSettings,
@@ -52,6 +53,7 @@ interface AppStateValue {
   readonly status: string;
   readonly error?: string;
   readonly success?: string;
+  readonly toasts: readonly ToastItem[];
   readonly analyzing: boolean;
   readonly exporting: boolean;
   readonly hydrating: boolean;
@@ -63,6 +65,8 @@ interface AppStateValue {
   readonly setRegistroFile: (file?: File) => void;
   readonly updateSettings: (settings: Partial<AppSettings>) => void;
   readonly setFilters: (filters: DashboardFilters) => void;
+  readonly pushToast: (toast: Omit<ToastItem, "id">) => void;
+  readonly dismissToast: (id: string) => void;
   readonly analyze: () => Promise<void>;
   readonly exportActiveAnalysis: () => Promise<void>;
   readonly exportStoredAnalysis: (analysis: StoredAnalysis) => Promise<void>;
@@ -139,12 +143,28 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
   const [status, setStatus] = useState("Pendiente de archivos");
   const [error, setError] = useState<string | undefined>();
   const [success, setSuccess] = useState<string | undefined>();
+  const [toasts, setToasts] = useState<readonly ToastItem[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [hydrating, setHydrating] = useState(true);
   const [aiStatus, setAiStatus] = useState<AiStatus | undefined>();
   const [aiTesting, setAiTesting] = useState(false);
   const [aiTestMessage, setAiTestMessage] = useState<string | undefined>();
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((current) => current.filter((toast) => toast.id !== id));
+  }, []);
+
+  const pushToast = useCallback((toast: Omit<ToastItem, "id">) => {
+    setToasts((current) => [...current, { ...toast, id: createId() }].slice(-5));
+  }, []);
+
+  const pushMessageToast = useCallback(
+    (kind: ToastKind, title: string, message?: string) => {
+      pushToast({ kind, title, message });
+    },
+    [pushToast],
+  );
 
   const refreshHistory = useCallback(async () => {
     setHistory(await listAnalyses());
@@ -181,11 +201,13 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       setHistory(analyses);
       setActiveAnalysis(active);
       setStatus(active ? "Análisis activo cargado desde el historial" : "Pendiente de archivos");
-      setSuccess(
-        incompatibleCount
-          ? "Se ignoraron análisis guardados con formato anterior. Vuelve a analizar con la nueva lógica retributiva."
-          : undefined,
-      );
+      if (incompatibleCount) {
+        const message = "Se ignoraron analisis guardados con formato anterior. Vuelve a analizar con la nueva logica retributiva.";
+        setSuccess(message);
+        pushMessageToast("warning", "Historial actualizado", message);
+      } else {
+        setSuccess(undefined);
+      }
       setHydrating(false);
       void refreshAiStatus();
     }
@@ -195,7 +217,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
     return () => {
       cancelled = true;
     };
-  }, [refreshAiStatus]);
+  }, [pushMessageToast, refreshAiStatus]);
 
   const updateSettings = useCallback((patch: Partial<AppSettings>) => {
     setSettings((current) => {
@@ -207,7 +229,9 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
 
   const analyze = useCallback(async () => {
     if (!registroFile || !pdfFiles.length) {
-      setError("Selecciona PDFs y Excel Registro antes de analizar.");
+      const message = "Selecciona PDFs y Excel Registro antes de analizar.";
+      setError(message);
+      pushMessageToast("warning", "Faltan archivos", message);
       return;
     }
 
@@ -251,14 +275,17 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       setFilters(EMPTY_FILTERS);
       setStatus(`Análisis generado: ${result.summary.uniquePeople} personas`);
       setSuccess("Análisis completado y guardado en el historial.");
+      pushMessageToast("success", "Analisis completado", `${result.summary.uniquePeople} personas generadas y guardadas en historial.`);
       setView("dashboard");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Error inesperado.");
+      const message = caught instanceof Error ? caught.message : "Error inesperado.";
+      setError(message);
+      pushMessageToast("error", "Error de analisis", message);
       setStatus("Análisis detenido");
     } finally {
       setAnalyzing(false);
     }
-  }, [pdfFiles, refreshHistory, registroFile, settings]);
+  }, [pdfFiles, pushMessageToast, refreshHistory, registroFile, settings]);
 
   const exportAnalysis = useCallback(async (analysis: StoredAnalysis) => {
     setExporting(true);
@@ -270,12 +297,15 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       const date = analysis.createdAt.slice(0, 10);
       downloadBlob(blob, `comparativa_reg_retributivo_${date}.xlsx`);
       setSuccess("Excel exportado correctamente.");
+      pushMessageToast("success", "Excel exportado", "Excel exportado correctamente.");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Error inesperado.");
+      const message = caught instanceof Error ? caught.message : "Error inesperado.";
+      setError(message);
+      pushMessageToast("error", "Error al exportar", message);
     } finally {
       setExporting(false);
     }
-  }, []);
+  }, [pushMessageToast]);
 
   const exportActiveAnalysis = useCallback(async () => {
     if (activeAnalysis) {
@@ -298,7 +328,9 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
   const openStoredAnalysis = useCallback(async (id: string) => {
     const analysis = await getAnalysis(id);
     if (!analysis) {
-      setError("No se pudo abrir el análisis guardado.");
+      const message = "No se pudo abrir el análisis guardado.";
+      setError(message);
+      pushMessageToast("error", "Historial no disponible", message);
       return;
     }
 
@@ -307,8 +339,9 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
     setFilters(EMPTY_FILTERS);
     setStatus("Análisis activo actualizado desde el historial");
     setSuccess("Análisis activo actualizado.");
+    pushMessageToast("info", "Historial cargado", "Analisis activo actualizado.");
     setView("dashboard");
-  }, []);
+  }, [pushMessageToast]);
 
   const removeStoredAnalysis = useCallback(
     async (id: string) => {
@@ -318,8 +351,9 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       }
       await refreshHistory();
       setSuccess("Análisis eliminado del historial.");
+      pushMessageToast("info", "Historial actualizado", "Analisis eliminado del historial.");
     },
-    [activeAnalysis?.id, refreshHistory],
+    [activeAnalysis?.id, pushMessageToast, refreshHistory],
   );
 
   const clearStoredHistory = useCallback(async () => {
@@ -327,7 +361,8 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
     setActiveAnalysis(undefined);
     setHistory([]);
     setSuccess("Historial eliminado.");
-  }, []);
+    pushMessageToast("info", "Historial eliminado", "Se eliminaron los analisis guardados.");
+  }, [pushMessageToast]);
 
   const testAiConnection = useCallback(async () => {
     setAiTesting(true);
@@ -341,13 +376,16 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       }
 
       setAiTestMessage(`Conexión IA correcta con ${payload.model ?? settings.aiModel}.`);
+      pushMessageToast("success", "IA configurada", `Conexion IA correcta con ${payload.model ?? settings.aiModel}.`);
       await refreshAiStatus();
     } catch (caught) {
-      setAiTestMessage(caught instanceof Error ? caught.message : "No se pudo probar la conexión IA.");
+      const message = caught instanceof Error ? caught.message : "No se pudo probar la conexión IA.";
+      setAiTestMessage(message);
+      pushMessageToast("error", "IA no disponible", message);
     } finally {
       setAiTesting(false);
     }
-  }, [refreshAiStatus, settings.aiModel]);
+  }, [pushMessageToast, refreshAiStatus, settings.aiModel]);
 
   const value = useMemo<AppStateValue>(
     () => ({
@@ -362,6 +400,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       status,
       error,
       success,
+      toasts,
       analyzing,
       exporting,
       hydrating,
@@ -373,6 +412,8 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       setRegistroFile,
       updateSettings,
       setFilters,
+      pushToast,
+      dismissToast,
       analyze,
       exportActiveAnalysis,
       exportStoredAnalysis: exportAnalysis,
@@ -390,6 +431,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       aiTesting,
       analyze,
       clearStoredHistory,
+      dismissToast,
       error,
       exportActiveAnalysis,
       exportAnalysis,
@@ -399,6 +441,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       hydrating,
       openStoredAnalysis,
       pdfFiles,
+      pushToast,
       refreshAiStatus,
       registroFile,
       removeStoredAnalysis,
@@ -407,6 +450,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       status,
       success,
       testAiConnection,
+      toasts,
       updateSettings,
       view,
       analyzing,

@@ -2,7 +2,7 @@
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { render } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 import { TablesView } from "@/components/tables/TablesView";
 
@@ -36,9 +36,63 @@ const appState = {
           periods: ["Enero 2025"],
           files: ["PDF_ENERO.pdf"],
         },
+        {
+          employeeNumber: "10050",
+          person: "Persona Diferencia",
+          workplace: "Madrid",
+          position: "Puesto",
+          category: "Categoria",
+          salaryRegistro: 1000,
+          salaryPdf: 1200,
+          salaryDifference: 200,
+          salaryComplementRegistro: 0,
+          salaryComplementPdf: 0,
+          salaryComplementDifference: 0,
+          extraSalaryRegistro: 0,
+          extraSalaryPdf: 208.01,
+          extraSalaryDifference: 208.01,
+          registroTotal: 1000,
+          pdfTotal: 1408.01,
+          totalDifference: 408.01,
+          pdfControlTotalDevengado: 1408.01,
+          payrollCount: 1,
+          unmappedConceptsCount: 1,
+          status: "Diferencia",
+          detail: "Teletrabajo pendiente",
+          periods: ["Febrero 2025"],
+          files: ["PDF_FEBRERO.pdf"],
+        },
       ],
-      concepts: [],
-      unmappedConcepts: [],
+      concepts: [
+        {
+          employeeNumber: "10048",
+          person: "Persona Test",
+          block: "Extrasalarial",
+          blockKey: "extraSalary",
+          registroCode: "CYC_SEG_SALUD",
+          pdfConcept: "Seguro Medico",
+          registroAmount: 100,
+          pdfAmount: 120,
+          difference: 20,
+          status: "Diferencia",
+          detail: "Diferencia de concepto",
+        },
+      ],
+      unmappedConcepts: [
+        {
+          decisionType: "Pendiente revision",
+          includedInComparison: false,
+          pdfConcept: "Paga 40 anos",
+          totalDetected: 841.92,
+          peopleCount: 1,
+          payrollCount: 1,
+          exampleEmployeeNumbers: ["10072"],
+          suggestedBlock: "C. Salarial",
+          action: "Pendiente revisiÃ³n",
+          recommendedAction: "Revisar codigo Registro",
+          reason: "No existe codigo exacto",
+        },
+      ],
       groupings: [],
     },
     filters: { query: "", center: "", group: "", status: "" },
@@ -68,5 +122,36 @@ describe("TablesView", () => {
 
     expect(consoleError.mock.calls.flat().some((entry) => String(entry).includes("Encountered two children with the same key"))).toBe(false);
     consoleError.mockRestore();
+  });
+
+  test("opens a deterministic person detail modal from the whole clickable row", () => {
+    render(<TablesView mode="personas" />);
+
+    expect(screen.queryByRole("dialog", { name: /Detalle persona/i })).toBeNull();
+
+    fireEvent.click(screen.getByText("10048"));
+
+    expect(screen.getByRole("dialog", { name: /Detalle persona/i })).toBeTruthy();
+    expect(screen.getByText(/Analizar con IA/i)).toBeTruthy();
+    expect(screen.getByText(/Fase 2/i)).toBeTruthy();
+  });
+
+  test("keeps the detail button as an alternate way to open the concept modal", () => {
+    render(<TablesView mode="conceptos" />);
+
+    fireEvent.click(screen.getAllByRole("button", { name: /Detalle/i })[0]);
+
+    expect(screen.getByRole("dialog", { name: /Detalle concepto/i })).toBeTruthy();
+    expect(screen.getAllByText("CYC_SEG_SALUD").length).toBeGreaterThan(1);
+  });
+
+  test("quick filters keep the table functional and show visible totals", () => {
+    render(<TablesView mode="personas" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Ver solo diferencias/i }));
+
+    expect(appState.value.setFilters).toHaveBeenCalledWith(expect.objectContaining({ status: "Diferencia" }));
+    expect(screen.getByText(/filas visibles/i)).toBeTruthy();
+    expect(screen.getByText(/Suma diferencia visible/i)).toBeTruthy();
   });
 });
