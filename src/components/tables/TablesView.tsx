@@ -9,6 +9,7 @@ import { Badge } from "@/components/common/Badge";
 import { Card } from "@/components/common/Card";
 import { EmptyState } from "@/components/common/EmptyState";
 import { SectionHeader } from "@/components/common/SectionHeader";
+import { AgrupacionesView } from "@/components/groupings/AgrupacionesView";
 import { buildConceptExplainPayload, buildNotIncludedConceptExplainPayload, buildPersonExplainPayload } from "@/lib/ai/explainPayload";
 import type { AppView, ConceptComparisonRow, PersonComparisonRow, UnmappedConceptRow } from "@/lib/types";
 import { formatEuro } from "@/lib/utils/money";
@@ -784,15 +785,7 @@ function ConceptosTable({ density, onOpen }: Readonly<{ density: TableDensity; o
 }
 
 function AgrupacionesTable() {
-  const { result } = useAppState();
-  const rows = result?.groupings ?? [];
-  return (
-    <EmptyState
-      icon={Table2}
-      title={rows.length ? "Agrupaciones calculadas" : "Pendiente de implementación"}
-      description="La primera fase prioriza Registro vs PDF, conceptos y normalizado vs real. Las agrupaciones se implementan después sin bloquear la validación de importes."
-    />
-  );
+  return <AgrupacionesView />;
 }
 
 function loadDensity(): TableDensity {

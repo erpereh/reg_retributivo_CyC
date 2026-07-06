@@ -300,6 +300,7 @@ describe("TablesView", () => {
   beforeEach(() => {
     window.localStorage.clear();
     vi.restoreAllMocks();
+    appState.value.result.groupings = [];
     appState.value.aiStatus = { configured: false, enabled: false, model: "gemini-3.1-flash-lite" };
     appState.value.settings = { autoExplainOnOpen: false };
   });
@@ -461,5 +462,46 @@ describe("TablesView", () => {
     expect(appState.value.setFilters).toHaveBeenCalledWith(expect.objectContaining({ status: "Diferencia" }));
     expect(screen.getByText(/filas visibles/i)).toBeTruthy();
     expect(screen.getByText(/Suma diferencia visible/i)).toBeTruthy();
+  });
+
+  test("renders grouping validation with Base Registro and keeps PDF grouped as pending", () => {
+    appState.value.result.groupings = [
+      {
+        sourceSheet: "Análisis por puesto",
+        groupingType: "puesto",
+        groupId: "ATSACYC",
+        groupName: "Administrativo/a Técnico SACYC",
+        registroBase: "TOTAL RETRIBUCIONES NORMALIZADAS + VARIABLES",
+        block: "Salario",
+        metric: "Media",
+        segment: "Diferencia %",
+        registroSheetValue: 0,
+        registroRecalculatedValue: 0,
+        excelDifference: 0,
+        peopleCount: 1,
+        womenCount: 1,
+        menCount: 0,
+        status: "OK",
+        detail: "Hoja agrupada comparada contra Empleados.",
+      },
+    ];
+
+    render(<TablesView mode="agrupaciones" />);
+
+    expect(screen.getByText("Validación Excel")).toBeTruthy();
+    expect(screen.getByText("PDF agrupado")).toBeTruthy();
+    expect(screen.getByText(/La comparación PDF agrupado se implementará después/i)).toBeTruthy();
+    expect(screen.getByText("Las hojas agrupadas cuadran con Empleados.")).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Base Registro" })).toBeTruthy();
+    expect(screen.queryByRole("columnheader", { name: /PDF recalculado/i })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: /Dif. PDF/i })).toBeNull();
+
+    const groupingCell = screen.getAllByText("Administrativo/a Técnico SACYC").find((element) => element.tagName === "TD");
+    expect(groupingCell).toBeTruthy();
+    fireEvent.click(groupingCell as HTMLElement);
+
+    expect(screen.getByRole("dialog", { name: /Detalle agrupación/i })).toBeTruthy();
+    expect(screen.getAllByText("TOTAL RETRIBUCIONES NORMALIZADAS + VARIABLES").length).toBeGreaterThan(0);
+    expect(screen.getByText("Valor recalculado desde Empleados")).toBeTruthy();
   });
 });

@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest";
 import { compareAnalysis } from "@/lib/compare/comparePeople";
 import { buildDefaultConceptMap } from "@/lib/compare/conceptMapping";
 import { exportAnalysisToWorkbook } from "@/lib/export/exportExcel";
+import { buildRegistroGroupingComparisons, median, REGISTRO_GROUPING_BASES } from "@/lib/groupings/registroGroupings";
 import { parsePayrollPdf } from "@/lib/parsers/payrollPdfParser";
 import { parseRegistroRetributivo } from "@/lib/parsers/registroRetributivoParser";
 import type { ConceptMappingRule, PayrollRecord, RegistroEmployee } from "@/lib/types";
@@ -105,6 +106,61 @@ describe("Registro Retributivo parser", () => {
     expect(first.periodComplete.salary).toBe(29090.72);
     expect(first.concepts.some((concept) => concept.block === "Salario" && concept.code === "SSP_SAL_BASE")).toBe(true);
     expect(result.internalChecks.find((row) => row.employeeNumber === "10048")?.status).toBe("OK");
+  });
+});
+
+describe("Registro grouped sheets", () => {
+  test("calculates median robustly", () => {
+    expect(median([3, 1, 2])).toBe(2);
+    expect(median([10, 1, 5, 7])).toBe(6);
+    expect(median([undefined, Number.NaN, "x"])).toBe(0);
+  });
+
+  test("detects the five grouped sheets and recalculates the real Excel from Empleados", async () => {
+    const registro = await parseRegistroRetributivo(readFileSync(registroFile));
+    const result = buildRegistroGroupingComparisons(readFileSync(registroFile), registro.records, {
+      tolerance: 1,
+      reviewThreshold: 1,
+      incidentThreshold: 50,
+    });
+
+    expect(result.detectedSheets.map((sheet) => sheet.sourceSheet)).toEqual([
+      "Análisis por puesto",
+      "Análisis por valoración puesto",
+      "Análisis por categoría",
+      "Análisis por familia de puesto",
+      "Agrupación Categoría Personal",
+    ]);
+    expect(result.groupCount).toBe(79);
+    expect(new Set(result.rows.map((row) => row.registroBase))).toEqual(new Set(REGISTRO_GROUPING_BASES.map((base) => base.label)));
+    expect(result.rows.length).toBeGreaterThan(4000);
+    expect(result.rows.filter((row) => row.status !== "OK")).toEqual([]);
+    expect(result.warnings).toEqual([]);
+
+    const undefinedValuation = result.rows.find(
+      (row) =>
+        row.sourceSheet === "Análisis por valoración puesto" &&
+        row.groupName === "[SIN DEFINIR]" &&
+        row.registroBase === "RETRIBUCIONES (PERIODO COMPLETO)" &&
+        row.block === "Salario" &&
+        row.metric === "Media" &&
+        row.segment === "Mujeres",
+    );
+    expect(undefinedValuation?.peopleCount).toBe(70);
+    expect(undefinedValuation?.womenCount).toBe(30);
+    expect(undefinedValuation?.menCount).toBe(40);
+
+    const zeroMenDifference = result.rows.find(
+      (row) =>
+        row.sourceSheet === "Análisis por puesto" &&
+        row.groupId === "ATSACYC" &&
+        row.registroBase === "TOTAL RETRIBUCIONES NORMALIZADAS + VARIABLES" &&
+        row.block === "Salario" &&
+        row.metric === "Media" &&
+        row.segment === "Diferencia %",
+    );
+    expect(zeroMenDifference?.registroSheetValue).toBe(0);
+    expect(zeroMenDifference?.registroRecalculatedValue).toBe(0);
   });
 });
 
@@ -507,7 +563,7 @@ describe("Excel export", () => {
       "Cuadre_Interno_Excel",
       "Criterios",
     ]);
-    expect(workbook.getWorksheet("Agrupaciones")?.getCell("A2").value).toBe("Pendiente de implementación");
+    expect(workbook.getWorksheet("Agrupaciones")?.getCell("A2").value).toBe("Pendiente de implementación / Sin datos calculados");
     const resumenValues = new Set(workbook.getWorksheet("Resumen")?.getColumn(1).values.map(String));
     expect(resumenValues.has("Conceptos sin mapear")).toBe(false);
     expect(resumenValues.has("Conceptos pendientes de revisión")).toBe(true);
@@ -544,5 +600,33 @@ describe("Excel export", () => {
     await reloaded.xlsx.load(buffer);
     const serialized = JSON.stringify(reloaded.model);
     expect(serialized).not.toMatch(/ES\d{2}\s?\d{4}|00397416E|0128\s?8700/i);
+  });
+
+  test("exports Agrupaciones with real Registro vs Empleados data and no PDF columns", async () => {
+    const registro = await parseRegistroRetributivo(readFileSync(registroFile));
+    const groupingResult = buildRegistroGroupingComparisons(readFileSync(registroFile), registro.records, {
+      tolerance: 1,
+      reviewThreshold: 1,
+      incidentThreshold: 50,
+    });
+    const analysis = await compareAnalysis([], [registro.records[0]], {
+      tolerance: 1,
+      conceptMap: buildDefaultConceptMap(registro.conceptCodes),
+      enableAI: false,
+    });
+    const workbook = await exportAnalysisToWorkbook({
+      ...analysis,
+      groupings: groupingResult.rows,
+      summary: { ...analysis.summary, groupingDifferences: groupingResult.rows.filter((row) => row.status !== "OK").length },
+    });
+    const sheet = workbook.getWorksheet("Agrupaciones");
+
+    expect(sheet?.getCell("A2").value).not.toBe("Pendiente de implementación");
+    expect(sheet?.rowCount).toBeGreaterThan(4000);
+    expect(sheet?.getRow(1).values).toContain("Base Registro");
+    expect(sheet?.getRow(1).values).toContain("Valor hoja agrupada");
+    expect(sheet?.getRow(1).values).toContain("Valor recalculado Empleados");
+    expect(sheet?.getRow(1).values).not.toContain("PDF recalculado");
+    expect(sheet?.getRow(1).values).not.toContain("Dif. PDF");
   });
 });

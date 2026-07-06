@@ -285,29 +285,58 @@ function addRegistroSinPdf(workbook: ExcelJS.Workbook, analysis: AnalysisResult)
 function addAgrupaciones(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void {
   const sheet = workbook.addWorksheet("Agrupaciones");
   sheet.views = [{ state: "frozen", ySplit: 1 }];
-  sheet.addRow(["Estado", "Hoja", "Grupo", "Metrica", "Bloque", "Sexo", "Registro", "PDF recalculado", "Diferencia", "Detalle"]);
+  sheet.addRow([
+    "Estado",
+    "Hoja",
+    "Base Registro",
+    "Agrupación",
+    "ID agrupación",
+    "Bloque",
+    "Métrica",
+    "Segmento",
+    "Valor hoja agrupada",
+    "Valor recalculado Empleados",
+    "Diferencia Excel",
+    "Nº personas",
+    "Mujeres",
+    "Varones",
+    "Detalle",
+  ]);
   styleHeaderRow(sheet.getRow(1));
   if (!analysis.groupings.length) {
-    sheet.addRow(["Pendiente de implementación"]);
+    sheet.addRow(["Pendiente de implementación / Sin datos calculados"]);
   } else {
     analysis.groupings.forEach((item) => {
       const row = sheet.addRow([
         item.status,
-        item.sheet,
-        item.group,
-        item.metric,
+        item.sourceSheet,
+        item.registroBase,
+        item.groupName,
+        item.groupId,
         item.block,
-        item.sex,
-        item.registro,
-        item.pdfRecalculated,
-        item.difference,
+        item.metric,
+        item.segment,
+        item.registroSheetValue,
+        item.registroRecalculatedValue,
+        item.excelDifference,
+        item.peopleCount,
+        item.womenCount,
+        item.menCount,
         item.detail,
       ]);
       applyStatusStyle(row.getCell(1), item.status);
+      if (item.segment === "Diferencia %") {
+        row.getCell(9).numFmt = "0.00%";
+        row.getCell(10).numFmt = "0.00%";
+        row.getCell(11).numFmt = "0.00%";
+      } else {
+        row.getCell(9).numFmt = EURO_FORMAT;
+        row.getCell(10).numFmt = EURO_FORMAT;
+        row.getCell(11).numFmt = EURO_FORMAT;
+      }
     });
-    moneyColumns(sheet, [7, 8, 9]);
   }
-  configureColumns(sheet, [46, 24, 30, 28, 18, 14, 18, 18, 18, 60]);
+  configureColumns(sheet, [18, 34, 44, 36, 18, 18, 16, 16, 22, 28, 18, 14, 12, 12, 72]);
   styleBodyRows(sheet);
 }
 

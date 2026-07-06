@@ -14,9 +14,11 @@ export type MappingStatus = "Incluido" | "Ignorado" | "Pendiente revisión";
 export type ConceptMappingSourceType = "devengo" | "informativo" | "deduccion" | "retencion" | "coste_empresa" | "unknown";
 export type ConceptDedupePriority = "devengo" | "informativo";
 export type NonIncludedDecisionType = "Pendiente revision" | "Sin mapear real" | "Ignorado";
-export type AnalysisStatus = "OK" | "Revisar" | "Diferencia" | "Sin mapear" | "Sin PDF" | "Sin Registro";
+export type AnalysisStatus = "OK" | "Revisar" | "Diferencia" | "Sin mapear" | "Sin PDF" | "Sin Registro" | "Sin datos";
 export type SalaryStatus = AnalysisStatus;
 export type AppView = "dashboard" | "personas" | "conceptos" | "cuadre-excel" | "agrupaciones" | "historial" | "ajustes";
+export type GroupingType = "puesto" | "valoracionPuesto" | "categoria" | "familiaPuesto" | "agrupacionCategoriaPersonal";
+export type GroupingBlock = RetributionBlock;
 
 export interface AnalysisThresholds {
   readonly reviewThreshold: number;
@@ -264,14 +266,20 @@ export interface NormalizedVsRealRow {
 }
 
 export interface GroupingComparisonRow {
-  readonly sheet: string;
-  readonly group: string;
+  readonly sourceSheet: string;
+  readonly groupingType: GroupingType;
+  readonly groupId: string;
+  readonly groupName: string;
+  readonly registroBase: string;
+  readonly block: GroupingBlock;
   readonly metric: string;
-  readonly block: RetributionBlock;
-  readonly sex: string;
-  readonly registro: number;
-  readonly pdfRecalculated: number;
-  readonly difference: number;
+  readonly segment: string;
+  readonly registroSheetValue?: number;
+  readonly registroRecalculatedValue?: number;
+  readonly excelDifference?: number;
+  readonly peopleCount: number;
+  readonly womenCount: number;
+  readonly menCount: number;
   readonly status: AnalysisStatus;
   readonly detail: string;
 }
