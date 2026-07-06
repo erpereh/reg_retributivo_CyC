@@ -11,6 +11,7 @@ export const STORAGE_SCHEMA_VERSION = 2;
 export interface AppSettings {
   readonly defaultTolerance: number;
   readonly enableAIByDefault: boolean;
+  readonly autoExplainOnOpen: boolean;
   readonly reviewThreshold: number;
   readonly incidentThreshold: number;
   readonly aiModel: string;
@@ -20,6 +21,7 @@ export interface AppSettings {
 export const DEFAULT_SETTINGS: AppSettings = {
   defaultTolerance: 1,
   enableAIByDefault: true,
+  autoExplainOnOpen: false,
   reviewThreshold: 1,
   incidentThreshold: 50,
   aiModel: "gemini-3.1-flash-lite",
@@ -56,6 +58,7 @@ function normalizeSettings(value: Partial<AppSettings> | undefined): AppSettings
   return {
     defaultTolerance: normalizeNumber(value?.defaultTolerance, DEFAULT_SETTINGS.defaultTolerance),
     enableAIByDefault: typeof value?.enableAIByDefault === "boolean" ? value.enableAIByDefault : DEFAULT_SETTINGS.enableAIByDefault,
+    autoExplainOnOpen: typeof value?.autoExplainOnOpen === "boolean" ? value.autoExplainOnOpen : DEFAULT_SETTINGS.autoExplainOnOpen,
     reviewThreshold: normalizeNumber(value?.reviewThreshold, DEFAULT_SETTINGS.reviewThreshold),
     incidentThreshold: normalizeNumber(value?.incidentThreshold, DEFAULT_SETTINGS.incidentThreshold),
     aiModel: value?.aiModel || DEFAULT_SETTINGS.aiModel,

@@ -1,12 +1,13 @@
 "use client";
 
-import { BrainCircuit, CheckCircle2, LockKeyhole, ShieldCheck, SlidersHorizontal, Wifi } from "lucide-react";
+import { BrainCircuit, CheckCircle2, LockKeyhole, ShieldCheck, SlidersHorizontal, Trash2, Wifi } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAppState } from "@/components/app/AppState";
 import { Badge } from "@/components/common/Badge";
 import { Card } from "@/components/common/Card";
 import { SectionHeader } from "@/components/common/SectionHeader";
 import { Toggle } from "@/components/common/Toggle";
+import { clearAiExplanationCache } from "@/lib/ai/explainCache";
 import { normalizePdfConcept } from "@/lib/compare/conceptMapping";
 import type { ConceptMappingRule } from "@/lib/types";
 
@@ -74,6 +75,7 @@ export function SettingsView() {
   } = useAppState();
   const [mapDraft, setMapDraft] = useState("");
   const [mapMessage, setMapMessage] = useState<string | undefined>();
+  const [aiCacheMessage, setAiCacheMessage] = useState<string | undefined>();
 
   useEffect(() => {
     void refreshAiStatus();
@@ -154,6 +156,11 @@ export function SettingsView() {
     setMapMessage("Plantillas pendientes añadidas fuera del calculo. Edita includedInComparison/status solo si procede.");
   }
 
+  function clearAiCache() {
+    clearAiExplanationCache();
+    setAiCacheMessage("Caché de explicaciones IA borrada.");
+  }
+
   return (
     <div className="space-y-6">
       <SectionHeader
@@ -189,14 +196,33 @@ export function SettingsView() {
                 description="Si falta API key o ENABLE_AI_REVIEW=false, se usarán observaciones deterministas."
               />
             </div>
+            <div className="rounded-2xl bg-slate-50 p-4">
+              <Toggle
+                checked={settings.autoExplainOnOpen}
+                onChange={(autoExplainOnOpen) => updateSettings({ autoExplainOnOpen })}
+                label="Abrir explicación IA automáticamente"
+                description="Desactivado por defecto. Si se activa, solo lanza una explicación al abrir un modal y nunca bloquea el detalle determinista."
+              />
+            </div>
             <p className="text-sm leading-6 text-muted">La API key se configura desde el archivo .env. No se guarda en el navegador.</p>
-            <button type="button" onClick={() => void testAiConnection()} disabled={aiTesting || !aiStatus?.configured} className="btn-primary">
-              <Wifi className="h-4 w-4" aria-hidden="true" />
-              {aiTesting ? "Probando conexión..." : "Probar conexión IA"}
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => void testAiConnection()} disabled={aiTesting || !aiStatus?.configured} className="btn-primary">
+                <Wifi className="h-4 w-4" aria-hidden="true" />
+                {aiTesting ? "Probando conexión..." : "Probar conexión IA"}
+              </button>
+              <button type="button" onClick={clearAiCache} className="btn-secondary">
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
+                Borrar caché de explicaciones
+              </button>
+            </div>
             {aiTestMessage ? (
               <p className="rounded-2xl bg-blue-50 px-4 py-3 text-sm font-semibold text-primary" aria-live="polite">
                 {aiTestMessage}
+              </p>
+            ) : null}
+            {aiCacheMessage ? (
+              <p className="rounded-2xl bg-blue-50 px-4 py-3 text-sm font-semibold text-primary" aria-live="polite">
+                {aiCacheMessage}
               </p>
             ) : null}
           </div>

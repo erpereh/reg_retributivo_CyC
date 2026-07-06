@@ -3,11 +3,13 @@
 import { Copy, Search, Table2, X } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
+import { AiExplanationPanel } from "@/components/ai/AiExplanationPanel";
 import { useAppState, type DashboardFilters, EMPTY_FILTERS, matchesQuery } from "@/components/app/AppState";
 import { Badge } from "@/components/common/Badge";
 import { Card } from "@/components/common/Card";
 import { EmptyState } from "@/components/common/EmptyState";
 import { SectionHeader } from "@/components/common/SectionHeader";
+import { buildConceptExplainPayload, buildNotIncludedConceptExplainPayload, buildPersonExplainPayload } from "@/lib/ai/explainPayload";
 import type { AppView, ConceptComparisonRow, PersonComparisonRow, UnmappedConceptRow } from "@/lib/types";
 import { formatEuro } from "@/lib/utils/money";
 import { describeConceptCause, describePersonCause, type ProbableCause } from "@/lib/ui/probableCause";
@@ -253,7 +255,12 @@ function MoneyTriplet({ label, registro, pdf, diff }: Readonly<{ label: string; 
   );
 }
 
-function DetailModal({ state, tolerance, onClose }: Readonly<{ state: DetailModalState; tolerance: number; onClose: () => void }>) {
+function DetailModal({
+  state,
+  tolerance,
+  concepts,
+  onClose,
+}: Readonly<{ state: DetailModalState; tolerance: number; concepts: readonly ConceptComparisonRow[]; onClose: () => void }>) {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -274,6 +281,13 @@ function DetailModal({ state, tolerance, onClose }: Readonly<{ state: DetailModa
             review: displayText(state.row.recommendedAction) || "Revisar criterio de decisión.",
           };
   const copySummary = `${title}: ${cause.label} - ${cause.description}`;
+  const aiType = state.kind === "person" ? "person" : state.kind === "concept" ? "concept" : "notIncludedConcept";
+  const aiPayload =
+    state.kind === "person"
+      ? buildPersonExplainPayload(state.row, cause, concepts)
+      : state.kind === "concept"
+        ? buildConceptExplainPayload(state.row, cause)
+        : buildNotIncludedConceptExplainPayload(state.row, cause);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" onMouseDown={onClose}>
@@ -358,13 +372,12 @@ function DetailModal({ state, tolerance, onClose }: Readonly<{ state: DetailModa
           </div>
         </div>
 
+        <AiExplanationPanel type={aiType} payload={aiPayload} />
+
         <div className="mt-6 flex flex-wrap justify-end gap-2">
           <button type="button" className="btn-secondary" onClick={() => void navigator.clipboard?.writeText(copySummary)}>
             <Copy className="h-4 w-4" aria-hidden="true" />
             Copiar resumen
-          </button>
-          <button type="button" className="btn-ghost" disabled>
-            Analizar con IA - Fase 2
           </button>
         </div>
       </motion.div>
@@ -623,7 +636,7 @@ export function TablesView({ mode }: Readonly<{ mode: Extract<AppView, "personas
       ) : (
         <AgrupacionesTable />
       )}
-      {modal ? <DetailModal state={modal} tolerance={result.summary?.tolerance ?? 1} onClose={() => setModal(undefined)} /> : null}
+      {modal ? <DetailModal state={modal} tolerance={result.summary?.tolerance ?? 1} concepts={result.concepts} onClose={() => setModal(undefined)} /> : null}
     </div>
   );
 }

@@ -3,11 +3,13 @@
 import { CheckCircle2, Copy, FileCheck2, Sigma, Table2, X } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
+import { AiExplanationPanel } from "@/components/ai/AiExplanationPanel";
 import { useAppState } from "@/components/app/AppState";
 import { Badge } from "@/components/common/Badge";
 import { Card } from "@/components/common/Card";
 import { EmptyState } from "@/components/common/EmptyState";
 import { SectionHeader } from "@/components/common/SectionHeader";
+import { buildInternalExcelExplainPayload } from "@/lib/ai/explainPayload";
 import type { InternalExcelCheckRow } from "@/lib/types";
 import { displayText } from "@/lib/ui/displayText";
 import { cn } from "@/lib/utils/classNames";
@@ -111,6 +113,7 @@ function DetailModal({ row, onClose }: Readonly<{ row: InternalExcelCheckRow; on
   }, [onClose]);
 
   const copySummary = `Cuadre Excel ${row.employeeNumber}: ${row.status} - ${displayText(row.detail)}`;
+  const aiPayload = buildInternalExcelExplainPayload(row);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" onMouseDown={onClose}>
@@ -153,6 +156,8 @@ function DetailModal({ row, onClose }: Readonly<{ row: InternalExcelCheckRow; on
           <p className="text-sm font-semibold text-ink">Detalle</p>
           <p className="mt-2 text-sm leading-6 text-muted text-pretty">{displayText(row.detail) || "Sin detalle adicional."}</p>
         </div>
+
+        <AiExplanationPanel type="internalExcelCheck" payload={aiPayload} />
 
         <div className="mt-6 flex justify-end">
           <button type="button" className="btn-secondary" onClick={() => void navigator.clipboard?.writeText(copySummary)}>

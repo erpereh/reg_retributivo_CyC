@@ -61,7 +61,26 @@ describe("probable deterministic cause", () => {
     expect(describePersonCause(person({ salaryComplementDifference: 841.92 }), 1).label).toBe("Bolsa vacaciones");
     expect(
       describePersonCause(person({ salaryDifference: 120, salaryComplementDifference: -119.7, totalDifference: 0.3 }), 1).label,
-    ).toBe("Reclasificacion");
+    ).toBe("Reclasificación entre bloques");
+  });
+
+  test("labels 10123-style compensated salary and complement movement as block reclassification", () => {
+    const cause = describePersonCause(
+      person({
+        employeeNumber: "10123",
+        salaryDifference: 3679.81,
+        salaryComplementDifference: -3679.8,
+        extraSalaryDifference: -193.94,
+        totalDifference: -193.94,
+        detail: "Diferencia residual extrasalarial",
+      }),
+      1,
+    );
+
+    expect(cause.label).toBe("Reclasificación entre bloques");
+    expect(cause.description).toContain("bloque Salario");
+    expect(cause.description).toContain("bloque Complemento Salarial");
+    expect(cause.review).toContain("Extrasalarial");
   });
 
   test("labels no-registro, pending concept, tolerance and fallback cases", () => {

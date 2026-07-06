@@ -97,6 +97,7 @@ function normalizeSettingsPatch(current: AppSettings, patch: Partial<AppSettings
   return {
     defaultTolerance: Math.max(0, defaultTolerance),
     enableAIByDefault: next.enableAIByDefault,
+    autoExplainOnOpen: next.autoExplainOnOpen,
     reviewThreshold: Math.max(0, reviewThreshold),
     incidentThreshold: Math.max(Math.max(0, reviewThreshold), incidentThreshold),
     aiModel: next.aiModel || DEFAULT_SETTINGS.aiModel,

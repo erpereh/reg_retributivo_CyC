@@ -2,8 +2,8 @@
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, test, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { TablesView } from "@/components/tables/TablesView";
 
 const appState = {
@@ -77,6 +77,19 @@ const appState = {
           status: "Diferencia",
           detail: "Diferencia de concepto",
         },
+        {
+          employeeNumber: "10048",
+          person: "Persona Test",
+          block: "Salario",
+          blockKey: "salary",
+          registroCode: "SSP_SAL_BASE",
+          pdfConcept: "Salario Base",
+          registroAmount: 1000,
+          pdfAmount: 1100,
+          difference: 100,
+          status: "Diferencia",
+          detail: "Diferencia de concepto",
+        },
       ],
       unmappedConcepts: [
         {
@@ -97,6 +110,12 @@ const appState = {
     },
     filters: { query: "", center: "", group: "", status: "" },
     setFilters: vi.fn(),
+    activeAnalysis: { id: "analysis-1" },
+    settings: {
+      autoExplainOnOpen: false,
+    },
+    aiStatus: { configured: false, enabled: false, model: "gemini-3.1-flash-lite" },
+    pushToast: vi.fn(),
   },
 };
 
@@ -109,6 +128,13 @@ vi.mock("@/components/app/AppState", async () => {
 });
 
 describe("TablesView", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.restoreAllMocks();
+    appState.value.aiStatus = { configured: false, enabled: false, model: "gemini-3.1-flash-lite" };
+    appState.value.settings = { autoExplainOnOpen: false };
+  });
+
   test("does not key mapped table headers by their visible label", () => {
     const source = readFileSync(path.join(process.cwd(), "src", "components", "tables", "TablesView.tsx"), "utf8");
 
@@ -132,8 +158,44 @@ describe("TablesView", () => {
     fireEvent.click(screen.getByText("10048"));
 
     expect(screen.getByRole("dialog", { name: /Detalle persona/i })).toBeTruthy();
-    expect(screen.getByText(/Analizar con IA/i)).toBeTruthy();
-    expect(screen.getByText(/Fase 2/i)).toBeTruthy();
+    expect(screen.getByText(/Causa probable/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Analizar con IA/i }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText("IA no configurada. Añade GEMINI_API_KEY en .env")).toBeTruthy();
+  });
+
+  test("requests an AI explanation on demand without sending the person name", async () => {
+    appState.value.aiStatus = { configured: true, enabled: true, model: "gemini-3.1-flash-lite" };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          explanation: {
+            summary: "Diferencia explicada.",
+            probableCauses: ["Concepto pendiente."],
+            registroReview: ["Revisar Registro."],
+            pdfReview: ["Revisar datos extraidos de los PDFs."],
+            recommendedActions: ["Documentar criterio."],
+            confidence: "Media",
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    render(<TablesView mode="personas" />);
+    fireEvent.click(screen.getByText("10048"));
+    fireEvent.click(screen.getByRole("button", { name: /Analizar con IA/i }));
+
+    await screen.findByText("Diferencia explicada.");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/explain", expect.any(Object)));
+    const body = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body));
+
+    expect(JSON.stringify(body)).not.toContain("Persona Test");
+    expect(JSON.stringify(body)).toContain("10048");
+    expect(body.payload.topConceptDifferences.map((item: { registroCode: string }) => item.registroCode)).toContain("SSP_SAL_BASE");
+    expect(screen.getByText("Causas probables")).toBeTruthy();
+    expect(screen.getByText(/revisar en Registro/i)).toBeTruthy();
+    expect(screen.getByText(/revisar en PDF/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Regenerar/i })).toBeTruthy();
   });
 
   test("removes detail buttons and opens the concept modal from the row", () => {

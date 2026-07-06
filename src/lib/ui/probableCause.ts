@@ -1,5 +1,6 @@
 import type { ConceptComparisonRow, PersonComparisonRow } from "@/lib/types";
 import { normalizeComparableText } from "@/lib/utils/normalize";
+import { formatEuro } from "@/lib/utils/money";
 
 export interface ProbableCause {
   readonly label: string;
@@ -11,9 +12,29 @@ function closeTo(value: number, target: number, tolerance = 1): boolean {
   return Math.abs(Math.abs(value) - target) <= tolerance;
 }
 
-function hasOppositeCompensatedBlocks(row: PersonComparisonRow, tolerance: number): boolean {
-  const diffs = [row.salaryDifference, row.salaryComplementDifference, row.extraSalaryDifference].filter((value) => Math.abs(value) > tolerance);
-  return diffs.length >= 2 && Math.abs(row.totalDifference) <= tolerance && diffs.some((value) => value > 0) && diffs.some((value) => value < 0);
+interface BlockDifference {
+  readonly label: string;
+  readonly value: number;
+}
+
+function compensatedBlockPair(row: PersonComparisonRow, tolerance: number): readonly [BlockDifference, BlockDifference] | undefined {
+  const threshold = Math.max(tolerance, 5);
+  const blocks: readonly BlockDifference[] = [
+    { label: "bloque Salario", value: row.salaryDifference },
+    { label: "bloque Complemento Salarial", value: row.salaryComplementDifference },
+    { label: "bloque Extrasalarial", value: row.extraSalaryDifference },
+  ];
+  const pairs: Array<readonly [BlockDifference, BlockDifference]> = [
+    [blocks[0], blocks[1]],
+    [blocks[0], blocks[2]],
+    [blocks[1], blocks[2]],
+  ];
+
+  return pairs
+    .filter(([left, right]) => Math.abs(left.value) > tolerance && Math.abs(right.value) > tolerance)
+    .filter(([left, right]) => Math.sign(left.value) !== Math.sign(right.value))
+    .filter(([left, right]) => Math.abs(left.value + right.value) <= threshold)
+    .sort(([leftA, rightA], [leftB, rightB]) => Math.abs(leftA.value + rightA.value) - Math.abs(leftB.value + rightB.value))[0];
 }
 
 export function describePersonCause(row: PersonComparisonRow, tolerance: number): ProbableCause {
@@ -24,6 +45,23 @@ export function describePersonCause(row: PersonComparisonRow, tolerance: number)
       label: "PDF sin Registro",
       description: "La matricula aparece en PDF pero no existe como empleado del Registro.",
       review: "Revisar la hoja Empleados del Registro y confirmar si la matricula debe incorporarse.",
+    };
+  }
+
+  const reclassificationPair = compensatedBlockPair(row, tolerance);
+  if (reclassificationPair) {
+    const [left, right] = reclassificationPair;
+    const remaining = [
+      { label: "bloque Salario", value: row.salaryDifference },
+      { label: "bloque Complemento Salarial", value: row.salaryComplementDifference },
+      { label: "bloque Extrasalarial", value: row.extraSalaryDifference },
+    ].filter((block) => block.label !== left.label && block.label !== right.label);
+    const remainingText = remaining.length ? ` La diferencia restante queda en ${remaining[0].label}: ${formatEuro(remaining[0].value)}.` : "";
+
+    return {
+      label: "Reclasificación entre bloques",
+      description: `${left.label} (${formatEuro(left.value)}) y ${right.label} (${formatEuro(right.value)}) tienen diferencias de signo contrario y quedan casi compensados.${remainingText}`,
+      review: `Revisar si el importe compensado está clasificado de forma distinta entre ${left.label} y ${right.label}. Revisar también la diferencia restante en ${remaining[0]?.label ?? "los demás bloques"}.`,
     };
   }
 
@@ -40,14 +78,6 @@ export function describePersonCause(row: PersonComparisonRow, tolerance: number)
       label: "Bolsa vacaciones",
       description: "La diferencia coincide con el patron esperado para Bolsa de Vacaciones.",
       review: "Revisar el complemento salarial asociado y el codigo Registro sugerido.",
-    };
-  }
-
-  if (hasOppositeCompensatedBlocks(row, tolerance)) {
-    return {
-      label: "Reclasificacion",
-      description: "Hay diferencias opuestas entre bloques y el total queda dentro de tolerancia.",
-      review: "Revisar si el concepto esta clasificado en el bloque correcto.",
     };
   }
 

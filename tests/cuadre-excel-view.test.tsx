@@ -38,6 +38,10 @@ const appState = vi.hoisted(() => ({
         },
       ],
     },
+    activeAnalysis: { id: "analysis-1" },
+    settings: { autoExplainOnOpen: false },
+    aiStatus: { configured: false, enabled: false, model: "gemini-3.1-flash-lite" },
+    pushToast: vi.fn(),
   },
 }));
 
@@ -74,6 +78,8 @@ describe("CuadreExcelView", () => {
 
     expect(screen.getByRole("dialog", { name: /Detalle cuadre Excel/i })).toBeTruthy();
     expect(screen.getByText("Diferencia interna")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Analizar con IA/i }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText("IA no configurada. Añade GEMINI_API_KEY en .env")).toBeTruthy();
   });
 
   test("shows a clear OK message when every internal row matches", () => {

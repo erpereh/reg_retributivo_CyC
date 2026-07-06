@@ -19,6 +19,7 @@ import type { StoredAnalysis } from "@/lib/types";
 const settings: AppSettings = {
   defaultTolerance: 2,
   enableAIByDefault: false,
+  autoExplainOnOpen: false,
   reviewThreshold: 5,
   incidentThreshold: 80,
   aiModel: "gemini-3.1-flash-lite",
