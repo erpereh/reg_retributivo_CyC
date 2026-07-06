@@ -54,7 +54,7 @@ describe("CuadreExcelView", () => {
     render(<CuadreExcelView />);
 
     expect(screen.getByRole("heading", { name: "Cuadre interno del Excel" })).toBeTruthy();
-    expect(screen.getByText("Valida que las retribuciones del periodo completo cuadran con el desglose de conceptos del Registro.")).toBeTruthy();
+    expect(screen.getByText("Valida que las retribuciones del periodo completo cuadran con el desglose de conceptos dentro del propio Registro.")).toBeTruthy();
 
     ["Empleados comprobados", "Empleados OK", "Empleados con diferencia", "Diferencia total Salario", "Diferencia total C. Salarial", "Diferencia total Extrasalarial"].forEach((label) =>
       expect(screen.getByText(label)).toBeTruthy(),

@@ -165,7 +165,7 @@ export function SettingsView() {
     <div className="space-y-6">
       <SectionHeader
         title="Ajustes"
-        subtitle="Configura IA, tolerancias de análisis y revisa las reglas de privacidad de la herramienta."
+        subtitle="Configura tolerancias, preferencias de IA, caché de explicaciones y opciones de visualización de la comparativa."
       />
 
       <section className="grid gap-5 xl:grid-cols-[1fr_1fr]">

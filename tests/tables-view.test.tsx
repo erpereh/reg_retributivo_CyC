@@ -320,6 +320,28 @@ describe("TablesView", () => {
     consoleError.mockRestore();
   });
 
+  test("renders functional page subtitles for people, concepts and groupings", () => {
+    const { rerender } = render(<TablesView mode="personas" />);
+
+    expect(screen.getByRole("heading", { name: "Personas" })).toBeTruthy();
+    expect(screen.getByText(/Compara por matrícula los importes del Registro frente a los importes detectados en nóminas PDF/i)).toBeTruthy();
+    expect(screen.getByText(/Salario, Complemento Salarial y Extrasalarial/i)).toBeTruthy();
+
+    rerender(<TablesView mode="conceptos" />);
+    expect(screen.getByRole("heading", { name: "Conceptos" })).toBeTruthy();
+    expect(screen.getByText(/Revisa el detalle concepto a concepto/i)).toBeTruthy();
+
+    rerender(<TablesView mode="agrupaciones" />);
+    expect(screen.getByRole("heading", { name: "Agrupaciones" })).toBeTruthy();
+    expect(screen.getByText(/Comprueba que las hojas agrupadas del Registro cuadran con los datos recalculados desde la hoja Empleados/i)).toBeTruthy();
+  });
+
+  test("does not use technical implementation copy as the main table subtitle", () => {
+    render(<TablesView mode="personas" />);
+
+    expect(screen.queryByText(/scroll horizontal|sticky|clicar cualquier fila/i)).toBeNull();
+  });
+
   test("opens a deterministic person detail modal from the whole clickable row", () => {
     render(<TablesView mode="personas" />);
 

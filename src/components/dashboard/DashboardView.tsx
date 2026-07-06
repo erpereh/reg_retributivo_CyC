@@ -27,7 +27,7 @@ export function DashboardView() {
     <div className="space-y-6">
       <SectionHeader
         title="Comparativa Nóminas vs Registro Retributivo"
-        subtitle="Analiza nóminas PDF, compara datos maestros y revisa diferencias salariales."
+        subtitle="Resumen del análisis retributivo: diferencias matched, conceptos pendientes, PDF sin Registro y estado general del cuadre."
         actions={
           activeAnalysis ? (
             <Card className="flex items-center gap-3 rounded-full px-4 py-3">

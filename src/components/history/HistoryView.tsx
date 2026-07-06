@@ -99,7 +99,7 @@ export function HistoryView() {
     <div className="space-y-6">
       <SectionHeader
         title="Historial de análisis"
-        subtitle="Recupera comparativas previas guardadas localmente en este navegador."
+        subtitle="Recupera análisis anteriores guardados localmente, cambia el análisis activo o exporta comparativas ya generadas."
         actions={
           history.length ? (
             <button
@@ -122,7 +122,7 @@ export function HistoryView() {
         <EmptyState
           icon={History}
           title="No hay análisis guardados todavía"
-          description="Cada análisis completado se guardará aquí sin conservar PDFs ni archivos originales."
+          description="Los análisis completados aparecerán aquí para abrirlos, exportarlos o eliminarlos sin conservar PDFs ni archivos originales."
           action={
             <span className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-4 py-2 text-sm font-semibold text-primary">
               <FileText className="size-4" aria-hidden="true" />

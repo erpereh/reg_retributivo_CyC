@@ -197,8 +197,8 @@ export function CuadreExcelView() {
   if (!result) {
     return (
       <div className="space-y-6">
-        <SectionHeader title="Cuadre interno del Excel" subtitle="Valida que las retribuciones del periodo completo cuadran con el desglose de conceptos del Registro." />
-        <EmptyState icon={FileCheck2} title="No hay análisis activo" description="Sube el Registro y los PDF para generar la comparativa." />
+        <SectionHeader title="Cuadre interno del Excel" subtitle="Valida que las retribuciones del periodo completo cuadran con el desglose de conceptos dentro del propio Registro." />
+        <EmptyState icon={FileCheck2} title="No hay análisis activo" description="Carga el Registro Retributivo y las nóminas PDF para generar el cuadre interno." />
       </div>
     );
   }
@@ -207,7 +207,7 @@ export function CuadreExcelView() {
     <div className="space-y-6">
       <SectionHeader
         title="Cuadre interno del Excel"
-        subtitle="Valida que las retribuciones del periodo completo cuadran con el desglose de conceptos del Registro."
+        subtitle="Valida que las retribuciones del periodo completo cuadran con el desglose de conceptos dentro del propio Registro."
       />
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">

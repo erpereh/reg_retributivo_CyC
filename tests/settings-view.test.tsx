@@ -41,6 +41,10 @@ describe("SettingsView AI explanations", () => {
 
     render(<SettingsView />);
 
+    expect(screen.getByRole("heading", { name: "Ajustes" })).toBeTruthy();
+    expect(
+      screen.getByText("Configura tolerancias, preferencias de IA, caché de explicaciones y opciones de visualización de la comparativa."),
+    ).toBeTruthy();
     expect(screen.getByRole("switch", { name: /Abrir explicación IA automáticamente/i }).getAttribute("aria-checked")).toBe("false");
 
     fireEvent.click(screen.getByRole("button", { name: /Borrar caché de explicaciones/i }));

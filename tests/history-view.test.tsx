@@ -42,6 +42,11 @@ describe("HistoryView", () => {
   test("opens stored analysis without relying on the toast", () => {
     render(<HistoryView />);
 
+    expect(screen.getByRole("heading", { name: "Historial de análisis" })).toBeTruthy();
+    expect(
+      screen.getByText("Recupera análisis anteriores guardados localmente, cambia el análisis activo o exporta comparativas ya generadas."),
+    ).toBeTruthy();
+
     fireEvent.click(screen.getByRole("button", { name: /Abrir análisis/i }));
 
     expect(appState.value.openStoredAnalysis).toHaveBeenCalledWith("analysis-1");

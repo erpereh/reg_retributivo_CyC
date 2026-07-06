@@ -793,6 +793,22 @@ function loadDensity(): TableDensity {
   return window.localStorage.getItem("retributivo-table-density") === "compact" ? "compact" : "comfortable";
 }
 
+function viewTitle(mode: Extract<AppView, "personas" | "conceptos" | "agrupaciones">): string {
+  if (mode === "personas") return "Personas";
+  if (mode === "conceptos") return "Conceptos";
+  return "Agrupaciones";
+}
+
+function viewSubtitle(mode: Extract<AppView, "personas" | "conceptos" | "agrupaciones">): string {
+  if (mode === "personas") {
+    return "Compara por matrícula los importes del Registro frente a los importes detectados en nóminas PDF, separados por Salario, Complemento Salarial y Extrasalarial.";
+  }
+  if (mode === "conceptos") {
+    return "Revisa el detalle concepto a concepto para localizar qué partidas cuadran, cuáles generan diferencias y cuáles requieren revisión.";
+  }
+  return "Comprueba que las hojas agrupadas del Registro cuadran con los datos recalculados desde la hoja Empleados.";
+}
+
 export function TablesView({ mode }: Readonly<{ mode: Extract<AppView, "personas" | "conceptos" | "agrupaciones"> }>) {
   const { result, filters, setFilters } = useAppState();
   const [density, setDensity] = useState<TableDensity>(() => loadDensity());
@@ -809,18 +825,15 @@ export function TablesView({ mode }: Readonly<{ mode: Extract<AppView, "personas
   if (!result) {
     return (
       <div className="space-y-6">
-        <SectionHeader title="Revisión retributiva" subtitle="Completa un análisis para revisar diferencias por matrícula." />
-        <EmptyState icon={Table2} title="No hay análisis activo" description="Sube el Registro y los PDF para generar la comparativa." />
+        <SectionHeader title={viewTitle(mode)} subtitle={viewSubtitle(mode)} />
+        <EmptyState icon={Table2} title="No hay análisis activo" description="Carga el Registro Retributivo y las nóminas PDF para generar una comparativa antes de revisar esta sección." />
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      <SectionHeader
-        title={mode === "personas" ? "Personas" : mode === "conceptos" ? "Conceptos" : "Agrupaciones"}
-        subtitle="Tabla funcional con scroll horizontal, columnas sticky y detalle al clicar cualquier fila."
-      />
+      <SectionHeader title={viewTitle(mode)} subtitle={viewSubtitle(mode)} />
       {mode !== "agrupaciones" ? (
         <FiltersPanel filters={filters} centers={centers} groups={groups} density={density} onDensityChange={updateDensity} onChange={setFilters} />
       ) : null}
