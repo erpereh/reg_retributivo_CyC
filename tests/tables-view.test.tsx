@@ -153,6 +153,17 @@ describe("TablesView", () => {
     expect(screen.queryByRole("columnheader", { name: /^Detalle$/i })).toBeNull();
   });
 
+  test("keeps only Matricula sticky and uses opaque row backgrounds", () => {
+    const source = readFileSync(path.join(process.cwd(), "src", "components", "tables", "TablesView.tsx"), "utf8");
+
+    expect(source).not.toContain("left-[120px]");
+    expect(source).not.toContain("bg-emerald-50/45");
+    expect(source).not.toContain("bg-orange-50/45");
+    expect(source).not.toContain("bg-red-50/35");
+    expect(source).not.toContain("hover:bg-red-50/75");
+    expect(source).toContain("shadow-[10px_0_16px_-16px_rgba(15,23,42,0.55)]");
+  });
+
   test("quick filters keep the table functional and show visible totals", () => {
     render(<TablesView mode="personas" />);
 

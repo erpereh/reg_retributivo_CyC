@@ -6,8 +6,8 @@ import { motion, useReducedMotion } from "motion/react";
 import { Card } from "@/components/common/Card";
 import { EmptyState } from "@/components/common/EmptyState";
 import type { AnalysisResult } from "@/lib/types";
-import { formatEuro } from "@/lib/utils/money";
 import { cn } from "@/lib/utils/classNames";
+import { formatEuro } from "@/lib/utils/money";
 
 const STATUS_COLORS: Record<string, string> = {
   OK: "#15803d",
@@ -42,13 +42,7 @@ function ProfessionalChartCard({
 }
 
 function EmptyChart() {
-  return (
-    <EmptyState
-      icon={BarChart3}
-      title="Sin datos para graficar"
-      description="Sube nominas PDF y el Excel Registro para ver diferencias retributivas."
-    />
-  );
+  return <EmptyState icon={BarChart3} title="Sin datos para graficar" description="Sube nóminas PDF y el Excel Registro para ver diferencias retributivas." />;
 }
 
 function countByStatus(result: AnalysisResult): Array<{ name: string; value: number; color: string }> {
@@ -131,7 +125,7 @@ function SeparatedAmounts({ rows }: Readonly<{ rows: Array<{ name: string; value
   return (
     <div className="space-y-4">
       <p className="rounded-2xl bg-slate-50 px-4 py-3 text-sm font-medium leading-6 text-muted">
-        No se suman: cada importe representa un ambito diferente de revision.
+        No se suman: cada importe representa un ámbito diferente de revisión.
       </p>
       {rows.map((row) => (
         <div key={row.name} className="rounded-2xl border border-line bg-white p-4 shadow-subtle">
@@ -168,7 +162,7 @@ export function ChartsPanel({ result }: Readonly<{ result?: AnalysisResult }>) {
   ];
   const separatedAmounts = [
     { name: "Dif. matched", value: result.summary.matchedTotalDifference ?? result.summary.totalGlobalDifference, tone: "bg-primary" },
-    { name: "Pendiente decision", value: result.summary.pendingDecisionPdfTotal ?? result.summary.pendingReviewAmount ?? 0, tone: "bg-orange-500" },
+    { name: "Pendiente decisión", value: result.summary.pendingDecisionPdfTotal ?? result.summary.pendingReviewAmount ?? 0, tone: "bg-orange-500" },
     { name: "PDF sin Registro", value: result.summary.totalPdfWithoutRegistro ?? 0, tone: "bg-violet-600" },
   ];
   const topPeople = [...(result.people ?? [])]
@@ -203,7 +197,7 @@ export function ChartsPanel({ result }: Readonly<{ result?: AnalysisResult }>) {
         </div>
       </ProfessionalChartCard>
 
-      <ProfessionalChartCard title="Top diferencias" subtitle="Ranking de diferencias absolutas para priorizar revision manual." badge="Top 10">
+      <ProfessionalChartCard title="Top diferencias" subtitle="Ranking de diferencias absolutas para priorizar revisión manual." badge="Top 10">
         {topPeople.length ? (
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
@@ -217,11 +211,11 @@ export function ChartsPanel({ result }: Readonly<{ result?: AnalysisResult }>) {
             </ResponsiveContainer>
           </div>
         ) : (
-          <EmptyState icon={BarChart3} title="Sin diferencias" description="No hay diferencias para ordenar con el analisis activo." />
+          <EmptyState icon={BarChart3} title="Sin diferencias" description="No hay diferencias para ordenar con el análisis activo." />
         )}
       </ProfessionalChartCard>
 
-      <ProfessionalChartCard title="Importes separados" subtitle="Comparacion visual entre matched, pendiente y PDF sin Registro sin mezclar ambitos." badge="No se suman">
+      <ProfessionalChartCard title="Importes separados" subtitle="Comparación visual entre matched, pendiente y PDF sin Registro sin mezclar ámbitos." badge="No se suman">
         <SeparatedAmounts rows={separatedAmounts} />
       </ProfessionalChartCard>
     </section>

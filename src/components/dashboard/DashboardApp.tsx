@@ -3,6 +3,7 @@
 import { MotionConfig } from "motion/react";
 import { AppStateProvider, useAppState } from "@/components/app/AppState";
 import { DashboardView } from "@/components/dashboard/DashboardView";
+import { CuadreExcelView } from "@/components/cuadre-excel/CuadreExcelView";
 import { HistoryView } from "@/components/history/HistoryView";
 import { AppShell } from "@/components/layout/AppShell";
 import { SettingsView } from "@/components/settings/SettingsView";
@@ -16,6 +17,8 @@ function ActiveView() {
     case "conceptos":
     case "agrupaciones":
       return <TablesView mode={view} />;
+    case "cuadre-excel":
+      return <CuadreExcelView />;
     case "historial":
       return <HistoryView />;
     case "ajustes":

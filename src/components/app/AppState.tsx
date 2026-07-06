@@ -202,7 +202,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       setActiveAnalysis(active);
       setStatus(active ? "Análisis activo cargado desde el historial" : "Pendiente de archivos");
       if (incompatibleCount) {
-        const message = "Se ignoraron analisis guardados con formato anterior. Vuelve a analizar con la nueva logica retributiva.";
+        const message = "Se ignoraron análisis guardados con formato anterior. Vuelve a analizar con la nueva lógica retributiva.";
         setSuccess(message);
         pushMessageToast("warning", "Historial actualizado", message);
       } else {
@@ -275,12 +275,12 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       setFilters(EMPTY_FILTERS);
       setStatus(`Análisis generado: ${result.summary.uniquePeople} personas`);
       setSuccess("Análisis completado y guardado en el historial.");
-      pushMessageToast("success", "Analisis completado", `${result.summary.uniquePeople} personas generadas y guardadas en historial.`);
+      pushMessageToast("success", "Análisis completado", `${result.summary.uniquePeople} personas generadas y guardadas en historial.`);
       setView("dashboard");
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Error inesperado.";
       setError(message);
-      pushMessageToast("error", "Error de analisis", message);
+      pushMessageToast("error", "Error de análisis", message);
       setStatus("Análisis detenido");
     } finally {
       setAnalyzing(false);
@@ -339,7 +339,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
     setFilters(EMPTY_FILTERS);
     setStatus("Análisis activo actualizado desde el historial");
     setSuccess("Análisis activo actualizado.");
-    pushMessageToast("info", "Historial cargado", "Analisis activo actualizado.");
+    pushMessageToast("info", "Historial cargado", "Análisis activo actualizado.");
     setView("dashboard");
   }, [pushMessageToast]);
 
@@ -351,7 +351,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       }
       await refreshHistory();
       setSuccess("Análisis eliminado del historial.");
-      pushMessageToast("info", "Historial actualizado", "Analisis eliminado del historial.");
+      pushMessageToast("info", "Historial actualizado", "Análisis eliminado del historial.");
     },
     [activeAnalysis?.id, pushMessageToast, refreshHistory],
   );
@@ -361,7 +361,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
     setActiveAnalysis(undefined);
     setHistory([]);
     setSuccess("Historial eliminado.");
-    pushMessageToast("info", "Historial eliminado", "Se eliminaron los analisis guardados.");
+    pushMessageToast("info", "Historial eliminado", "Se eliminaron los análisis guardados.");
   }, [pushMessageToast]);
 
   const testAiConnection = useCallback(async () => {

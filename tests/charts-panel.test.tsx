@@ -127,7 +127,7 @@ describe("ChartsPanel", () => {
     render(<ChartsPanel result={result} />);
 
     expect(screen.getByText("Dif. matched")).toBeTruthy();
-    expect(screen.getByText("Pendiente decision")).toBeTruthy();
+    expect(screen.getByText("Pendiente decisión")).toBeTruthy();
     expect(screen.getByText("PDF sin Registro")).toBeTruthy();
     expect(screen.getAllByText(/No se suman/i).length).toBeGreaterThan(0);
   });

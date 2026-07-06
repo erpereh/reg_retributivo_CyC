@@ -12,6 +12,7 @@ import type { AppView, ConceptComparisonRow, PersonComparisonRow, UnmappedConcep
 import { formatEuro } from "@/lib/utils/money";
 import { describeConceptCause, describePersonCause, type ProbableCause } from "@/lib/ui/probableCause";
 import { cn } from "@/lib/utils/classNames";
+import { displayText } from "@/lib/ui/displayText";
 
 interface TableHeader {
   readonly key: string;
@@ -25,12 +26,12 @@ type DetailModalState =
   | { readonly kind: "unmapped"; readonly row: UnmappedConceptRow };
 
 const PERSONAS_HEADERS: readonly TableHeader[] = [
-  { key: "employeeNumber", label: "MatrÃ­cula" },
+  { key: "employeeNumber", label: "Matrícula" },
   { key: "person", label: "Persona" },
   { key: "cause", label: "Causa" },
   { key: "workplace", label: "Centro" },
   { key: "position", label: "Puesto" },
-  { key: "category", label: "CategorÃ­a" },
+  { key: "category", label: "Categoría" },
   { key: "salaryRegistro", label: "Salario Registro" },
   { key: "salaryPdf", label: "Salario PDF" },
   { key: "salaryDiff", label: "Dif." },
@@ -47,11 +48,11 @@ const PERSONAS_HEADERS: readonly TableHeader[] = [
 ];
 
 const CONCEPTOS_HEADERS: readonly TableHeader[] = [
-  { key: "employeeNumber", label: "MatrÃ­cula" },
+  { key: "employeeNumber", label: "Matrícula" },
   { key: "person", label: "Persona" },
   { key: "cause", label: "Causa" },
   { key: "block", label: "Bloque" },
-  { key: "registroCode", label: "CÃ³digo Registro" },
+  { key: "registroCode", label: "Código Registro" },
   { key: "pdfConcept", label: "Concepto PDF" },
   { key: "registroAmount", label: "Registro" },
   { key: "pdfAmount", label: "PDF" },
@@ -60,16 +61,16 @@ const CONCEPTOS_HEADERS: readonly TableHeader[] = [
 ];
 
 const CONCEPTOS_NO_INCLUIDOS_HEADERS: readonly TableHeader[] = [
-  { key: "decisionType", label: "Tipo decisiÃ³n" },
-  { key: "includedInComparison", label: "Incluido en cÃ¡lculo" },
+  { key: "decisionType", label: "Tipo decisión" },
+  { key: "includedInComparison", label: "Incluido en cálculo" },
   { key: "pdfConcept", label: "Concepto PDF" },
   { key: "totalDetected", label: "Total detectado" },
   { key: "peopleCount", label: "Personas" },
-  { key: "payrollCount", label: "NÃ³minas" },
-  { key: "exampleEmployeeNumbers", label: "Ejemplos matrÃ­culas" },
+  { key: "payrollCount", label: "Nóminas" },
+  { key: "exampleEmployeeNumbers", label: "Ejemplos matrículas" },
   { key: "suggestedBlock", label: "Sugerencia bloque" },
-  { key: "suggestedRegistroCode", label: "Sugerencia cÃ³digo Registro" },
-  { key: "recommendedAction", label: "AcciÃ³n recomendada" },
+  { key: "suggestedRegistroCode", label: "Sugerencia código Registro" },
+  { key: "recommendedAction", label: "Acción recomendada" },
   { key: "reason", label: "Motivo" },
 ];
 
@@ -80,18 +81,18 @@ function unique(values: readonly (string | undefined)[]): string[] {
 function rowTone(status?: string): string {
   switch (status) {
     case "OK":
-      return "bg-emerald-50/45 hover:bg-emerald-50";
+      return "bg-emerald-50 hover:bg-emerald-100";
     case "Revisar":
     case "Sin mapear":
-      return "bg-orange-50/45 hover:bg-orange-50";
+      return "bg-orange-50 hover:bg-orange-100";
     case "Diferencia":
-      return "bg-red-50/35 hover:bg-red-50/75";
+      return "bg-red-50 hover:bg-red-100";
     case "Sin Registro":
-      return "bg-violet-50/45 hover:bg-violet-50";
+      return "bg-violet-50 hover:bg-violet-100";
     case "Sin PDF":
       return "bg-slate-50 hover:bg-slate-100";
     default:
-      return "odd:bg-white even:bg-slate-50/70 hover:bg-blue-50/70";
+      return "odd:bg-white even:bg-slate-50 hover:bg-blue-50";
   }
 }
 
@@ -137,7 +138,7 @@ function FiltersPanel({
               type="search"
               value={filters.query}
               onChange={(event) => onChange({ ...filters, query: event.target.value })}
-              placeholder="Matricula, persona o concepto"
+              placeholder="Matrícula, persona o concepto"
               className="filter-control pl-11"
             />
           </span>
@@ -200,7 +201,7 @@ function FiltersPanel({
               onClick={() => onDensityChange(item)}
               className={cn("min-h-9 rounded-full px-3 text-xs font-semibold transition", density === item ? "bg-white text-ink shadow-subtle" : "text-muted")}
             >
-              {item === "comfortable" ? "Comoda" : "Compacta"}
+              {item === "comfortable" ? "Cómoda" : "Compacta"}
             </button>
           ))}
         </div>
@@ -234,7 +235,7 @@ function ModalField({ label, value }: Readonly<{ label: string; value?: string |
   return (
     <div>
       <p className="text-xs font-semibold uppercase text-muted">{label}</p>
-      <p className="mt-1 break-words text-sm font-semibold text-ink">{value ?? "Sin dato"}</p>
+      <p className="mt-1 break-words text-sm font-semibold text-ink">{displayText(value) || "Sin dato"}</p>
     </div>
   );
 }
@@ -269,8 +270,8 @@ function DetailModal({ state, tolerance, onClose }: Readonly<{ state: DetailModa
         ? describeConceptCause(state.row, tolerance)
         : {
             label: state.row.decisionType ?? (state.row.action === "Ignorado" ? "Ignorado" : "Sin mapear real"),
-            description: state.row.reason ?? "Concepto no incluido en el calculo principal.",
-            review: state.row.recommendedAction ?? "Revisar criterio de decision.",
+            description: displayText(state.row.reason) || "Concepto no incluido en el cálculo principal.",
+            review: displayText(state.row.recommendedAction) || "Revisar criterio de decisión.",
           };
   const copySummary = `${title}: ${cause.label} - ${cause.description}`;
 
@@ -300,21 +301,21 @@ function DetailModal({ state, tolerance, onClose }: Readonly<{ state: DetailModa
         <div className="mt-6 grid gap-4 md:grid-cols-4">
           {state.kind === "person" ? (
             <>
-              <ModalField label="Matricula" value={state.row.employeeNumber} />
+              <ModalField label="Matrícula" value={state.row.employeeNumber} />
               <ModalField label="Persona" value={state.row.person} />
               <ModalField label="Centro" value={state.row.workplace} />
               <ModalField label="Puesto" value={state.row.position} />
-              <ModalField label="Categoria" value={state.row.category} />
+              <ModalField label="Categoría" value={state.row.category} />
               <ModalField label="Estado" value={state.row.status} />
-              <ModalField label="Nominas" value={state.row.payrollCount} />
+              <ModalField label="Nóminas" value={state.row.payrollCount} />
               <ModalField label="Periodos" value={state.row.periods.join("; ")} />
             </>
           ) : state.kind === "concept" ? (
             <>
-              <ModalField label="Matricula" value={state.row.employeeNumber} />
+              <ModalField label="Matrícula" value={state.row.employeeNumber} />
               <ModalField label="Persona" value={state.row.person} />
               <ModalField label="Bloque" value={state.row.block} />
-              <ModalField label="Codigo Registro" value={state.row.registroCode} />
+              <ModalField label="Código Registro" value={state.row.registroCode} />
               <ModalField label="Concepto PDF" value={state.row.pdfConcept} />
               <ModalField label="Estado" value={state.row.status} />
               <ModalField label="Regla usada" value={state.row.detail} />
@@ -324,11 +325,11 @@ function DetailModal({ state, tolerance, onClose }: Readonly<{ state: DetailModa
               <ModalField label="Concepto PDF" value={state.row.pdfConcept} />
               <ModalField label="Total detectado" value={formatEuro(state.row.totalDetected)} />
               <ModalField label="Personas" value={state.row.peopleCount} />
-              <ModalField label="Nominas" value={state.row.payrollCount} />
-              <ModalField label="Ejemplos matriculas" value={state.row.exampleEmployeeNumbers.join("; ")} />
-              <ModalField label="Tipo decision" value={state.row.decisionType} />
+              <ModalField label="Nóminas" value={state.row.payrollCount} />
+              <ModalField label="Ejemplos matrículas" value={state.row.exampleEmployeeNumbers.join("; ")} />
+              <ModalField label="Tipo decisión" value={state.row.decisionType} />
               <ModalField label="Sugerencia bloque" value={state.row.suggestedBlock} />
-              <ModalField label="Sugerencia codigo Registro" value={state.row.suggestedRegistroCode} />
+              <ModalField label="Sugerencia código Registro" value={state.row.suggestedRegistroCode} />
             </>
           )}
         </div>
@@ -349,11 +350,11 @@ function DetailModal({ state, tolerance, onClose }: Readonly<{ state: DetailModa
         <div className="mt-6 grid gap-4 md:grid-cols-2">
           <div className="rounded-2xl bg-blue-50 p-4">
             <p className="text-sm font-semibold text-blue-950">Causa probable: {cause.label}</p>
-            <p className="mt-2 text-sm leading-6 text-blue-900">{cause.description}</p>
+            <p className="mt-2 text-sm leading-6 text-blue-900">{displayText(cause.description)}</p>
           </div>
           <div className="rounded-2xl bg-slate-50 p-4">
-            <p className="text-sm font-semibold text-ink">Que revisar</p>
-            <p className="mt-2 text-sm leading-6 text-muted">{cause.review}</p>
+            <p className="text-sm font-semibold text-ink">Qué revisar</p>
+            <p className="mt-2 text-sm leading-6 text-muted">{displayText(cause.review)}</p>
           </div>
         </div>
 
@@ -425,12 +426,12 @@ function PersonasTable({ density, onOpen }: Readonly<{ density: TableDensity; on
                     transition={{ duration: 0.16, delay: Math.min(index * 0.01, 0.16) }}
                     className={cn("cursor-pointer transition", rowTone(row.status))}
                   >
-                    <td className={cn(stickyFirstColumn(density), "border-b border-line/70 font-mono")}>{row.employeeNumber}</td>
-                    <td className={cn("min-w-[220px] border-b border-line/70 font-semibold", cellPadding(density))}>{row.person}</td>
+                    <td className={cn(stickyFirstColumn(density), "border-b border-line/70 font-mono")}>{displayText(row.employeeNumber)}</td>
+                    <td className={cn("min-w-[220px] border-b border-line/70 font-semibold", cellPadding(density))}>{displayText(row.person)}</td>
                     <td className={cn("border-b border-line/70", cellPadding(density))}><CauseBadge cause={cause} /></td>
-                    <td className={cn("border-b border-line/70", cellPadding(density))}>{row.workplace}</td>
-                    <td className={cn("border-b border-line/70", cellPadding(density))}>{row.position}</td>
-                    <td className={cn("border-b border-line/70", cellPadding(density))}>{row.category}</td>
+                    <td className={cn("border-b border-line/70", cellPadding(density))}>{displayText(row.workplace)}</td>
+                    <td className={cn("border-b border-line/70", cellPadding(density))}>{displayText(row.position)}</td>
+                    <td className={cn("border-b border-line/70", cellPadding(density))}>{displayText(row.category)}</td>
                     <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density))}>{formatEuro(row.salaryRegistro)}</td>
                     <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density))}>{formatEuro(row.salaryPdf)}</td>
                     <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density), diffClass(row.salaryDifference))}>{formatEuro(row.salaryDifference)}</td>
@@ -509,12 +510,12 @@ function ConceptosTable({ density, onOpen }: Readonly<{ density: TableDensity; o
                     }}
                     className={cn("cursor-pointer transition", rowTone(row.status))}
                   >
-                    <td className={cn(stickyFirstColumn(density), "border-b border-line/70 font-mono")}>{row.employeeNumber}</td>
-                    <td className={cn("min-w-[220px] border-b border-line/70 font-semibold", cellPadding(density))}>{row.person}</td>
+                    <td className={cn(stickyFirstColumn(density), "border-b border-line/70 font-mono")}>{displayText(row.employeeNumber)}</td>
+                    <td className={cn("min-w-[220px] border-b border-line/70 font-semibold", cellPadding(density))}>{displayText(row.person)}</td>
                     <td className={cn("border-b border-line/70", cellPadding(density))}><CauseBadge cause={cause} /></td>
-                    <td className={cn("border-b border-line/70", cellPadding(density))}>{row.block}</td>
-                    <td className={cn("border-b border-line/70 font-mono", cellPadding(density))}>{row.registroCode}</td>
-                    <td className={cn("max-w-[260px] truncate border-b border-line/70", cellPadding(density))}>{row.pdfConcept}</td>
+                    <td className={cn("border-b border-line/70", cellPadding(density))}>{displayText(row.block)}</td>
+                    <td className={cn("border-b border-line/70 font-mono", cellPadding(density))}>{displayText(row.registroCode)}</td>
+                    <td className={cn("max-w-[260px] truncate border-b border-line/70", cellPadding(density))}>{displayText(row.pdfConcept)}</td>
                     <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density))}>{formatEuro(row.registroAmount)}</td>
                     <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density))}>{formatEuro(row.pdfAmount)}</td>
                     <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density), diffClass(row.difference))}>{formatEuro(row.difference)}</td>
@@ -544,18 +545,18 @@ function ConceptosTable({ density, onOpen }: Readonly<{ density: TableDensity; o
             </thead>
             <tbody>
               {unmapped.map((row) => (
-                <tr key={row.pdfConcept} tabIndex={0} onClick={() => onOpen({ kind: "unmapped", row })} className="cursor-pointer odd:bg-white even:bg-slate-50 hover:bg-blue-50/70">
+                <tr key={row.pdfConcept} tabIndex={0} onClick={() => onOpen({ kind: "unmapped", row })} className="cursor-pointer odd:bg-white even:bg-slate-50 hover:bg-blue-50">
                   <td className={cn(stickyFirstColumn(density), "border-b border-line/70")}><Badge value={row.decisionType ?? (row.action === "Ignorado" ? "Ignorado" : "Sin mapear real")} /></td>
-                  <td className={cn("border-b border-line/70", cellPadding(density))}>{row.includedInComparison ? "Si" : "No"}</td>
-                  <td className={cn("border-b border-line/70 font-semibold", cellPadding(density))}>{row.pdfConcept}</td>
+                  <td className={cn("border-b border-line/70", cellPadding(density))}>{row.includedInComparison ? "Sí" : "No"}</td>
+                  <td className={cn("border-b border-line/70 font-semibold", cellPadding(density))}>{displayText(row.pdfConcept)}</td>
                   <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density))}>{formatEuro(row.totalDetected)}</td>
                   <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density))}>{row.peopleCount}</td>
                   <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density))}>{row.payrollCount}</td>
                   <td className={cn("border-b border-line/70 font-mono", cellPadding(density))}>{row.exampleEmployeeNumbers.join("; ")}</td>
-                  <td className={cn("border-b border-line/70", cellPadding(density))}>{row.suggestedBlock}</td>
-                  <td className={cn("border-b border-line/70 font-mono", cellPadding(density))}>{row.suggestedRegistroCode}</td>
-                  <td className={cn("border-b border-line/70", cellPadding(density))}>{row.recommendedAction ?? row.action}</td>
-                  <td className={cn("max-w-[320px] border-b border-line/70", cellPadding(density))}>{row.reason}</td>
+                  <td className={cn("border-b border-line/70", cellPadding(density))}>{displayText(row.suggestedBlock)}</td>
+                  <td className={cn("border-b border-line/70 font-mono", cellPadding(density))}>{displayText(row.suggestedRegistroCode)}</td>
+                  <td className={cn("border-b border-line/70", cellPadding(density))}>{displayText(row.recommendedAction ?? row.action)}</td>
+                  <td className={cn("max-w-[320px] border-b border-line/70", cellPadding(density))}>{displayText(row.reason)}</td>
                 </tr>
               ))}
             </tbody>
@@ -573,8 +574,8 @@ function AgrupacionesTable() {
   return (
     <EmptyState
       icon={Table2}
-      title={rows.length ? "Agrupaciones calculadas" : "Pendiente de implementaciÃ³n"}
-      description="La primera fase prioriza Registro vs PDF, conceptos y normalizado vs real. Las agrupaciones se implementan despues sin bloquear la validacion de importes."
+      title={rows.length ? "Agrupaciones calculadas" : "Pendiente de implementación"}
+      description="La primera fase prioriza Registro vs PDF, conceptos y normalizado vs real. Las agrupaciones se implementan después sin bloquear la validación de importes."
     />
   );
 }
@@ -600,8 +601,8 @@ export function TablesView({ mode }: Readonly<{ mode: Extract<AppView, "personas
   if (!result) {
     return (
       <div className="space-y-6">
-        <SectionHeader title="Revision retributiva" subtitle="Completa un analisis para revisar diferencias por matricula." />
-        <EmptyState icon={Table2} title="No hay analisis activo" description="Sube el Registro y los PDF para generar la comparativa." />
+        <SectionHeader title="Revisión retributiva" subtitle="Completa un análisis para revisar diferencias por matrícula." />
+        <EmptyState icon={Table2} title="No hay análisis activo" description="Sube el Registro y los PDF para generar la comparativa." />
       </div>
     );
   }

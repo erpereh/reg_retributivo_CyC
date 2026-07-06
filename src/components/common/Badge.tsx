@@ -2,6 +2,7 @@
 
 import { AlertTriangle, CheckCircle2, CircleDashed, Info, XCircle } from "lucide-react";
 import { motion } from "motion/react";
+import { displayText } from "@/lib/ui/displayText";
 import { cn } from "@/lib/utils/classNames";
 
 interface BadgeProps {
@@ -10,7 +11,7 @@ interface BadgeProps {
 }
 
 export function Badge({ value, className }: BadgeProps) {
-  const text = value || "Sin dato";
+  const text = displayText(value) || "Sin dato";
   const lower = text.toLowerCase();
   const danger = lower.includes("alta") || lower.includes("incidencia") || lower.includes("falta");
   const warning = lower.includes("media") || lower.includes("revisar");

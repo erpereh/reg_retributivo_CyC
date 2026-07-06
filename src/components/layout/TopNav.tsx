@@ -10,6 +10,7 @@ const TABS: ReadonlyArray<{ id: AppView; label: string }> = [
   { id: "dashboard", label: "Dashboard" },
   { id: "personas", label: "Personas" },
   { id: "conceptos", label: "Conceptos" },
+  { id: "cuadre-excel", label: "Cuadre Excel" },
   { id: "agrupaciones", label: "Agrupaciones" },
   { id: "historial", label: "Historial" },
   { id: "ajustes", label: "Ajustes" },
@@ -54,10 +55,10 @@ export function TopNav() {
 
   return (
     <header className="sticky top-3 z-30 px-1">
-      <nav aria-label="Navegacion principal" className="mx-auto grid max-w-[1500px] grid-cols-[1fr_auto_1fr] items-center gap-3">
+      <nav aria-label="Navegación principal" className="mx-auto grid max-w-[1500px] grid-cols-[1fr_auto_1fr] items-center gap-3">
         <div aria-hidden="true" />
 
-        <div className="max-w-[calc(100vw-7rem)] overflow-x-auto rounded-full border border-white/80 bg-white/88 p-1 shadow-subtle backdrop-blur-xl md:max-w-none md:overflow-visible">
+        <div className="max-w-[calc(100vw-7rem)] overflow-x-auto rounded-full border border-white/80 bg-white/95 p-1 shadow-subtle md:max-w-none md:overflow-visible">
           <div className="flex min-w-max items-center gap-1" role="tablist" aria-label="Vistas">
             {TABS.map((tab) => {
               const active = view === tab.id;
@@ -69,7 +70,7 @@ export function TopNav() {
                   aria-selected={active}
                   onClick={() => setView(tab.id)}
                   className={cn(
-                    "relative min-h-10 whitespace-nowrap rounded-full px-4 text-sm font-semibold transition-colors duration-150",
+                    "relative min-h-10 whitespace-nowrap rounded-full px-3 text-sm font-semibold transition-colors duration-150 xl:px-4",
                     active ? "text-white" : "text-muted hover:text-ink",
                   )}
                 >
@@ -91,7 +92,7 @@ export function TopNav() {
           <IconAction label="Exportar Excel" disabled={!result || exporting} onClick={() => void exportActiveAnalysis()} variant="secondary">
             <Download className="size-4" aria-hidden="true" />
           </IconAction>
-          <IconAction label="Nuevo analisis" onClick={resetForNewAnalysis} variant="primary">
+          <IconAction label="Nuevo análisis" onClick={resetForNewAnalysis} variant="primary">
             <RotateCcw className="size-4" aria-hidden="true" />
           </IconAction>
         </div>

@@ -1,24 +1,51 @@
 "use client";
 
-import { AlertCircle, BadgeEuro, FileText, Sigma, Users, UserX } from "lucide-react";
+import { AlertCircle, BadgeEuro, FileCheck2, FileText, Sigma, Users, UserX } from "lucide-react";
 import { StatCard } from "@/components/common/StatCard";
-import type { AnalysisSummary } from "@/lib/types";
+import type { AnalysisSummary, InternalExcelCheckRow } from "@/lib/types";
 import { formatEuro } from "@/lib/utils/money";
 
 interface SummaryCardsProps {
   readonly summary?: AnalysisSummary;
+  readonly internalExcelChecks?: readonly InternalExcelCheckRow[];
 }
 
-export function SummaryCards({ summary }: SummaryCardsProps) {
+function getInternalExcelAccent(rows: readonly InternalExcelCheckRow[]): "green" | "orange" | "red" {
+  if (rows.some((row) => row.status === "Diferencia")) {
+    return "red";
+  }
+
+  if (rows.some((row) => row.status === "Revisar")) {
+    return "orange";
+  }
+
+  return "green";
+}
+
+export function SummaryCards({ summary, internalExcelChecks = [] }: SummaryCardsProps) {
+  const internalOk = internalExcelChecks.filter((row) => row.status === "OK").length;
+  const internalTotal = internalExcelChecks.length;
+  const internalAccent = getInternalExcelAccent(internalExcelChecks);
+
   const cards = [
     {
       label: "Recibos procesados",
       value: summary?.pdfsAnalyzed ?? 0,
-      detail: summary?.pdfsFailed ? `${summary.pdfsFailed} con error` : "Paginas de recibos procesadas",
+      detail: summary?.pdfsFailed ? `${summary.pdfsFailed} con error` : "Páginas de recibos procesadas",
       icon: FileText,
       highlight: true,
       badge: "Proceso",
-      tooltip: "Recibos procesados desde los PDFs cargados. Es volumen de analisis, no una diferencia economica.",
+      tooltip: "Recibos procesados desde los PDFs cargados. Es volumen de análisis, no una diferencia económica.",
+    },
+    {
+      label: "Cuadre interno Excel",
+      value: `${internalOk} / ${internalTotal} OK`,
+      detail: "Periodo completo vs desglose de conceptos",
+      icon: FileCheck2,
+      accent: internalAccent,
+      badge: internalAccent === "green" ? "OK" : internalAccent === "orange" ? "Revisión" : "Diferencia",
+      tooltip:
+        "El cuadre interno compara las columnas de retribuciones del periodo completo contra la suma de conceptos de Salario, C. Salarial y Extrasalarial dentro del propio Excel. No compara contra PDFs.",
     },
     {
       label: "Personas matched",
@@ -35,8 +62,8 @@ export function SummaryCards({ summary }: SummaryCardsProps) {
       detail: "Importe PDF pendiente de decisión, no incluido en el cálculo principal",
       icon: AlertCircle,
       accent: "orange" as const,
-      badge: "Decision",
-      tooltip: "Requieren decision manual; no son errores automaticos. No entran en el calculo principal hasta que se active una decision desde Ajustes.",
+      badge: "Decisión",
+      tooltip: "Requieren decisión manual; no son errores automáticos. No entran en el cálculo principal hasta que se active una decisión desde Ajustes.",
     },
     {
       label: "Importe pendiente de decisión",
@@ -45,7 +72,7 @@ export function SummaryCards({ summary }: SummaryCardsProps) {
       icon: AlertCircle,
       accent: "orange" as const,
       badge: "Separado",
-      tooltip: "Importe detectado en PDFs que requiere revision manual. No afecta al calculo principal hasta que se decida incluirlo.",
+      tooltip: "Importe detectado en PDFs que requiere revisión manual. No afecta al cálculo principal hasta que se decida incluirlo.",
     },
     {
       label: "Dif. matched",
@@ -63,16 +90,16 @@ export function SummaryCards({ summary }: SummaryCardsProps) {
       icon: UserX,
       accent: "gray" as const,
       badge: "Correcto",
-      tooltip: "Conceptos excluidos deliberadamente del calculo, por ejemplo deducciones, retenciones o duplicados informativos.",
+      tooltip: "Conceptos excluidos deliberadamente del cálculo, por ejemplo deducciones, retenciones o duplicados informativos.",
     },
     {
       label: "Conceptos sin mapear reales",
       value: summary?.conceptsRealUnmapped ?? 0,
-      detail: "Problema real de mapeo: sin codigo Registro claro",
+      detail: "Problema real de mapeo: sin código Registro claro",
       icon: AlertCircle,
       accent: "red" as const,
       badge: "Mapeo",
-      tooltip: "Conceptos detectados en PDF que no tienen un codigo Registro claro. Estos si requieren revisar el mapeo.",
+      tooltip: "Conceptos detectados en PDF que no tienen un código Registro claro. Estos sí requieren revisar el mapeo.",
     },
     {
       label: "PDF sin Registro",
@@ -81,7 +108,7 @@ export function SummaryCards({ summary }: SummaryCardsProps) {
       icon: Sigma,
       accent: "violet" as const,
       badge: "Separado",
-      tooltip: "Importes detectados en PDFs cuya matricula no existe en la hoja Empleados del Registro. Se muestran separados del matched.",
+      tooltip: "Importes detectados en PDFs cuya matrícula no existe en la hoja Empleados del Registro. Se muestran separados del matched.",
     },
   ];
 

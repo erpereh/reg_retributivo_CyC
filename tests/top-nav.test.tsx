@@ -42,20 +42,32 @@ describe("TopNav", () => {
     expect(appState.value.setView).toHaveBeenCalledWith("personas");
   });
 
+  test("includes the Cuadre Excel tab between concepts and groupings", () => {
+    render(<TopNav />);
+
+    const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
+
+    expect(tabs).toEqual(["Dashboard", "Personas", "Conceptos", "Cuadre Excel", "Agrupaciones", "Historial", "Ajustes"]);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Cuadre Excel" }));
+
+    expect(appState.value.setView).toHaveBeenCalledWith("cuadre-excel");
+  });
+
   test("renders compact premium navigation without brand or analysis badges", () => {
     render(<TopNav />);
 
     expect(screen.queryByText("Retributivo")).toBeNull();
-    expect(screen.queryByText(/Analisis activo/i)).toBeNull();
+    expect(screen.queryByText(/Análisis activo/i)).toBeNull();
     expect(screen.queryByText(/IA activa/i)).toBeNull();
-    expect(screen.getByRole("navigation", { name: /Navegacion principal/i })).toBeTruthy();
+    expect(screen.getByRole("navigation", { name: /Navegación principal/i })).toBeTruthy();
   });
 
   test("uses icon-only export and reset buttons with accessible names", () => {
     render(<TopNav />);
 
     const exportButton = screen.getByRole("button", { name: /Exportar Excel/i });
-    const resetButton = screen.getByRole("button", { name: /Nuevo analisis/i });
+    const resetButton = screen.getByRole("button", { name: /Nuevo análisis/i });
 
     expect(exportButton.textContent).toBe("");
     expect(resetButton.textContent).toBe("");
@@ -75,7 +87,7 @@ describe("TopNav", () => {
 
     render(<TopNav />);
 
-    expect(screen.queryByText(/Analisis activo/i)).toBeNull();
+    expect(screen.queryByText(/Análisis activo/i)).toBeNull();
     expect(screen.queryByText(/IA activa/i)).toBeNull();
   });
 });

@@ -54,7 +54,7 @@ export function ToastViewport({ toasts, onDismiss, autoDismissMs = 4500 }: Toast
   }, [autoDismissMs, onDismiss, toasts]);
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex w-[min(420px,calc(100vw-2rem))] flex-col gap-3" aria-live="polite">
+    <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-[min(420px,calc(100vw-2rem))] flex-col gap-3" aria-live="polite">
       <AnimatePresence initial={false}>
         {toasts.map((toast) => (
           <motion.div
@@ -65,7 +65,7 @@ export function ToastViewport({ toasts, onDismiss, autoDismissMs = 4500 }: Toast
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.98 }}
             transition={{ duration: 0.18, ease: "easeOut" }}
-            className={cn("flex items-start gap-3 rounded-2xl border p-4 shadow-lift backdrop-blur", TOAST_STYLE[toast.kind])}
+            className={cn("pointer-events-auto flex items-start gap-3 rounded-2xl border p-4 shadow-lift", TOAST_STYLE[toast.kind])}
           >
             <ToastIcon kind={toast.kind} />
             <div className="min-w-0 flex-1">

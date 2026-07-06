@@ -31,8 +31,8 @@ export function DashboardView() {
         actions={
           activeAnalysis ? (
             <Card className="flex items-center gap-3 rounded-full px-4 py-3">
-              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-50 text-primary">
-                <Clock3 className="h-4 w-4" aria-hidden="true" />
+              <span className="flex size-9 items-center justify-center rounded-full bg-blue-50 text-primary">
+                <Clock3 className="size-4" aria-hidden="true" />
               </span>
               <div>
                 <p className="text-xs font-semibold uppercase text-muted">Análisis activo</p>
@@ -44,7 +44,7 @@ export function DashboardView() {
         }
       />
       <UploadPanel />
-      <SummaryCards summary={result?.summary} />
+      <SummaryCards summary={result?.summary} internalExcelChecks={result?.internalExcelChecks} />
       <ChartsPanel result={result} />
     </div>
   );

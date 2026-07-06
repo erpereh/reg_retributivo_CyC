@@ -16,7 +16,7 @@ export type ConceptDedupePriority = "devengo" | "informativo";
 export type NonIncludedDecisionType = "Pendiente revision" | "Sin mapear real" | "Ignorado";
 export type AnalysisStatus = "OK" | "Revisar" | "Diferencia" | "Sin mapear" | "Sin PDF" | "Sin Registro";
 export type SalaryStatus = AnalysisStatus;
-export type AppView = "dashboard" | "personas" | "conceptos" | "agrupaciones" | "historial" | "ajustes";
+export type AppView = "dashboard" | "personas" | "conceptos" | "cuadre-excel" | "agrupaciones" | "historial" | "ajustes";
 
 export interface AnalysisThresholds {
   readonly reviewThreshold: number;

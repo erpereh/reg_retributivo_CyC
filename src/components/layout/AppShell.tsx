@@ -18,13 +18,13 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
           {hydrating ? (
             <DashboardSkeleton />
           ) : (
-            <AnimatePresence mode="wait">
+            <AnimatePresence initial={false}>
               <motion.div
                 key={view}
                 initial={{ opacity: 0, y: 18 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.24, ease: "easeOut" }}
+                transition={{ duration: 0.18, ease: "easeOut" }}
               >
                 {children}
               </motion.div>
