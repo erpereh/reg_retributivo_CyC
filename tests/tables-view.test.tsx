@@ -2,7 +2,7 @@
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { TablesView } from "@/components/tables/TablesView";
 
@@ -62,6 +62,58 @@ const appState = {
           periods: ["Febrero 2025"],
           files: ["PDF_FEBRERO.pdf"],
         },
+        {
+          employeeNumber: "10072",
+          person: "Persona Bolsa",
+          workplace: "Bilbao",
+          position: "Puesto",
+          category: "Categoria",
+          salaryRegistro: 1000,
+          salaryPdf: 1000,
+          salaryDifference: 0,
+          salaryComplementRegistro: 500,
+          salaryComplementPdf: 1341.92,
+          salaryComplementDifference: 841.92,
+          extraSalaryRegistro: 0,
+          extraSalaryPdf: 208.01,
+          extraSalaryDifference: 208.01,
+          registroTotal: 1500,
+          pdfTotal: 2549.93,
+          totalDifference: 1049.93,
+          pdfControlTotalDevengado: 2549.93,
+          payrollCount: 1,
+          unmappedConceptsCount: 1,
+          status: "Diferencia",
+          detail: "Bolsa vacaciones y teletrabajo",
+          periods: ["Marzo 2025"],
+          files: ["PDF_MARZO.pdf"],
+        },
+        {
+          employeeNumber: "10123",
+          person: "Persona Reclasificacion",
+          workplace: "Madrid",
+          position: "Puesto",
+          category: "Categoria",
+          salaryRegistro: 1000,
+          salaryPdf: 4679.81,
+          salaryDifference: 3679.81,
+          salaryComplementRegistro: 3679.8,
+          salaryComplementPdf: 0,
+          salaryComplementDifference: -3679.8,
+          extraSalaryRegistro: 193.94,
+          extraSalaryPdf: 0,
+          extraSalaryDifference: -193.94,
+          registroTotal: 4873.74,
+          pdfTotal: 4679.81,
+          totalDifference: -193.94,
+          pdfControlTotalDevengado: 4679.81,
+          payrollCount: 1,
+          unmappedConceptsCount: 0,
+          status: "Diferencia",
+          detail: "Reclasificacion entre bloques",
+          periods: ["Abril 2025"],
+          files: ["PDF_ABRIL.pdf"],
+        },
       ],
       concepts: [
         {
@@ -69,11 +121,11 @@ const appState = {
           person: "Persona Test",
           block: "Extrasalarial",
           blockKey: "extraSalary",
-          registroCode: "CYC_SEG_SALUD",
-          pdfConcept: "Seguro Medico",
-          registroAmount: 100,
-          pdfAmount: 120,
-          difference: 20,
+          registroCode: "CYC_ABONO_TELETRABAJO",
+          pdfConcept: "Abono teletrabajo",
+          registroAmount: 0,
+          pdfAmount: 208.01,
+          difference: 208.01,
           status: "Diferencia",
           detail: "Diferencia de concepto",
         },
@@ -90,8 +142,125 @@ const appState = {
           status: "Diferencia",
           detail: "Diferencia de concepto",
         },
+        {
+          employeeNumber: "10048",
+          person: "Persona Test",
+          block: "Extrasalarial",
+          blockKey: "extraSalary",
+          registroCode: "CYC_SEG_SALUD",
+          pdfConcept: "Seguro Medico",
+          registroAmount: 100,
+          pdfAmount: 120,
+          difference: 20,
+          status: "Diferencia",
+          detail: "Diferencia de concepto",
+        },
+        {
+          employeeNumber: "10048",
+          person: "Persona Test",
+          block: "C. Salarial",
+          blockKey: "salaryComplement",
+          registroCode: "CSP_REVISION",
+          pdfConcept: "Complemento revision",
+          registroAmount: 100,
+          pdfAmount: 100,
+          difference: 0,
+          status: "Revisar",
+          detail: "Revisar criterio",
+        },
+        {
+          employeeNumber: "10048",
+          person: "Persona Test",
+          block: "Salario",
+          blockKey: "salary",
+          registroCode: "SSP_ANTIGUEDAD",
+          pdfConcept: "Antiguedad",
+          registroAmount: 50,
+          pdfAmount: 50,
+          difference: 0,
+          status: "OK",
+          detail: "OK",
+        },
+        {
+          employeeNumber: "10072",
+          person: "Persona Bolsa",
+          block: "C. Salarial",
+          blockKey: "salaryComplement",
+          registroCode: "CSP_BOLSA_VAC",
+          pdfConcept: "Bolsa de Vacaciones",
+          registroAmount: 0,
+          pdfAmount: 841.92,
+          difference: 841.92,
+          status: "Diferencia",
+          detail: "Bolsa vacaciones",
+        },
+        {
+          employeeNumber: "10072",
+          person: "Persona Bolsa",
+          block: "Extrasalarial",
+          blockKey: "extraSalary",
+          registroCode: "CYC_ABONO_TELETRABAJO",
+          pdfConcept: "Abono teletrabajo",
+          registroAmount: 0,
+          pdfAmount: 208.01,
+          difference: 208.01,
+          status: "Diferencia",
+          detail: "Teletrabajo",
+        },
+        {
+          employeeNumber: "10123",
+          person: "Persona Reclasificacion",
+          block: "Salario",
+          blockKey: "salary",
+          registroCode: "SSP_PREST_ENF_75",
+          pdfConcept: "Prestacion enfermedad 75",
+          registroAmount: 0,
+          pdfAmount: 3679.81,
+          difference: 3679.81,
+          status: "Diferencia",
+          detail: "Reclasificacion",
+        },
+        {
+          employeeNumber: "10123",
+          person: "Persona Reclasificacion",
+          block: "C. Salarial",
+          blockKey: "salaryComplement",
+          registroCode: "CSP_IT_COMPLEMENTO",
+          pdfConcept: "Complemento IT",
+          registroAmount: 3679.8,
+          pdfAmount: 0,
+          difference: -3679.8,
+          status: "Diferencia",
+          detail: "Reclasificacion",
+        },
+        {
+          employeeNumber: "10123",
+          person: "Persona Reclasificacion",
+          block: "Extrasalarial",
+          blockKey: "extraSalary",
+          registroCode: "CYC_EXTRA_RESTO",
+          pdfConcept: "Ajuste extrasalarial",
+          registroAmount: 193.94,
+          pdfAmount: 0,
+          difference: -193.94,
+          status: "Diferencia",
+          detail: "Diferencia residual",
+        },
       ],
       unmappedConcepts: [
+        {
+          decisionType: "Pendiente revision",
+          includedInComparison: false,
+          pdfConcept: "Prestacion Teorica Maternidad",
+          totalDetected: 300,
+          peopleCount: 1,
+          payrollCount: 1,
+          exampleEmployeeNumbers: ["10048"],
+          suggestedBlock: "C. Salarial",
+          action: "Pendiente revision",
+          recommendedAction: "Revisar maternidad",
+          reason: "Ejemplo explicito para la matricula",
+        },
         {
           decisionType: "Pendiente revision",
           includedInComparison: false,
@@ -163,6 +332,63 @@ describe("TablesView", () => {
     expect(screen.getByText("IA no configurada. Añade GEMINI_API_KEY en .env")).toBeTruthy();
   });
 
+  test("shows a compact person concept table before AI with filters, ordering and expandable detail", () => {
+    render(<TablesView mode="personas" />);
+    fireEvent.click(screen.getByText("10048"));
+
+    const conceptSection = screen.getByRole("region", { name: /Conceptos de la persona/i });
+
+    expect(within(conceptSection).getByText("Conceptos de la persona")).toBeTruthy();
+    expect(within(conceptSection).getByText(/Comparativa de conceptos del Registro/i)).toBeTruthy();
+    expect(within(conceptSection).queryByRole("columnheader", { name: "Persona" })).toBeNull();
+    expect(within(conceptSection).queryByRole("columnheader", { name: "Matrícula" })).toBeNull();
+    expect(within(conceptSection).getByText(/Diferencia total de conceptos visibles/i)).toBeTruthy();
+    expect(within(conceptSection).getByText(/Conceptos con diferencia real/i)).toBeTruthy();
+    expect(within(conceptSection).getByText(/Conceptos OK/i)).toBeTruthy();
+
+    const content = conceptSection.textContent ?? "";
+    expect(content.indexOf("Abono teletrabajo")).toBeLessThan(content.indexOf("Salario Base"));
+    expect(content.indexOf("Salario Base")).toBeLessThan(content.indexOf("Seguro Medico"));
+
+    fireEvent.click(within(conceptSection).getByRole("button", { name: /OK/i }));
+    expect(within(conceptSection).getByText("Antiguedad")).toBeTruthy();
+    expect(within(conceptSection).queryByText("Abono teletrabajo")).toBeNull();
+
+    fireEvent.click(within(conceptSection).getByRole("button", { name: /Solo diferencias/i }));
+    expect(within(conceptSection).getByText("Abono teletrabajo")).toBeTruthy();
+    fireEvent.click(within(conceptSection).getByText("Abono teletrabajo"));
+    expect(within(conceptSection).getByText(/Qué revisar/i)).toBeTruthy();
+    expect(within(conceptSection).getByText(/Causa probable/i)).toBeTruthy();
+
+    expect(screen.getByText("Conceptos no incluidos de esta persona")).toBeTruthy();
+    expect(screen.getByText("Prestacion Teorica Maternidad")).toBeTruthy();
+    expect(screen.queryByText("Paga 40 anos")).toBeNull();
+    expect(conceptSection.compareDocumentPosition(screen.getByRole("region", { name: /Explicación IA/i })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  test("shows an empty state when the selected person has no compared concepts", () => {
+    render(<TablesView mode="personas" />);
+    fireEvent.click(screen.getByText("10050"));
+
+    expect(screen.getByText("No hay conceptos comparados para esta matrícula.")).toBeTruthy();
+  });
+
+  test("orders 10072 and 10123 concept rows by the relevant differences", () => {
+    render(<TablesView mode="personas" />);
+
+    fireEvent.click(screen.getByText("10072"));
+    let conceptSection = screen.getByRole("region", { name: /Conceptos de la persona/i });
+    let content = conceptSection.textContent ?? "";
+    expect(content.indexOf("Bolsa de Vacaciones")).toBeLessThan(content.indexOf("Abono teletrabajo"));
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.click(screen.getByText("10123"));
+    conceptSection = screen.getByRole("region", { name: /Conceptos de la persona/i });
+    content = conceptSection.textContent ?? "";
+    expect(content.indexOf("Prestacion enfermedad 75")).toBeLessThan(content.indexOf("Ajuste extrasalarial"));
+    expect(content.indexOf("Complemento IT")).toBeLessThan(content.indexOf("Ajuste extrasalarial"));
+  });
+
   test("requests an AI explanation on demand without sending the person name", async () => {
     appState.value.aiStatus = { configured: true, enabled: true, model: "gemini-3.1-flash-lite" };
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -192,6 +418,7 @@ describe("TablesView", () => {
     expect(JSON.stringify(body)).not.toContain("Persona Test");
     expect(JSON.stringify(body)).toContain("10048");
     expect(body.payload.topConceptDifferences.map((item: { registroCode: string }) => item.registroCode)).toContain("SSP_SAL_BASE");
+    expect(body.payload.relatedNotIncludedConcepts.map((item: { pdfConcept: string }) => item.pdfConcept)).toContain("Prestacion Teorica Maternidad");
     expect(screen.getByText("Causas probables")).toBeTruthy();
     expect(screen.getByText(/revisar en Registro/i)).toBeTruthy();
     expect(screen.getByText(/revisar en PDF/i)).toBeTruthy();

@@ -115,9 +115,25 @@ export function describeConceptCause(row: ConceptComparisonRow, tolerance: numbe
     };
   }
 
+  if (concept.includes("bolsa") || closeTo(row.difference, 841.92, 2)) {
+    return {
+      label: "Bolsa vacaciones",
+      description: "El concepto o importe coincide con el patron esperado de Bolsa de Vacaciones.",
+      review: "Revisar el criterio de inclusion y el codigo Registro asociado a Bolsa de Vacaciones.",
+    };
+  }
+
+  if (concept.includes("reclasificacion") || concept.includes("reclasificaciÃ³n")) {
+    return {
+      label: "Reclasificación",
+      description: "El concepto apunta a una posible clasificacion distinta entre bloques.",
+      review: "Revisar bloque, codigo Registro y criterio de clasificacion aplicado.",
+    };
+  }
+
   if (row.status === "Sin mapear" || row.status === "Revisar") {
     return {
-      label: "Concepto pendiente",
+      label: "Revisión",
       description: "El concepto requiere revision de mapeo o criterio de inclusion.",
       review: "Revisar regla usada, codigo Registro y decision del concepto.",
     };

@@ -38,6 +38,17 @@ export const explainConceptDifferenceSchema = z.object({
   detail: z.string().optional(),
 });
 
+export const explainRelatedNotIncludedConceptSchema = z.object({
+  pdfConcept: z.string().min(1),
+  totalDetected: z.number(),
+  decisionType: z.string().optional(),
+  includedInComparison: z.boolean().optional(),
+  suggestedBlock: z.string().optional(),
+  suggestedRegistroCode: z.string().optional(),
+  reason: z.string().optional(),
+  recommendedAction: z.string().optional(),
+});
+
 export const explainPayloadSchema = z.object({
   rowId: z.string().min(1),
   employeeNumber: z.string().optional(),
@@ -59,6 +70,7 @@ export const explainPayloadSchema = z.object({
   detail: z.string().optional(),
   amounts: z.array(explainAmountSchema).max(12),
   topConceptDifferences: z.array(explainConceptDifferenceSchema).max(12).optional(),
+  relatedNotIncludedConcepts: z.array(explainRelatedNotIncludedConceptSchema).max(5).optional(),
   deterministicCause: deterministicCauseSchema,
 });
 

@@ -92,6 +92,7 @@ describe("probable deterministic cause", () => {
 
   test("describes concept rows using existing deterministic data only", () => {
     expect(describeConceptCause(concept({ pdfConcept: "Teletrabajo", difference: 208.01 }), 1).label).toBe("Teletrabajo");
-    expect(describeConceptCause(concept({ status: "Sin mapear", difference: 20 }), 1).label).toBe("Concepto pendiente");
+    expect(describeConceptCause(concept({ pdfConcept: "Bolsa de Vacaciones", difference: 841.92 }), 1).label).toBe("Bolsa vacaciones");
+    expect(describeConceptCause(concept({ status: "Sin mapear", difference: 20 }), 1).label).toBe("Revisión");
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { describePersonCause } from "@/lib/ui/probableCause";
-import type { ConceptComparisonRow, PersonComparisonRow } from "@/lib/types";
+import type { ConceptComparisonRow, PersonComparisonRow, UnmappedConceptRow } from "@/lib/types";
 
 describe("AI explain payload builders", () => {
   test("builds a person payload without sending the person name", async () => {
@@ -49,6 +49,19 @@ describe("AI explain payload builders", () => {
       {
         employeeNumber: "10048",
         person: "Persona Privada",
+        block: "Salario",
+        blockKey: "salary",
+        registroCode: "SSP_ANTIGUEDAD",
+        pdfConcept: "Antiguedad",
+        registroAmount: 50,
+        pdfAmount: 50,
+        difference: 0,
+        status: "OK",
+        detail: "OK",
+      },
+      {
+        employeeNumber: "10048",
+        person: "Persona Privada",
         block: "Extrasalarial",
         blockKey: "extraSalary",
         registroCode: "CYC_TEST",
@@ -60,8 +73,36 @@ describe("AI explain payload builders", () => {
         detail: "Pendiente",
       },
     ];
+    const related: UnmappedConceptRow[] = [
+      {
+        decisionType: "Pendiente revision",
+        includedInComparison: false,
+        pdfConcept: "Prestacion Teorica Maternidad",
+        totalDetected: 300,
+        peopleCount: 1,
+        payrollCount: 1,
+        exampleEmployeeNumbers: ["10048"],
+        suggestedBlock: "C. Salarial",
+        action: "Pendiente revisión",
+        recommendedAction: "Revisar criterio",
+        reason: "Relacionado por matricula explicita",
+      },
+      {
+        decisionType: "Pendiente revision",
+        includedInComparison: false,
+        pdfConcept: "Paga 40 anos",
+        totalDetected: 841.92,
+        peopleCount: 1,
+        payrollCount: 1,
+        exampleEmployeeNumbers: ["10072"],
+        suggestedBlock: "C. Salarial",
+        action: "Pendiente revisión",
+        recommendedAction: "Revisar codigo",
+        reason: "Otra matricula",
+      },
+    ];
 
-    const payload = buildPersonExplainPayload(row, describePersonCause(row, 1), concepts);
+    const payload = buildPersonExplainPayload(row, describePersonCause(row, 1), concepts, related);
     const serialized = JSON.stringify(payload);
 
     expect(serialized).not.toContain("Persona Privada");
@@ -71,6 +112,8 @@ describe("AI explain payload builders", () => {
     expect(payload.category).toBe("Categoria A");
     expect(payload.amounts.map((item) => item.label)).toEqual(["Salario", "C. Salarial", "Extrasalarial", "Total"]);
     expect(payload.topConceptDifferences?.map((item) => item.registroCode)).toEqual(["CYC_TEST", "SSP_SAL_BASE"]);
+    expect(payload.topConceptDifferences?.map((item) => item.registroCode)).not.toContain("SSP_ANTIGUEDAD");
+    expect(payload.relatedNotIncludedConcepts?.map((item) => item.pdfConcept)).toEqual(["Prestacion Teorica Maternidad"]);
     expect(payload.deterministicCause.description).toBeTruthy();
   });
 });

@@ -2,7 +2,7 @@
 
 import { Copy, Search, Table2, X } from "lucide-react";
 import { motion } from "motion/react";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { AiExplanationPanel } from "@/components/ai/AiExplanationPanel";
 import { useAppState, type DashboardFilters, EMPTY_FILTERS, matchesQuery } from "@/components/app/AppState";
 import { Badge } from "@/components/common/Badge";
@@ -26,6 +26,7 @@ type DetailModalState =
   | { readonly kind: "person"; readonly row: PersonComparisonRow }
   | { readonly kind: "concept"; readonly row: ConceptComparisonRow }
   | { readonly kind: "unmapped"; readonly row: UnmappedConceptRow };
+type PersonConceptFilter = "all" | "differences" | "ok" | "review";
 
 const PERSONAS_HEADERS: readonly TableHeader[] = [
   { key: "employeeNumber", label: "Matrícula" },
@@ -230,7 +231,7 @@ function TableSummary({
 }
 
 function CauseBadge({ cause }: Readonly<{ cause: ProbableCause }>) {
-  return <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">{cause.label}</span>;
+  return <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">{displayText(cause.label)}</span>;
 }
 
 function ModalField({ label, value }: Readonly<{ label: string; value?: string | number }>) {
@@ -255,12 +256,209 @@ function MoneyTriplet({ label, registro, pdf, diff }: Readonly<{ label: string; 
   );
 }
 
+function conceptRowKey(row: ConceptComparisonRow, index: number): string {
+  return `${row.employeeNumber}-${row.registroCode}-${row.pdfConcept ?? "sin-pdf"}-${index}`;
+}
+
+function conceptPriority(row: ConceptComparisonRow): number {
+  if (row.status === "Diferencia") return 0;
+  if (row.status === "Revisar") return 1;
+  if (["Sin mapear", "Sin PDF", "Sin Registro"].includes(row.status)) return 2;
+  if (row.status === "OK") return 3;
+  return 4;
+}
+
+function isReviewConcept(row: ConceptComparisonRow): boolean {
+  return row.status === "Revisar" || row.status === "Sin mapear";
+}
+
+function filterPersonConcept(row: ConceptComparisonRow, filter: PersonConceptFilter, tolerance: number): boolean {
+  if (filter === "differences") return Math.abs(row.difference) > tolerance || row.status === "Diferencia";
+  if (filter === "ok") return row.status === "OK";
+  if (filter === "review") return isReviewConcept(row);
+  return true;
+}
+
+function sortPersonConcepts(rows: readonly ConceptComparisonRow[]): ConceptComparisonRow[] {
+  return [...rows].sort((left, right) => {
+    const priority = conceptPriority(left) - conceptPriority(right);
+    if (priority !== 0) return priority;
+    return Math.abs(right.difference) - Math.abs(left.difference);
+  });
+}
+
+function PersonConceptsSection({
+  person,
+  concepts,
+  unmappedConcepts,
+  tolerance,
+}: Readonly<{
+  person: PersonComparisonRow;
+  concepts: readonly ConceptComparisonRow[];
+  unmappedConcepts: readonly UnmappedConceptRow[];
+  tolerance: number;
+}>) {
+  const [filter, setFilter] = useState<PersonConceptFilter>("all");
+  const [expandedKey, setExpandedKey] = useState<string | undefined>();
+  const personConcepts = useMemo(() => sortPersonConcepts(concepts.filter((row) => row.employeeNumber === person.employeeNumber)), [concepts, person.employeeNumber]);
+  const visibleConcepts = useMemo(() => personConcepts.filter((row) => filterPersonConcept(row, filter, tolerance)), [filter, personConcepts, tolerance]);
+  const relatedUnmapped = useMemo(
+    () => unmappedConcepts.filter((row) => row.exampleEmployeeNumbers.includes(person.employeeNumber)),
+    [person.employeeNumber, unmappedConcepts],
+  );
+  const okCount = personConcepts.filter((row) => row.status === "OK").length;
+  const realDifferenceCount = personConcepts.filter((row) => Math.abs(row.difference) > tolerance).length;
+  const reviewCount = personConcepts.filter(isReviewConcept).length;
+  const visibleDifference = visibleConcepts.reduce((sum, row) => sum + row.difference, 0);
+  const filterOptions: Array<{ label: string; value: PersonConceptFilter }> = [
+    { label: "Todos", value: "all" },
+    { label: "Solo diferencias", value: "differences" },
+    { label: "OK", value: "ok" },
+    { label: "Revisar", value: "review" },
+  ];
+
+  return (
+    <section className="mt-6 rounded-3xl border border-line bg-white p-4 shadow-subtle sm:p-5" aria-label="Conceptos de la persona">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h3 className="text-lg font-semibold text-ink">Conceptos de la persona</h3>
+          <p className="mt-1 text-sm leading-6 text-muted">Comparativa de conceptos del Registro contra los importes detectados en PDF para esta matrícula.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {filterOptions.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              onClick={() => setFilter(item.value)}
+              className={cn("min-h-9 rounded-full px-3 text-xs font-semibold transition", filter === item.value ? "bg-primary text-white shadow-blue" : "bg-slate-100 text-muted hover:bg-slate-200")}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-2 md:grid-cols-5">
+        {[
+          ["Conceptos totales", personConcepts.length],
+          ["Conceptos OK", okCount],
+          ["Conceptos con diferencia real", realDifferenceCount],
+          ["Conceptos en revisión", reviewCount],
+          ["Diferencia total de conceptos visibles", formatEuro(visibleDifference)],
+        ].map(([label, value]) => (
+          <div key={label} className="rounded-2xl bg-slate-50 px-3 py-3">
+            <p className="text-xs font-semibold uppercase text-muted">{label}</p>
+            <p className="mt-1 text-sm font-semibold text-ink tabular-nums">{value}</p>
+          </div>
+        ))}
+      </div>
+
+      {personConcepts.length ? (
+        <div className="mt-4 max-h-[420px] overflow-auto rounded-2xl border border-line">
+          <table className="w-full min-w-[1040px] border-separate border-spacing-0 text-left text-sm">
+            <thead className="sticky top-0 z-20 bg-slate-100 text-muted shadow-subtle">
+              <tr>
+                {["Bloque", "Código Registro", "Concepto PDF", "Registro", "PDF", "Diferencia", "Estado", "Causa"].map((header) => (
+                  <th key={`person-concept-${header}`} className="border-b border-line px-3 py-3 text-xs font-semibold uppercase">
+                    {header}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {visibleConcepts.map((row, index) => {
+                const key = conceptRowKey(row, index);
+                const conceptCause = describeConceptCause(row, tolerance);
+                const expanded = expandedKey === key;
+
+                return (
+                  <Fragment key={key}>
+                    <tr
+                      tabIndex={0}
+                      onClick={() => setExpandedKey(expanded ? undefined : key)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") setExpandedKey(expanded ? undefined : key);
+                      }}
+                      className={cn("cursor-pointer transition", rowTone(row.status))}
+                    >
+                      <td className="border-b border-line/70 px-3 py-3 font-semibold">{displayText(row.block)}</td>
+                      <td className="border-b border-line/70 px-3 py-3 font-mono">{displayText(row.registroCode)}</td>
+                      <td className="max-w-[260px] truncate border-b border-line/70 px-3 py-3 font-semibold">{displayText(row.pdfConcept)}</td>
+                      <td className="border-b border-line/70 px-3 py-3 text-right font-mono">{formatEuro(row.registroAmount)}</td>
+                      <td className="border-b border-line/70 px-3 py-3 text-right font-mono">{formatEuro(row.pdfAmount)}</td>
+                      <td className={cn("border-b border-line/70 px-3 py-3 text-right font-mono", diffClass(row.difference))}>{formatEuro(row.difference)}</td>
+                      <td className="border-b border-line/70 px-3 py-3"><Badge value={row.status} /></td>
+                      <td className="border-b border-line/70 px-3 py-3"><CauseBadge cause={conceptCause} /></td>
+                    </tr>
+                    {expanded ? (
+                      <tr className="bg-white">
+                        <td colSpan={8} className="border-b border-line/70 p-4">
+                          <div className="grid gap-3 rounded-2xl bg-slate-50 p-4 md:grid-cols-4">
+                            <ModalField label="Código Registro" value={row.registroCode} />
+                            <ModalField label="Concepto PDF" value={row.pdfConcept} />
+                            <ModalField label="Bloque" value={row.block} />
+                            <ModalField label="Diferencia" value={formatEuro(row.difference)} />
+                            <div className="md:col-span-2">
+                              <p className="text-sm font-semibold text-ink">Causa probable: {conceptCause.label}</p>
+                              <p className="mt-1 text-sm leading-6 text-muted">{displayText(conceptCause.description)}</p>
+                            </div>
+                            <div className="md:col-span-2">
+                              <p className="text-sm font-semibold text-ink">Qué revisar</p>
+                              <p className="mt-1 text-sm leading-6 text-muted">{displayText(conceptCause.review)}</p>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+          {!visibleConcepts.length ? <p className="p-5 text-sm text-muted">No hay conceptos con el filtro actual.</p> : null}
+        </div>
+      ) : (
+        <p className="mt-4 rounded-2xl bg-slate-50 px-4 py-5 text-sm font-semibold text-muted">No hay conceptos comparados para esta matrícula.</p>
+      )}
+
+      {relatedUnmapped.length ? (
+        <div className="mt-5 rounded-2xl border border-orange-100 bg-orange-50/70 p-4">
+          <h4 className="text-sm font-semibold text-ink">Conceptos no incluidos de esta persona</h4>
+          <div className="mt-3 overflow-auto rounded-xl border border-orange-100 bg-white">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead className="bg-orange-50 text-muted">
+                <tr>
+                  {["Concepto PDF", "Total detectado", "Tipo decisión", "Motivo", "Acción recomendada"].map((header) => (
+                    <th key={`person-unmapped-${header}`} className="px-3 py-2 text-xs font-semibold uppercase">{header}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {relatedUnmapped.map((row) => (
+                  <tr key={row.pdfConcept} className="border-t border-orange-100">
+                    <td className="px-3 py-2 font-semibold">{displayText(row.pdfConcept)}</td>
+                    <td className="px-3 py-2 text-right font-mono">{formatEuro(row.totalDetected)}</td>
+                    <td className="px-3 py-2"><Badge value={row.decisionType ?? row.action} /></td>
+                    <td className="px-3 py-2 text-muted">{displayText(row.reason)}</td>
+                    <td className="px-3 py-2 text-muted">{displayText(row.recommendedAction ?? row.action)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function DetailModal({
   state,
   tolerance,
   concepts,
+  unmappedConcepts,
   onClose,
-}: Readonly<{ state: DetailModalState; tolerance: number; concepts: readonly ConceptComparisonRow[]; onClose: () => void }>) {
+}: Readonly<{ state: DetailModalState; tolerance: number; concepts: readonly ConceptComparisonRow[]; unmappedConcepts: readonly UnmappedConceptRow[]; onClose: () => void }>) {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -284,7 +482,7 @@ function DetailModal({
   const aiType = state.kind === "person" ? "person" : state.kind === "concept" ? "concept" : "notIncludedConcept";
   const aiPayload =
     state.kind === "person"
-      ? buildPersonExplainPayload(state.row, cause, concepts)
+      ? buildPersonExplainPayload(state.row, cause, concepts, unmappedConcepts)
       : state.kind === "concept"
         ? buildConceptExplainPayload(state.row, cause)
         : buildNotIncludedConceptExplainPayload(state.row, cause);
@@ -359,6 +557,10 @@ function DetailModal({
           <div className="mt-6">
             <MoneyTriplet label="Concepto" registro={state.row.registroAmount} pdf={state.row.pdfAmount} diff={state.row.difference} />
           </div>
+        ) : null}
+
+        {state.kind === "person" ? (
+          <PersonConceptsSection person={state.row} concepts={concepts} unmappedConcepts={unmappedConcepts} tolerance={tolerance} />
         ) : null}
 
         <div className="mt-6 grid gap-4 md:grid-cols-2">
@@ -636,7 +838,15 @@ export function TablesView({ mode }: Readonly<{ mode: Extract<AppView, "personas
       ) : (
         <AgrupacionesTable />
       )}
-      {modal ? <DetailModal state={modal} tolerance={result.summary?.tolerance ?? 1} concepts={result.concepts} onClose={() => setModal(undefined)} /> : null}
+      {modal ? (
+        <DetailModal
+          state={modal}
+          tolerance={result.summary?.tolerance ?? 1}
+          concepts={result.concepts}
+          unmappedConcepts={result.unmappedConcepts}
+          onClose={() => setModal(undefined)}
+        />
+      ) : null}
     </div>
   );
 }

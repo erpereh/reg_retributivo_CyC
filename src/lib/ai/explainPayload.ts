@@ -18,7 +18,7 @@ function causeFrom(value: ProbableCause): ExplainPayload["deterministicCause"] {
 function buildTopConceptDifferences(row: PersonComparisonRow, concepts: readonly ConceptComparisonRow[] = []): ExplainPayload["topConceptDifferences"] {
   const top = concepts
     .filter((concept) => concept.employeeNumber === row.employeeNumber)
-    .filter((concept) => Math.abs(concept.difference) > 0)
+    .filter((concept) => Math.abs(concept.difference) > 0 || concept.status !== "OK")
     .sort((left, right) => Math.abs(right.difference) - Math.abs(left.difference))
     .slice(0, 10)
     .map((concept) => ({
@@ -35,7 +35,30 @@ function buildTopConceptDifferences(row: PersonComparisonRow, concepts: readonly
   return top.length ? top : undefined;
 }
 
-export function buildPersonExplainPayload(row: PersonComparisonRow, cause: ProbableCause, concepts: readonly ConceptComparisonRow[] = []): ExplainPayload {
+function buildRelatedNotIncludedConcepts(row: PersonComparisonRow, concepts: readonly UnmappedConceptRow[] = []): ExplainPayload["relatedNotIncludedConcepts"] {
+  const related = concepts
+    .filter((concept) => concept.exampleEmployeeNumbers.includes(row.employeeNumber))
+    .slice(0, 5)
+    .map((concept) => ({
+      pdfConcept: concept.pdfConcept,
+      totalDetected: concept.totalDetected,
+      decisionType: clean(concept.decisionType),
+      includedInComparison: concept.includedInComparison,
+      suggestedBlock: clean(concept.suggestedBlock),
+      suggestedRegistroCode: clean(concept.suggestedRegistroCode),
+      reason: clean(concept.reason),
+      recommendedAction: clean(concept.recommendedAction ?? concept.action),
+    }));
+
+  return related.length ? related : undefined;
+}
+
+export function buildPersonExplainPayload(
+  row: PersonComparisonRow,
+  cause: ProbableCause,
+  concepts: readonly ConceptComparisonRow[] = [],
+  relatedUnmappedConcepts: readonly UnmappedConceptRow[] = [],
+): ExplainPayload {
   return {
     rowId: `person:${row.employeeNumber}`,
     employeeNumber: row.employeeNumber,
@@ -53,6 +76,7 @@ export function buildPersonExplainPayload(row: PersonComparisonRow, cause: Proba
       { label: "Total", registro: row.registroTotal, pdf: row.pdfTotal, difference: row.totalDifference },
     ],
     topConceptDifferences: buildTopConceptDifferences(row, concepts),
+    relatedNotIncludedConcepts: buildRelatedNotIncludedConcepts(row, relatedUnmappedConcepts),
     deterministicCause: causeFrom(cause),
   };
 }
