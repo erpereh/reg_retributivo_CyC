@@ -341,6 +341,91 @@ describe("concept mapping", () => {
       registroCode: "CSP_I_PAGA_25_ANYOS",
     });
   });
+
+  test("normalizes legacy rules with defaults and resolves aliases", async () => {
+    const employee = emptyRegistroEmployee({
+      employeeNumber: "10048",
+      periodComplete: { salary: 0, salaryComplement: 0, extraSalary: 208, total: 208 },
+      concepts: [{ block: "Extrasalarial", blockKey: "extraSalary", code: "CSP_I_COMP_TELETR_COVID", amount: 208 }],
+    });
+    const map = buildDefaultConceptMap({
+      salary: [],
+      salaryComplement: [],
+      extraSalary: ["CSP_I_COMP_TELETR_COVID"],
+    });
+    const telework = map.find((rule) => normalizeComparableText(rule.pdfConcept) === "abono teletrabajo");
+
+    expect(telework).toMatchObject({
+      status: "Justificado",
+      registroCode: "CSP_I_COMP_TELETR_COVID",
+      block: "Extrasalarial",
+      aliases: ["Teletrabajo", "Compensación teletrabajo"],
+      active: true,
+      includedInComparison: true,
+      includedInAdjustedComparison: false,
+    });
+
+    const result = await compareAnalysis(
+      [
+        {
+          sourceFile: "PDF_TEST.pdf",
+          periodLabel: "Del 1 al 31 Enero 2025",
+          workerName: "PERSONA TEST",
+          employeeNumber: "10048",
+          concepts: [{ name: "Teletrabajo", amount: 208, type: "devengo" }],
+        },
+      ],
+      [employee],
+      {
+        tolerance: 1,
+        enableAI: false,
+        conceptMap: map,
+      },
+    );
+
+    expect(result.concepts.find((row) => row.registroCode === "CSP_I_COMP_TELETR_COVID")).toMatchObject({
+      pdfConcept: "Teletrabajo",
+      pdfAmount: 208,
+      status: "OK",
+    });
+  });
+
+  test("does not let inactive rules affect the analysis", async () => {
+    const employee = emptyRegistroEmployee({
+      employeeNumber: "10048",
+      periodComplete: { salary: 0, salaryComplement: 0, extraSalary: 208, total: 208 },
+      concepts: [{ block: "Extrasalarial", blockKey: "extraSalary", code: "CSP_I_COMP_TELETR_COVID", amount: 208 }],
+    });
+    const result = await compareAnalysis(
+      [
+        {
+          sourceFile: "PDF_TEST.pdf",
+          periodLabel: "Del 1 al 31 Enero 2025",
+          workerName: "PERSONA TEST",
+          employeeNumber: "10048",
+          concepts: [{ name: "Abono teletrabajo", amount: 208, type: "devengo" }],
+        },
+      ],
+      [employee],
+      {
+        tolerance: 1,
+        enableAI: false,
+        conceptMap: [
+          testRule({
+            pdfConcept: "Abono teletrabajo",
+            block: "Extrasalarial",
+            blockKey: "extraSalary",
+            registroCode: "CSP_I_COMP_TELETR_COVID",
+            status: "Incluido",
+            active: false,
+          } as Partial<ConceptMappingRule> & Pick<ConceptMappingRule, "pdfConcept" | "block" | "blockKey" | "status">),
+        ],
+      },
+    );
+
+    expect(result.concepts.find((row) => row.registroCode === "CSP_I_COMP_TELETR_COVID")?.pdfAmount).toBe(0);
+    expect(result.unmappedConcepts.find((row) => row.pdfConcept === "Abono teletrabajo")).toBeTruthy();
+  });
 });
 
 describe("comparison engine", () => {

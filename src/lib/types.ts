@@ -10,10 +10,10 @@ export type PayrollConceptType =
 export type Severity = "Alta" | "Media" | "Baja";
 export type RetributionBlock = "Salario" | "C. Salarial" | "Extrasalarial";
 export type ConceptBlockKey = "salary" | "salaryComplement" | "extraSalary";
-export type MappingStatus = "Incluido" | "Ignorado" | "Pendiente revisión";
+export type MappingStatus = "Incluido" | "Justificado" | "Ignorado" | "Pendiente revisión";
 export type ConceptMappingSourceType = "devengo" | "informativo" | "deduccion" | "retencion" | "coste_empresa" | "unknown";
 export type ConceptDedupePriority = "devengo" | "informativo";
-export type NonIncludedDecisionType = "Pendiente revision" | "Sin mapear real" | "Ignorado";
+export type NonIncludedDecisionType = "Pendiente revision" | "Sin mapear real" | "Ignorado" | "Justificado";
 export type AnalysisStatus = "OK" | "Revisar" | "Diferencia" | "Sin mapear" | "Sin PDF" | "Sin Registro" | "Sin datos";
 export type SalaryStatus = AnalysisStatus;
 export type GroupingPdfStatus = AnalysisStatus | "No aplica";
@@ -173,6 +173,7 @@ export interface RegistroParseResult {
 export interface ConceptMappingRule {
   readonly pdfConcept: string;
   readonly normalizedPdfConcept: string;
+  readonly aliases?: readonly string[];
   readonly block: RetributionBlock;
   readonly blockKey: ConceptBlockKey;
   readonly registroCode?: string;
@@ -181,6 +182,8 @@ export interface ConceptMappingRule {
   readonly allowInformative?: boolean;
   readonly dedupePriority?: ConceptDedupePriority;
   readonly includedInComparison?: boolean;
+  readonly includedInAdjustedComparison?: boolean;
+  readonly active?: boolean;
   readonly reason?: string;
 }
 

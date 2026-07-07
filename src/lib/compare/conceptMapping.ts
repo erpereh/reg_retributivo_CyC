@@ -16,11 +16,16 @@ interface CodeLocation {
 
 interface DefaultRule {
   readonly pdfConcept: string;
+  readonly aliases?: readonly string[];
   readonly registroCode: string;
   readonly status?: MappingStatus;
   readonly sourceType?: ConceptMappingSourceType;
   readonly allowInformative?: boolean;
   readonly dedupePriority?: ConceptDedupePriority;
+  readonly includedInComparison?: boolean;
+  readonly includedInAdjustedComparison?: boolean;
+  readonly active?: boolean;
+  readonly reason?: string;
 }
 
 interface IgnoredRule {
@@ -68,7 +73,17 @@ const DEFAULT_RULES: readonly DefaultRule[] = [
   { pdfConcept: "Compensacion Comida", registroCode: "CSP_I_COMPENSACION_COMIDA" },
   { pdfConcept: "Comida Tarjeta", registroCode: "CSP_I_TARJETA_COMIDA" },
   { pdfConcept: "Ayuda Escolar hijos", registroCode: "CSP_I_AYU_ESCOLAR_HIJOS" },
-  { pdfConcept: "Abono teletrabajo", registroCode: "CSP_I_COMP_TELETR_COVID" },
+  {
+    pdfConcept: "Abono teletrabajo",
+    aliases: ["Teletrabajo", "Compensación teletrabajo"],
+    registroCode: "CSP_I_COMP_TELETR_COVID",
+    status: "Justificado",
+    includedInComparison: true,
+    includedInAdjustedComparison: false,
+    active: true,
+    reason:
+      "Abono teletrabajo detectado en PDF pero no informado en Registro. Se mantiene visible y auditable, pero se excluirá de la diferencia ajustada cuando se implemente esa subfase.",
+  },
   { pdfConcept: "Lote de Navidad", registroCode: "CSP_I_LOTE_NAVIDAD" },
   { pdfConcept: "Seguro Medico", registroCode: "CYC_SEG_SALUD" },
   {
@@ -155,14 +170,34 @@ function defaultDedupePriority(rule: Pick<ConceptMappingRule, "dedupePriority" |
   return defaultSourceTypeForRule(rule) === "informativo" ? "informativo" : "devengo";
 }
 
-function normalizeRule(rule: ConceptMappingRule): ConceptMappingRule {
+function normalizeAliases(aliases: ConceptMappingRule["aliases"]): readonly string[] {
+  const seen = new Set<string>();
+  return (aliases ?? [])
+    .map((alias) => alias.trim())
+    .filter((alias) => {
+      if (!alias) {
+        return false;
+      }
+      const normalized = normalizePdfConcept(alias);
+      if (seen.has(normalized)) {
+        return false;
+      }
+      seen.add(normalized);
+      return true;
+    });
+}
+
+export function normalizeConceptMappingRule(rule: ConceptMappingRule): ConceptMappingRule {
   return {
     ...rule,
     normalizedPdfConcept: rule.normalizedPdfConcept || normalizePdfConcept(rule.pdfConcept),
+    aliases: normalizeAliases(rule.aliases),
     sourceType: defaultSourceTypeForRule(rule),
     allowInformative: rule.allowInformative ?? false,
     dedupePriority: defaultDedupePriority(rule),
-    includedInComparison: rule.includedInComparison ?? rule.status === "Incluido",
+    includedInComparison: rule.includedInComparison ?? (rule.status === "Incluido" || rule.status === "Justificado"),
+    includedInAdjustedComparison: rule.includedInAdjustedComparison ?? rule.status !== "Justificado",
+    active: rule.active ?? true,
   };
 }
 
@@ -172,11 +207,12 @@ export function buildDefaultConceptMap(codes: AvailableConceptCodes): ConceptMap
   DEFAULT_RULES.forEach((rule) => {
     const location = findCodeLocation(codes, rule.registroCode);
     const status = rule.status ?? (location ? "Incluido" : "Pendiente revisión");
-    const included = Boolean(location && status === "Incluido");
+    const included = Boolean(location && (status === "Incluido" || status === "Justificado") && rule.includedInComparison !== false);
     const visibleLocation = location ?? fallbackLocation();
     rules.push({
       pdfConcept: rule.pdfConcept,
       normalizedPdfConcept: normalizePdfConcept(rule.pdfConcept),
+      aliases: rule.aliases ?? [],
       block: visibleLocation.block,
       blockKey: visibleLocation.blockKey,
       registroCode: location ? rule.registroCode : undefined,
@@ -185,11 +221,17 @@ export function buildDefaultConceptMap(codes: AvailableConceptCodes): ConceptMap
       allowInformative: rule.allowInformative ?? false,
       dedupePriority: rule.dedupePriority ?? "devengo",
       includedInComparison: included,
-      reason: location
-        ? status === "Incluido"
-          ? "Mapeo por defecto validado contra codigos del Excel."
-          : "Sugerencia de mapeo pendiente de revision; no incluida automaticamente."
-        : `El codigo ${rule.registroCode} no existe en el Excel cargado.`,
+      includedInAdjustedComparison: rule.includedInAdjustedComparison ?? status !== "Justificado",
+      active: rule.active ?? true,
+      reason:
+        rule.reason ??
+        (location
+          ? status === "Incluido"
+            ? "Mapeo por defecto validado contra codigos del Excel."
+            : status === "Justificado"
+              ? "Visible y auditable, preparado para excluirse de la diferencia ajustada en una fase posterior."
+              : "Sugerencia de mapeo pendiente de revision; no incluida automaticamente."
+          : `El codigo ${rule.registroCode} no existe en el Excel cargado.`),
     });
   });
 
@@ -204,6 +246,8 @@ export function buildDefaultConceptMap(codes: AvailableConceptCodes): ConceptMap
       allowInformative: false,
       dedupePriority: "informativo",
       includedInComparison: false,
+      includedInAdjustedComparison: false,
+      active: true,
       reason: reason ?? "Concepto conservadoramente excluido por ser deduccion, retencion, cotizacion, especie, informativo o coste empresa.",
     });
   });
@@ -215,7 +259,7 @@ export function mergeConceptMap(rules: readonly ConceptMappingRule[]): ConceptMa
   const byName = new Map<string, ConceptMappingRule>();
   rules.forEach((rule) => {
     const normalized = rule.normalizedPdfConcept || normalizePdfConcept(rule.pdfConcept);
-    byName.set(normalized, normalizeRule({ ...rule, normalizedPdfConcept: normalized }));
+    byName.set(normalized, normalizeConceptMappingRule({ ...rule, normalizedPdfConcept: normalized }));
   });
   return [...byName.values()].sort((a, b) => a.pdfConcept.localeCompare(b.pdfConcept, "es"));
 }
@@ -225,7 +269,16 @@ export function findConceptRule(
   pdfConcept: string,
 ): ConceptMappingRule | undefined {
   const normalized = normalizePdfConcept(pdfConcept);
-  return rules.find((rule) => (rule.normalizedPdfConcept || normalizePdfConcept(rule.pdfConcept)) === normalized);
+  return rules.find((rule) => {
+    const normalizedRule = normalizeConceptMappingRule(rule);
+    if (normalizedRule.active === false) {
+      return false;
+    }
+    if ((normalizedRule.normalizedPdfConcept || normalizePdfConcept(normalizedRule.pdfConcept)) === normalized) {
+      return true;
+    }
+    return (normalizedRule.aliases ?? []).some((alias) => normalizePdfConcept(alias) === normalized);
+  });
 }
 
 export function mappingStatusFromConceptType(type: string): MappingStatus {
@@ -255,7 +308,8 @@ export function validateConceptMapForCodes(
         ...rule,
         block: location.block,
         blockKey: location.blockKey,
-        includedInComparison: rule.status === "Incluido" && rule.includedInComparison !== false,
+        includedInComparison: (rule.status === "Incluido" || rule.status === "Justificado") && rule.includedInComparison !== false,
+        includedInAdjustedComparison: rule.includedInAdjustedComparison ?? rule.status !== "Justificado",
       };
     }),
   );

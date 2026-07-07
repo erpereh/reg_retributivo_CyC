@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { ExportWorkbookMetadata } from "@/lib/export/exportExcel";
-import type { AnalysisConfig, AnalysisResult, AppView, StoredAnalysis } from "@/lib/types";
+import type { AnalysisConfig, AnalysisResult, AppView, ConceptMappingRule, StoredAnalysis } from "@/lib/types";
 import type { ToastItem, ToastKind } from "@/components/common/ToastViewport";
 import {
   clearAnalyses,
@@ -69,6 +69,7 @@ interface AppStateValue {
   readonly pushToast: (toast: Omit<ToastItem, "id">) => void;
   readonly dismissToast: (id: string) => void;
   readonly analyze: () => Promise<void>;
+  readonly saveConceptMapAndRefresh: (conceptMap: readonly ConceptMappingRule[]) => Promise<void>;
   readonly exportActiveAnalysis: () => Promise<void>;
   readonly exportStoredAnalysis: (analysis: StoredAnalysis) => Promise<void>;
   readonly resetForNewAnalysis: () => void;
@@ -240,7 +241,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
     });
   }, []);
 
-  const analyze = useCallback(async () => {
+  const runAnalysis = useCallback(async (settingsForAnalysis: AppSettings, options?: { readonly keepView?: boolean; readonly refreshedMap?: boolean }) => {
     if (!registroFile || !pdfFiles.length) {
       const message = "Selecciona PDFs y Excel Registro antes de analizar.";
       setError(message);
@@ -248,7 +249,8 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       return;
     }
 
-    const config = buildConfig(settings);
+    const currentView = view;
+    const config = buildConfig(settingsForAnalysis);
     const formData = new FormData();
     formData.append("registro", registroFile);
     formData.append("tolerance", String(config.tolerance));
@@ -287,9 +289,13 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       await refreshHistory();
       setFilters(EMPTY_FILTERS);
       setStatus(`Análisis generado: ${result.summary.uniquePeople} personas`);
-      setSuccess("Análisis completado y guardado en el historial.");
-      pushMessageToast("success", "Análisis completado", `${result.summary.uniquePeople} personas generadas y guardadas en historial.`);
-      setView("dashboard");
+      setSuccess(options?.refreshedMap ? "Mapa guardado y análisis actualizado." : "Análisis completado y guardado en el historial.");
+      pushMessageToast(
+        "success",
+        options?.refreshedMap ? "Mapa actualizado" : "Análisis completado",
+        options?.refreshedMap ? "Mapa guardado y análisis actualizado." : `${result.summary.uniquePeople} personas generadas y guardadas en historial.`,
+      );
+      setView(options?.keepView ? currentView : "dashboard");
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Error inesperado.";
       setError(message);
@@ -298,7 +304,29 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
     } finally {
       setAnalyzing(false);
     }
-  }, [pdfFiles, pushMessageToast, refreshHistory, registroFile, settings]);
+  }, [pdfFiles, pushMessageToast, refreshHistory, registroFile, view]);
+
+  const analyze = useCallback(async () => {
+    await runAnalysis(settings);
+  }, [runAnalysis, settings]);
+
+  const saveConceptMapAndRefresh = useCallback(
+    async (conceptMap: readonly ConceptMappingRule[]) => {
+      const nextSettings = normalizeSettingsPatch(settings, { conceptMap });
+      setSettings(nextSettings);
+      saveSettings(nextSettings);
+
+      if (!registroFile || !pdfFiles.length) {
+        const message = "Mapa guardado. Vuelve a seleccionar archivos para reanalizar.";
+        setSuccess(message);
+        pushMessageToast("info", "Mapa guardado", message);
+        return;
+      }
+
+      await runAnalysis(nextSettings, { keepView: true, refreshedMap: true });
+    },
+    [pdfFiles.length, pushMessageToast, registroFile, runAnalysis, settings],
+  );
 
   const exportAnalysis = useCallback(async (analysis: StoredAnalysis) => {
     setExporting(true);
@@ -428,6 +456,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       pushToast,
       dismissToast,
       analyze,
+      saveConceptMapAndRefresh,
       exportActiveAnalysis,
       exportStoredAnalysis: exportAnalysis,
       resetForNewAnalysis,
@@ -443,6 +472,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       aiTestMessage,
       aiTesting,
       analyze,
+      saveConceptMapAndRefresh,
       clearStoredHistory,
       dismissToast,
       error,

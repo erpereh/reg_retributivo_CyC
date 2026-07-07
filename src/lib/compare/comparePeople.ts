@@ -99,6 +99,7 @@ function addGrouped(
 
 function decisionTypeOrder(decisionType: UnmappedConceptRow["decisionType"]): number {
   if (decisionType === "Pendiente revision") return 0;
+  if (decisionType === "Justificado") return 1;
   if (decisionType === "Sin mapear real") return 1;
   return 2;
 }
@@ -186,7 +187,12 @@ function nonIncludedReason(input: {
 }
 
 function shouldIncludeConcept(rule: ConceptMappingRule | undefined, concept: PayrollConcept): rule is ConceptMappingRule & { registroCode: string } {
-  if (!rule?.registroCode || rule.status !== "Incluido" || rule.includedInComparison === false || DISALLOWED_INCLUDED_TYPES.has(concept.type)) {
+  if (
+    !rule?.registroCode ||
+    !["Incluido", "Justificado"].includes(rule.status) ||
+    rule.includedInComparison === false ||
+    DISALLOWED_INCLUDED_TYPES.has(concept.type)
+  ) {
     return false;
   }
   if (concept.type === "informativo" && !rule.allowInformative) {
@@ -409,8 +415,9 @@ function createUnmappedRows(aggregates: readonly PayrollAggregate[], conceptMap:
     aggregate.unmapped.forEach((value, key) => {
       const rule = findConceptRule(conceptMap, key);
       const normalized = normalizeComparableText(key);
+      const isJustified = rule?.status === "Justificado";
       const isPending = Boolean(rule?.registroCode) || normalized === "paga 40 anos";
-      const decisionType: UnmappedConceptRow["decisionType"] = isPending ? "Pendiente revision" : "Sin mapear real";
+      const decisionType: UnmappedConceptRow["decisionType"] = isJustified ? "Justificado" : isPending ? "Pendiente revision" : "Sin mapear real";
       const current = combined.get(key) ?? {
         amount: 0,
         people: new Set<string>(),
@@ -420,7 +427,12 @@ function createUnmappedRows(aggregates: readonly PayrollAggregate[], conceptMap:
         action: rule?.status ?? "Pendiente revisión",
         decisionType,
         includedInComparison: false,
-        recommendedAction: decisionType === "Pendiente revision" ? pendingReviewAction(key) : "Mantener en revision hasta identificar codigo Registro.",
+        recommendedAction:
+          decisionType === "Justificado"
+            ? "Mantener visible y auditable; preparado para diferencia ajustada posterior."
+            : decisionType === "Pendiente revision"
+              ? pendingReviewAction(key)
+              : "Mantener en revision hasta identificar codigo Registro.",
         reason: nonIncludedReason({ pdfConcept: key, decisionType, fallback: rule?.reason }),
       };
       current.amount = roundMoney(current.amount + value.amount);
