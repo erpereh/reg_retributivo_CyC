@@ -1,13 +1,24 @@
 import { NextResponse } from "next/server";
-import { exportAnalysisToBuffer } from "@/lib/export/exportExcel";
+import { exportAnalysisToBuffer, type ExportWorkbookMetadata } from "@/lib/export/exportExcel";
 import type { AnalysisResult } from "@/lib/types";
 
 export const runtime = "nodejs";
 
+interface ExportRequestPayload {
+  readonly analysis: AnalysisResult;
+  readonly metadata?: ExportWorkbookMetadata;
+}
+
+function isWrappedPayload(value: unknown): value is ExportRequestPayload {
+  return Boolean(value && typeof value === "object" && "analysis" in value);
+}
+
 export async function POST(request: Request) {
   try {
-    const analysis = (await request.json()) as AnalysisResult;
-    const buffer = await exportAnalysisToBuffer(analysis);
+    const payload = (await request.json()) as AnalysisResult | ExportRequestPayload;
+    const analysis = isWrappedPayload(payload) ? payload.analysis : payload;
+    const metadata = isWrappedPayload(payload) ? payload.metadata : undefined;
+    const buffer = await exportAnalysisToBuffer(analysis, metadata);
     const body = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
 
     return new NextResponse(body, {

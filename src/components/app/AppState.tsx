@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import type { ExportWorkbookMetadata } from "@/lib/export/exportExcel";
 import type { AnalysisConfig, AnalysisResult, AppView, StoredAnalysis } from "@/lib/types";
 import type { ToastItem, ToastKind } from "@/components/common/ToastViewport";
 import {
@@ -118,11 +119,22 @@ function buildConfig(settings: AppSettings): AnalysisConfig {
   return configFromSettings(settings);
 }
 
-async function fetchExport(result: AnalysisResult): Promise<Blob> {
+function buildExportMetadata(analysis: StoredAnalysis): ExportWorkbookMetadata {
+  return {
+    registroFileName: analysis.registroFileName,
+    pdfFileCount: analysis.pdfCount,
+    exportedAt: new Date().toISOString(),
+    aiEnabled: analysis.config.enableAI,
+    aiModel: analysis.config.aiModel,
+    schemaVersion: analysis.schemaVersion,
+  };
+}
+
+async function fetchExport(analysis: StoredAnalysis): Promise<Blob> {
   const response = await fetch("/api/export", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(result),
+    body: JSON.stringify({ analysis: analysis.result, metadata: buildExportMetadata(analysis) }),
   });
 
   if (!response.ok) {
@@ -294,7 +306,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
     setSuccess(undefined);
 
     try {
-      const blob = await fetchExport(analysis.result);
+      const blob = await fetchExport(analysis);
       const date = analysis.createdAt.slice(0, 10);
       downloadBlob(blob, `comparativa_reg_retributivo_${date}.xlsx`);
       setSuccess("Excel exportado correctamente.");

@@ -632,64 +632,147 @@ describe("comparison engine", () => {
 
 
 describe("Excel export", () => {
-  test("creates phase 1 sheets and excludes NIF and banking data", async () => {
+  test("creates professional workbook sheets, dashboard first, and excludes sensitive data", async () => {
     const registro = await parseRegistroRetributivo(readFileSync(registroFile));
     const analysis = await compareAnalysis([], [registro.records[0]], {
       tolerance: 1,
       conceptMap: buildDefaultConceptMap(registro.conceptCodes),
       enableAI: false,
     });
-    const workbook = await exportAnalysisToWorkbook(analysis);
+    const workbook = await exportAnalysisToWorkbook(analysis, {
+      registroFileName: "registro.xlsx",
+      pdfFileCount: 12,
+      exportedAt: "2026-07-07T10:00:00.000Z",
+      aiEnabled: false,
+      schemaVersion: 2,
+    });
 
     expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual([
+      "Dashboard",
       "Resumen",
       "Personas",
-      "Normalizado_vs_Real",
       "Conceptos",
       "Conceptos_no_incluidos",
+      "Normalizado_vs_Real",
       "PDF_sin_Registro",
       "Registro_sin_PDF",
-      "Agrupaciones",
       "Cuadre_Interno_Excel",
+      "Agrupaciones",
       "Criterios",
     ]);
-    expect(workbook.getWorksheet("Agrupaciones")?.getCell("A2").value).toBe("Pendiente de implementación / Sin datos calculados");
-    const resumenValues = new Set(workbook.getWorksheet("Resumen")?.getColumn(1).values.map(String));
+    expect(workbook.getWorksheet("Conceptos_sin_mapear")).toBeUndefined();
+    expect(workbook.getWorksheet("Dashboard")?.getCell("B2").value).toBe("Comparativa Nominas vs Registro Retributivo");
+    expect(workbook.getWorksheet("Dashboard")?.getCell("E4").value).toBe("Registro: registro.xlsx");
+    expect(workbook.getWorksheet("Agrupaciones")?.getCell("A3").value).toBe("Pendiente de implementacion / Sin datos calculados");
+    workbook.worksheets.forEach((sheet) => {
+      expect(sheet.views[0]?.state).toBe("frozen");
+      expect(sheet.autoFilter).toBeTruthy();
+    });
+    const resumenValues = new Set(workbook.getWorksheet("Resumen")?.getColumn(2).values.map(String));
     expect(resumenValues.has("Conceptos sin mapear")).toBe(false);
-    expect(resumenValues.has("Conceptos pendientes de revisión")).toBe(true);
+    expect(resumenValues.has("Conceptos pendientes revision")).toBe(true);
     expect(resumenValues.has("Conceptos ignorados")).toBe(true);
-    expect(resumenValues.has("Conceptos no incluidos")).toBe(true);
     expect(resumenValues.has("Conceptos sin mapear reales")).toBe(true);
-    expect(resumenValues.has("Importe pendiente de decisión")).toBe(true);
+    expect(resumenValues.has("Importe pendiente de decision")).toBe(true);
     expect(
-      [...(workbook.getWorksheet("Resumen")?.getColumn(2).values ?? [])].some(
-        (value) =>
-          typeof value === "string" &&
-          value.includes("conceptos PDF pendientes de decisión") &&
-          value.includes("diferencia matched"),
+      [...(workbook.getWorksheet("Resumen")?.getColumn(4).values ?? [])].some(
+        (value) => typeof value === "string" && value.includes("No incluido en diferencia matched"),
+      ),
+    ).toBe(true);
+    expect(
+      [...(workbook.getWorksheet("Dashboard")?.getColumn(8).values ?? [])].some(
+        (value) => typeof value === "string" && value.includes("PDF sin Registro se muestra separado"),
+      ),
+    ).toBe(true);
+    expect(
+      [...(workbook.getWorksheet("Dashboard")?.getColumn(8).values ?? [])].some(
+        (value) => typeof value === "string" && value.includes("diferencia matched"),
       ),
     ).toBe(true);
     expect(workbook.getWorksheet("Conceptos_no_incluidos")?.getRow(1).values).toEqual([
       undefined,
-      "Tipo decisión",
-      "Incluido en cálculo",
+      "Tipo decision",
+      "Incluido en calculo",
       "Concepto PDF",
       "Total detectado",
       "N personas",
-      "N nóminas",
-      "Ejemplos matrículas",
+      "N nominas",
+      "Ejemplos matriculas",
       "Sugerencia bloque",
-      "Sugerencia código Registro",
-      "Acción recomendada",
+      "Sugerencia codigo Registro",
+      "Accion recomendada",
       "Motivo",
     ]);
-    expect(workbook.getWorksheet("Personas")?.getRow(1).values).toContain("Detalle");
+    expect(workbook.getWorksheet("Personas")?.getRow(1).values).toContain("Causa probable");
+    expect(workbook.getWorksheet("Personas")?.getRow(1).values).toContain("Observaciones / detalle breve");
+    expect(workbook.getWorksheet("Conceptos")?.getRow(1).values).toContain("Regla / detalle");
+    expect(workbook.getWorksheet("Personas")?.getColumn(6).numFmt).toContain("EUR");
 
     const buffer = await workbook.xlsx.writeBuffer();
     const reloaded = new ExcelJS.Workbook();
     await reloaded.xlsx.load(buffer);
     const serialized = JSON.stringify(reloaded.model);
-    expect(serialized).not.toMatch(/ES\d{2}\s?\d{4}|00397416E|0128\s?8700/i);
+    expect(serialized).not.toMatch(/ES\d{2}\s?\d{4}\s?\d{4}/);
+    expect(serialized).not.toContain("00397416E");
+    expect(serialized).not.toContain("0128 8700");
+    expect(serialized).not.toContain("payload");
+  });
+
+  test("exports Personas and Conceptos values without changing analysis amounts", async () => {
+    const employee = emptyRegistroEmployee({
+      employeeNumber: "E1",
+      workerName: "PERSONA TEST",
+      workplace: "Bilbao",
+      position: "Tecnico",
+      category: "A",
+      periodComplete: { salary: 1000, salaryComplement: 200, extraSalary: 50, total: 1250 },
+      concepts: [
+        { block: "Salario", blockKey: "salary", code: "SAL_TEST", amount: 1000 },
+        { block: "C. Salarial", blockKey: "salaryComplement", code: "COMP_TEST", amount: 200 },
+      ],
+    });
+    const analysis = await compareAnalysis(
+      [
+        {
+          sourceFile: "PDF_TEST.pdf",
+          periodLabel: "Del 1 al 31 Enero 2025",
+          workerName: "PERSONA TEST",
+          employeeNumber: "E1",
+          concepts: [
+            { name: "Salario Test", amount: 1000, type: "devengo" },
+            { name: "Complemento Test", amount: 205, type: "devengo" },
+          ],
+        },
+      ],
+      [employee],
+      {
+        tolerance: 1,
+        enableAI: false,
+        conceptMap: [
+          testRule({ pdfConcept: "Salario Test", block: "Salario", blockKey: "salary", registroCode: "SAL_TEST", status: "Incluido", includedInComparison: true }),
+          testRule({ pdfConcept: "Complemento Test", block: "C. Salarial", blockKey: "salaryComplement", registroCode: "COMP_TEST", status: "Incluido", includedInComparison: true }),
+        ],
+      },
+    );
+    const workbook = await exportAnalysisToWorkbook(analysis);
+    const peopleSheet = workbook.getWorksheet("Personas");
+    const conceptsSheet = workbook.getWorksheet("Conceptos");
+    const personHeader = peopleSheet?.getRow(1).values as unknown[];
+    const conceptHeader = conceptsSheet?.getRow(1).values as unknown[];
+    const exportedPerson = peopleSheet?.getRow(2);
+    const exportedConcept = Array.from({ length: (conceptsSheet?.rowCount ?? 1) - 1 }, (_, index) => conceptsSheet?.getRow(index + 2)).find(
+      (row) => row?.getCell(conceptHeader.indexOf("Codigo Registro")).value === "COMP_TEST",
+    );
+    const sourcePerson = analysis.people.find((row) => row.employeeNumber === "E1");
+    const sourceConcept = analysis.concepts.find((row) => row.registroCode === "COMP_TEST");
+
+    expect(exportedPerson?.getCell(personHeader.indexOf("Total Registro")).value).toBe(sourcePerson?.registroTotal);
+    expect(exportedPerson?.getCell(personHeader.indexOf("Total PDF")).value).toBe(sourcePerson?.pdfTotal);
+    expect(exportedPerson?.getCell(personHeader.indexOf("Dif. Total")).value).toBe(sourcePerson?.totalDifference);
+    expect(exportedConcept?.getCell(conceptHeader.indexOf("Registro")).value).toBe(sourceConcept?.registroAmount);
+    expect(exportedConcept?.getCell(conceptHeader.indexOf("PDF")).value).toBe(sourceConcept?.pdfAmount);
+    expect(exportedConcept?.getCell(conceptHeader.indexOf("Diferencia")).value).toBe(sourceConcept?.difference);
+    expect((exportedConcept?.getCell(1).fill as { fgColor?: { argb?: string } }).fgColor?.argb).toBeTruthy();
   });
 
   test("exports Agrupaciones with real Registro, Empleados and PDF grouped columns", async () => {
@@ -715,21 +798,22 @@ describe("Excel export", () => {
       summary: { ...analysis.summary, groupingDifferences: groupings.filter((row) => row.status !== "OK").length },
     });
     const sheet = workbook.getWorksheet("Agrupaciones");
-    const header = sheet?.getRow(1).values as unknown[];
+    const header = sheet?.getRow(2).values as unknown[];
 
-    expect(sheet?.getCell("A2").value).not.toBe("Pendiente de implementación");
+    expect(sheet?.getCell("A3").value).not.toBe("Pendiente de implementacion");
     expect(sheet?.rowCount).toBeGreaterThan(4000);
     expect(header).toContain("Base Registro");
-    expect(header).toContain("Valor hoja agrupada");
-    expect(header).toContain("Valor recalculado Empleados");
+    expect(header).toContain("Hoja agrupada");
+    expect(header).toContain("Recalculado Empleados");
     expect(header).toContain("Registro periodo completo matched");
     expect(header).toContain("PDF recalculado");
     expect(header).toContain("Dif. PDF");
+    expect(header).toContain("Estado PDF");
 
     const baseColumn = header.indexOf("Base Registro");
     const pdfStatusColumn = header.indexOf("Estado PDF");
     const normalizedRow = sheet
-      ? Array.from({ length: sheet.rowCount - 1 }, (_, index) => sheet.getRow(index + 2)).find((row) => row.getCell(baseColumn).value === "RETRIBUCIONES NORMALIZADAS")
+      ? Array.from({ length: sheet.rowCount - 2 }, (_, index) => sheet.getRow(index + 3)).find((row) => row.getCell(baseColumn).value === "RETRIBUCIONES NORMALIZADAS")
       : undefined;
     expect(normalizedRow?.getCell(pdfStatusColumn).value).toBe("No aplica");
   });
@@ -772,11 +856,11 @@ describe("Excel export", () => {
       ],
     });
     const sheet = workbook.getWorksheet("Agrupaciones");
-    const header = sheet?.getRow(1).values as unknown[];
-    const excelDifferenceColumn = header.indexOf("Diferencia Excel");
+    const header = sheet?.getRow(2).values as unknown[];
+    const excelDifferenceColumn = header.indexOf("Dif. Excel");
     const pdfDifferenceColumn = header.indexOf("Dif. PDF");
 
-    expect(sheet?.getRow(2).getCell(excelDifferenceColumn).value).toBe(0);
-    expect(sheet?.getRow(2).getCell(pdfDifferenceColumn).value).toBe(0);
+    expect(sheet?.getRow(3).getCell(excelDifferenceColumn).value).toBe(0);
+    expect(sheet?.getRow(3).getCell(pdfDifferenceColumn).value).toBe(0);
   });
 });
