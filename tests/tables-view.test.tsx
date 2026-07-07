@@ -568,6 +568,9 @@ describe("TablesView", () => {
     expect(screen.getAllByText("Comparación PDF").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/usa solo personas matched y excluye matrículas PDF sin Registro/i).length).toBeGreaterThan(0);
     expect(screen.getByText("Las hojas agrupadas cuadran con Empleados.")).toBeTruthy();
+    expect(screen.getByText("Hojas analizadas")).toBeTruthy();
+    expect(screen.getByText("Agrupaciones calculadas")).toBeTruthy();
+    expect(screen.queryByText("Filas Excel OK")).toBeNull();
     expect(screen.getByText("Filas Excel con diferencia")).toBeTruthy();
     expect(screen.getByText("Filas PDF con diferencia")).toBeTruthy();
     expect(screen.getByText("PDF sin Registro excluidos")).toBeTruthy();

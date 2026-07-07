@@ -313,7 +313,6 @@ export function AgrupacionesView() {
     return {
       sheets: unique(rows.map((row) => row.sourceSheet)).length,
       groups: distinctGroupCount(rows),
-      excelOk: rows.length - excelDifferenceRows,
       excelDifferenceRows,
       pdfDifferenceRows,
       pdfExcluded: Math.max(0, ...rows.map((row) => row.excludedPdfWithoutRegistroCount ?? 0)),
@@ -383,20 +382,19 @@ export function AgrupacionesView() {
         La comparación PDF agrupado usa solo personas matched y excluye matrículas PDF sin Registro. Se excluyen {summary.pdfExcluded} matrículas presentes en PDF pero no en Registro porque no tienen datos maestros de agrupación.
       </div>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-7">
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
         {[
           ["Hojas analizadas", summary.sheets],
           ["Agrupaciones calculadas", summary.groups],
-          ["Filas Excel OK", summary.excelOk],
           ["Filas Excel con diferencia", summary.excelDifferenceRows],
           ["Filas PDF con diferencia", summary.pdfDifferenceRows],
           ["PDF sin Registro excluidos", summary.pdfExcluded],
           ["Mayor diferencia PDF", formatEuro(zeroNormalized(summary.maxPdfDifference, 0.005))],
           ["Agrupaciones PDF afectadas", summary.pdfAffectedGroups],
         ].map(([label, value]) => (
-          <Card key={label} className="min-h-[104px] p-4">
-            <p className="text-sm font-medium text-muted">{label}</p>
-            <p className="mt-3 text-xl font-semibold text-ink tabular-nums">{value}</p>
+          <Card key={label} className="min-h-[92px] p-3">
+            <p className="text-xs font-semibold leading-5 text-muted">{label}</p>
+            <p className="mt-2 text-lg font-semibold text-ink tabular-nums">{value}</p>
           </Card>
         ))}
       </section>
