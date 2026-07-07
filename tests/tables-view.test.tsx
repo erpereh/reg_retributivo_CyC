@@ -486,7 +486,7 @@ describe("TablesView", () => {
     expect(screen.getByText(/Suma diferencia visible/i)).toBeTruthy();
   });
 
-  test("renders grouping validation with Base Registro and keeps PDF grouped as pending", () => {
+  test("separates Excel validation from grouped PDF comparison", () => {
     appState.value.result.groupings = [
       {
         sourceSheet: "Análisis por puesto",
@@ -504,26 +504,141 @@ describe("TablesView", () => {
         womenCount: 1,
         menCount: 0,
         status: "OK",
+        pdfStatus: "No aplica",
+        excludedPdfWithoutRegistroCount: 1,
+        detail: "Hoja agrupada comparada contra Empleados.",
+      },
+      {
+        sourceSheet: "Análisis por puesto",
+        groupingType: "puesto",
+        groupId: "ATSACYC",
+        groupName: "Administrativo/a Técnico SACYC",
+        registroBase: "RETRIBUCIONES (PERIODO COMPLETO)",
+        block: "Salario",
+        metric: "Media",
+        segment: "Mujeres",
+        registroSheetValue: 100,
+        registroRecalculatedValue: 100,
+        excelDifference: 0,
+        pdfRegistroRecalculatedValue: 100,
+        pdfRecalculatedValue: 130,
+        pdfDifference: 30,
+        peopleCount: 2,
+        matchedPeopleCount: 1,
+        womenCount: 1,
+        menCount: 1,
+        matchedWomenCount: 1,
+        matchedMenCount: 0,
+        excludedPdfWithoutRegistroCount: 1,
+        status: "OK",
+        pdfStatus: "Diferencia",
+        detail: "Hoja agrupada comparada contra Empleados.",
+      },
+      {
+        sourceSheet: "Análisis por puesto",
+        groupingType: "puesto",
+        groupId: "ATSACYC",
+        groupName: "Administrativo/a Técnico SACYC",
+        registroBase: "RETRIBUCIONES (PERIODO COMPLETO)",
+        block: "Salario",
+        metric: "Media",
+        segment: "Diferencia %",
+        registroSheetValue: 0,
+        registroRecalculatedValue: 0,
+        excelDifference: 0,
+        pdfRegistroRecalculatedValue: 0.1,
+        pdfRecalculatedValue: 10.1,
+        pdfDifference: 10,
+        peopleCount: 2,
+        matchedPeopleCount: 1,
+        womenCount: 1,
+        menCount: 1,
+        matchedWomenCount: 1,
+        matchedMenCount: 0,
+        excludedPdfWithoutRegistroCount: 1,
+        status: "OK",
+        pdfStatus: "Diferencia",
         detail: "Hoja agrupada comparada contra Empleados.",
       },
     ];
 
     render(<TablesView mode="agrupaciones" />);
 
-    expect(screen.getByText("Validación Excel")).toBeTruthy();
-    expect(screen.getByText("PDF agrupado")).toBeTruthy();
-    expect(screen.getByText(/La comparación PDF agrupado se implementará después/i)).toBeTruthy();
+    expect(screen.getAllByText("Validación Excel").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Comparación PDF").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/usa solo personas matched y excluye matrículas PDF sin Registro/i).length).toBeGreaterThan(0);
     expect(screen.getByText("Las hojas agrupadas cuadran con Empleados.")).toBeTruthy();
+    expect(screen.getByText("Filas Excel con diferencia")).toBeTruthy();
+    expect(screen.getByText("Filas PDF con diferencia")).toBeTruthy();
+    expect(screen.getByText("PDF sin Registro excluidos")).toBeTruthy();
+    expect(screen.queryByText("Dif. PDF Salario")).toBeNull();
+    expect(screen.queryByText("Dif. PDF C. Salarial")).toBeNull();
+    expect(screen.queryByText("Dif. PDF Extrasalarial")).toBeNull();
+    const maxPdfCard = screen.getByText("Mayor diferencia PDF").closest("div");
+    const affectedCard = screen.getByText("Agrupaciones PDF afectadas").closest("div");
+    expect(maxPdfCard).toBeTruthy();
+    expect(affectedCard).toBeTruthy();
+    expect(within(maxPdfCard as HTMLElement).getByText("30,00 EUR")).toBeTruthy();
+    expect(within(affectedCard as HTMLElement).getByText("1")).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: "Base Registro" })).toBeTruthy();
     expect(screen.queryByRole("columnheader", { name: /PDF recalculado/i })).toBeNull();
     expect(screen.queryByRole("columnheader", { name: /Dif. PDF/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Comparación PDF" }));
+
+    expect(screen.getByDisplayValue("RETRIBUCIONES (PERIODO COMPLETO)")).toBeTruthy();
+    expect(screen.getByText(/Las diferencias PDF se muestran por métrica agrupada/i)).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Registro periodo completo matched" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "PDF recalculado" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Dif. PDF" })).toBeTruthy();
+    expect(screen.queryByText("TOTAL RETRIBUCIONES NORMALIZADAS + VARIABLES")).toBeNull();
 
     const groupingCell = screen.getAllByText("Administrativo/a Técnico SACYC").find((element) => element.tagName === "TD");
     expect(groupingCell).toBeTruthy();
     fireEvent.click(groupingCell as HTMLElement);
 
     expect(screen.getByRole("dialog", { name: /Detalle agrupación/i })).toBeTruthy();
-    expect(screen.getAllByText("TOTAL RETRIBUCIONES NORMALIZADAS + VARIABLES").length).toBeGreaterThan(0);
-    expect(screen.getByText("Valor recalculado desde Empleados")).toBeTruthy();
+    expect(screen.getByText("Población Excel")).toBeTruthy();
+    expect(screen.getByText("Población matched PDF")).toBeTruthy();
+    expect(screen.getByText("Diferencia Excel")).toBeTruthy();
+    expect(screen.getByText("Diferencia PDF")).toBeTruthy();
+    expect(screen.getAllByText("Esta diferencia corresponde a la métrica agrupada seleccionada.").length).toBeGreaterThan(0);
+  });
+
+  test("normalizes negative zero in grouped PDF display", () => {
+    appState.value.result.groupings = [
+      {
+        sourceSheet: "Análisis por puesto",
+        groupingType: "puesto",
+        groupId: "ATSACYC",
+        groupName: "Administrativo/a Técnico SACYC",
+        registroBase: "RETRIBUCIONES (PERIODO COMPLETO)",
+        block: "Salario",
+        metric: "Media",
+        segment: "Mujeres",
+        registroSheetValue: 100,
+        registroRecalculatedValue: 100,
+        excelDifference: 0,
+        pdfRegistroRecalculatedValue: 100,
+        pdfRecalculatedValue: 99.996,
+        pdfDifference: -0.004,
+        peopleCount: 1,
+        matchedPeopleCount: 1,
+        womenCount: 1,
+        menCount: 0,
+        matchedWomenCount: 1,
+        matchedMenCount: 0,
+        excludedPdfWithoutRegistroCount: 0,
+        status: "OK",
+        pdfStatus: "OK",
+        detail: "Hoja agrupada comparada contra Empleados.",
+      },
+    ];
+
+    render(<TablesView mode="agrupaciones" />);
+    fireEvent.click(screen.getByRole("button", { name: "Comparación PDF" }));
+
+    expect(screen.queryByText(/-0,00/)).toBeNull();
+    expect(screen.getAllByText("0,00 EUR").length).toBeGreaterThan(0);
   });
 });

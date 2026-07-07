@@ -16,6 +16,7 @@ export type ConceptDedupePriority = "devengo" | "informativo";
 export type NonIncludedDecisionType = "Pendiente revision" | "Sin mapear real" | "Ignorado";
 export type AnalysisStatus = "OK" | "Revisar" | "Diferencia" | "Sin mapear" | "Sin PDF" | "Sin Registro" | "Sin datos";
 export type SalaryStatus = AnalysisStatus;
+export type GroupingPdfStatus = AnalysisStatus | "No aplica";
 export type AppView = "dashboard" | "personas" | "conceptos" | "cuadre-excel" | "agrupaciones" | "historial" | "ajustes";
 export type GroupingType = "puesto" | "valoracionPuesto" | "categoria" | "familiaPuesto" | "agrupacionCategoriaPersonal";
 export type GroupingBlock = RetributionBlock;
@@ -277,10 +278,19 @@ export interface GroupingComparisonRow {
   readonly registroSheetValue?: number;
   readonly registroRecalculatedValue?: number;
   readonly excelDifference?: number;
+  readonly pdfRegistroRecalculatedValue?: number;
+  readonly pdfRecalculatedValue?: number;
+  readonly pdfDifference?: number;
   readonly peopleCount: number;
+  readonly matchedPeopleCount?: number;
   readonly womenCount: number;
   readonly menCount: number;
+  readonly matchedWomenCount?: number;
+  readonly matchedMenCount?: number;
+  readonly excludedPdfWithoutRegistroCount?: number;
   readonly status: AnalysisStatus;
+  readonly excelStatus?: AnalysisStatus;
+  readonly pdfStatus?: GroupingPdfStatus;
   readonly detail: string;
 }
 

@@ -3,7 +3,7 @@ import { getGeminiModel, isGeminiEnabled } from "@/lib/ai/geminiClient";
 import { compareAnalysis } from "@/lib/compare/comparePeople";
 import { buildDefaultConceptMap, mergeConceptMap, validateConceptMapForCodes } from "@/lib/compare/conceptMapping";
 import { DEFAULT_INCIDENT_THRESHOLD, DEFAULT_REVIEW_THRESHOLD } from "@/lib/compare/salaryDiff";
-import { buildRegistroGroupingComparisons } from "@/lib/groupings/registroGroupings";
+import { buildRegistroGroupingComparisons, enrichRegistroGroupingsWithPdf } from "@/lib/groupings/registroGroupings";
 import { parsePayrollPdf } from "@/lib/parsers/payrollPdfParser";
 import { parseRegistroRetributivo } from "@/lib/parsers/registroRetributivoParser";
 import type { AnalysisError, AnalysisResult, PayrollRecord } from "@/lib/types";
@@ -93,14 +93,25 @@ export async function POST(request: Request) {
       conceptMap,
       internalExcelChecks: registroParsed.internalChecks,
     });
+    const enrichedGroupings = enrichRegistroGroupingsWithPdf(
+      groupingResult.rows,
+      registroParsed.records,
+      result.people,
+      result.pdfWithoutRegistro,
+      {
+        tolerance,
+        reviewThreshold,
+        incidentThreshold,
+      },
+    );
     const response: AnalysisResult = {
       ...result,
       summary: {
         ...result.summary,
         pdfsFailed: errors.filter((error) => error.type === "pdf").length,
-        groupingDifferences: groupingResult.rows.filter((row) => row.status !== "OK").length,
+        groupingDifferences: enrichedGroupings.filter((row) => row.status !== "OK").length,
       },
-      groupings: groupingResult.rows,
+      groupings: enrichedGroupings,
       errors: [...result.errors, ...errors],
       criteria: [
         ...result.criteria,

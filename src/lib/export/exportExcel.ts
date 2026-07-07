@@ -282,11 +282,27 @@ function addRegistroSinPdf(workbook: ExcelJS.Workbook, analysis: AnalysisResult)
   styleBodyRows(sheet);
 }
 
+function groupingExportValue(item: AnalysisResult["groupings"][number], value?: number): number | undefined {
+  if (value === undefined || !Number.isFinite(value)) {
+    return undefined;
+  }
+  const threshold = item.segment.includes("%") ? 0.00005 : 0.005;
+  return Math.abs(value) < threshold ? 0 : value;
+}
+
+function groupingPdfExportValue(item: AnalysisResult["groupings"][number], value?: number): number | string | undefined {
+  if (item.pdfStatus === "No aplica") {
+    return "No aplica";
+  }
+  return groupingExportValue(item, value);
+}
+
 function addAgrupaciones(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void {
   const sheet = workbook.addWorksheet("Agrupaciones");
   sheet.views = [{ state: "frozen", ySplit: 1 }];
   sheet.addRow([
-    "Estado",
+    "Estado Excel",
+    "Estado PDF",
     "Hoja",
     "Base Registro",
     "Agrupación",
@@ -297,9 +313,16 @@ function addAgrupaciones(workbook: ExcelJS.Workbook, analysis: AnalysisResult): 
     "Valor hoja agrupada",
     "Valor recalculado Empleados",
     "Diferencia Excel",
+    "Registro periodo completo matched",
+    "PDF recalculado",
+    "Dif. PDF",
     "Nº personas",
     "Mujeres",
     "Varones",
+    "Nº matched",
+    "Mujeres matched",
+    "Varones matched",
+    "PDF sin Registro excluidos",
     "Detalle",
   ]);
   styleHeaderRow(sheet.getRow(1));
@@ -309,6 +332,7 @@ function addAgrupaciones(workbook: ExcelJS.Workbook, analysis: AnalysisResult): 
     analysis.groupings.forEach((item) => {
       const row = sheet.addRow([
         item.status,
+        item.pdfStatus ?? "Sin datos",
         item.sourceSheet,
         item.registroBase,
         item.groupName,
@@ -316,27 +340,39 @@ function addAgrupaciones(workbook: ExcelJS.Workbook, analysis: AnalysisResult): 
         item.block,
         item.metric,
         item.segment,
-        item.registroSheetValue,
-        item.registroRecalculatedValue,
-        item.excelDifference,
+        groupingExportValue(item, item.registroSheetValue),
+        groupingExportValue(item, item.registroRecalculatedValue),
+        groupingExportValue(item, item.excelDifference),
+        groupingPdfExportValue(item, item.pdfRegistroRecalculatedValue),
+        groupingPdfExportValue(item, item.pdfRecalculatedValue),
+        groupingPdfExportValue(item, item.pdfDifference),
         item.peopleCount,
         item.womenCount,
         item.menCount,
+        item.matchedPeopleCount ?? 0,
+        item.matchedWomenCount ?? 0,
+        item.matchedMenCount ?? 0,
+        item.excludedPdfWithoutRegistroCount ?? 0,
         item.detail,
       ]);
       applyStatusStyle(row.getCell(1), item.status);
+      applyStatusStyle(row.getCell(2), item.pdfStatus ?? "Sin datos");
       if (item.segment === "Diferencia %") {
-        row.getCell(9).numFmt = "0.00%";
-        row.getCell(10).numFmt = "0.00%";
-        row.getCell(11).numFmt = "0.00%";
+        [10, 11, 12, 13, 14, 15].forEach((column) => {
+          if (typeof row.getCell(column).value === "number") {
+            row.getCell(column).numFmt = "0.00%";
+          }
+        });
       } else {
-        row.getCell(9).numFmt = EURO_FORMAT;
-        row.getCell(10).numFmt = EURO_FORMAT;
-        row.getCell(11).numFmt = EURO_FORMAT;
+        [10, 11, 12, 13, 14, 15].forEach((column) => {
+          if (typeof row.getCell(column).value === "number") {
+            row.getCell(column).numFmt = EURO_FORMAT;
+          }
+        });
       }
     });
   }
-  configureColumns(sheet, [18, 34, 44, 36, 18, 18, 16, 16, 22, 28, 18, 14, 12, 12, 72]);
+  configureColumns(sheet, [18, 18, 34, 44, 36, 18, 18, 16, 16, 22, 28, 18, 30, 22, 18, 14, 12, 12, 14, 16, 16, 24, 82]);
   styleBodyRows(sheet);
 }
 

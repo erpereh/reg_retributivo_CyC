@@ -5,10 +5,10 @@ import { describe, expect, test } from "vitest";
 import { compareAnalysis } from "@/lib/compare/comparePeople";
 import { buildDefaultConceptMap } from "@/lib/compare/conceptMapping";
 import { exportAnalysisToWorkbook } from "@/lib/export/exportExcel";
-import { buildRegistroGroupingComparisons, median, REGISTRO_GROUPING_BASES } from "@/lib/groupings/registroGroupings";
+import { buildRegistroGroupingComparisons, enrichRegistroGroupingsWithPdf, median, REGISTRO_GROUPING_BASES } from "@/lib/groupings/registroGroupings";
 import { parsePayrollPdf } from "@/lib/parsers/payrollPdfParser";
 import { parseRegistroRetributivo } from "@/lib/parsers/registroRetributivoParser";
-import type { ConceptMappingRule, PayrollRecord, RegistroEmployee } from "@/lib/types";
+import type { ConceptMappingRule, GroupingComparisonRow, PersonComparisonRow, PayrollRecord, RegistroEmployee } from "@/lib/types";
 import { formatEuro, parseSpanishMoney } from "@/lib/utils/money";
 import { normalizeComparableText, normalizeProfessionalGroup } from "@/lib/utils/normalize";
 import { parsePayrollPeriod, toIsoDate } from "@/lib/utils/spanishDates";
@@ -36,6 +36,32 @@ function emptyRegistroEmployee(overrides: Partial<RegistroEmployee>): RegistroEm
     excelBreakdownDiffs: { salary: 0, salaryComplement: 0, extraSalary: 0 },
     concepts: [],
     raw: {},
+    ...overrides,
+  };
+}
+
+function personRow(overrides: Partial<PersonComparisonRow> & Pick<PersonComparisonRow, "employeeNumber">): PersonComparisonRow {
+  return {
+    employeeNumber: overrides.employeeNumber,
+    salaryRegistro: 0,
+    salaryPdf: 0,
+    salaryDifference: 0,
+    salaryComplementRegistro: 0,
+    salaryComplementPdf: 0,
+    salaryComplementDifference: 0,
+    extraSalaryRegistro: 0,
+    extraSalaryPdf: 0,
+    extraSalaryDifference: 0,
+    registroTotal: 0,
+    pdfTotal: 0,
+    totalDifference: 0,
+    pdfControlTotalDevengado: 0,
+    payrollCount: 1,
+    unmappedConceptsCount: 0,
+    status: "OK",
+    detail: "",
+    periods: [],
+    files: [],
     ...overrides,
   };
 }
@@ -161,6 +187,70 @@ describe("Registro grouped sheets", () => {
     );
     expect(zeroMenDifference?.registroSheetValue).toBe(0);
     expect(zeroMenDifference?.registroRecalculatedValue).toBe(0);
+  });
+
+  test("enriches grouped rows with PDF matched-only period-complete comparisons", () => {
+    const employees = [
+      emptyRegistroEmployee({ employeeNumber: "E1", sex: "Mujer", raw: { "puesto id puesto": "G1", "puesto puesto": "Grupo 1" } }),
+      emptyRegistroEmployee({ employeeNumber: "E2", sex: "Hombre", raw: { "puesto id puesto": "G1", "puesto puesto": "Grupo 1" } }),
+      emptyRegistroEmployee({ employeeNumber: "E3", sex: "Mujer", raw: { "puesto id puesto": "G1", "puesto puesto": "Grupo 1" } }),
+    ];
+    const people = [
+      personRow({ employeeNumber: "E1", salaryRegistro: 100, salaryPdf: 130, salaryDifference: 30 }),
+      personRow({ employeeNumber: "E2", salaryRegistro: 200, salaryPdf: 200, salaryDifference: 0 }),
+      personRow({ employeeNumber: "E3", salaryRegistro: 999, salaryPdf: 0, salaryDifference: -999, status: "Sin PDF" }),
+      personRow({ employeeNumber: "E4", salaryRegistro: 0, salaryPdf: 700, salaryDifference: 700, status: "Sin Registro" }),
+    ];
+    const baseRow: GroupingComparisonRow = {
+      sourceSheet: "Análisis por puesto",
+      groupingType: "puesto",
+      groupId: "G1",
+      groupName: "Grupo 1",
+      registroBase: "RETRIBUCIONES (PERIODO COMPLETO)",
+      block: "Salario",
+      metric: "Media",
+      segment: "Mujeres",
+      registroSheetValue: 100,
+      registroRecalculatedValue: 399.5,
+      excelDifference: 0,
+      peopleCount: 3,
+      womenCount: 2,
+      menCount: 1,
+      status: "OK",
+      detail: "Excel OK.",
+    };
+
+    const enriched = enrichRegistroGroupingsWithPdf(
+      [
+        baseRow,
+        { ...baseRow, segment: "Diferencia %", registroSheetValue: 0.5, registroRecalculatedValue: 0.5 },
+        { ...baseRow, registroBase: "RETRIBUCIONES NORMALIZADAS" },
+      ],
+      employees,
+      people,
+      people.filter((row) => row.status === "Sin Registro"),
+      { tolerance: 1, reviewThreshold: 1, incidentThreshold: 50 },
+    );
+
+    const women = enriched[0];
+    expect(women.pdfRegistroRecalculatedValue).toBe(100);
+    expect(women.pdfRecalculatedValue).toBe(130);
+    expect(women.pdfDifference).toBe(30);
+    expect(women.pdfStatus).toBe("Revisar");
+    expect(women.matchedPeopleCount).toBe(2);
+    expect(women.matchedWomenCount).toBe(1);
+    expect(women.matchedMenCount).toBe(1);
+    expect(women.excludedPdfWithoutRegistroCount).toBe(1);
+
+    const percentage = enriched[1];
+    expect(percentage.pdfRegistroRecalculatedValue).toBe(0.5);
+    expect(percentage.pdfRecalculatedValue).toBe(0.35);
+    expect(percentage.pdfDifference).toBeCloseTo(-0.15);
+
+    const normalized = enriched[2];
+    expect(normalized.pdfStatus).toBe("No aplica");
+    expect(normalized.pdfRecalculatedValue).toBeUndefined();
+    expect(normalized.pdfDifference).toBeUndefined();
   });
 });
 
@@ -602,7 +692,7 @@ describe("Excel export", () => {
     expect(serialized).not.toMatch(/ES\d{2}\s?\d{4}|00397416E|0128\s?8700/i);
   });
 
-  test("exports Agrupaciones with real Registro vs Empleados data and no PDF columns", async () => {
+  test("exports Agrupaciones with real Registro, Empleados and PDF grouped columns", async () => {
     const registro = await parseRegistroRetributivo(readFileSync(registroFile));
     const groupingResult = buildRegistroGroupingComparisons(readFileSync(registroFile), registro.records, {
       tolerance: 1,
@@ -614,19 +704,79 @@ describe("Excel export", () => {
       conceptMap: buildDefaultConceptMap(registro.conceptCodes),
       enableAI: false,
     });
+    const groupings = enrichRegistroGroupingsWithPdf(groupingResult.rows, registro.records, analysis.people, analysis.pdfWithoutRegistro, {
+      tolerance: 1,
+      reviewThreshold: 1,
+      incidentThreshold: 50,
+    });
     const workbook = await exportAnalysisToWorkbook({
       ...analysis,
-      groupings: groupingResult.rows,
-      summary: { ...analysis.summary, groupingDifferences: groupingResult.rows.filter((row) => row.status !== "OK").length },
+      groupings,
+      summary: { ...analysis.summary, groupingDifferences: groupings.filter((row) => row.status !== "OK").length },
     });
     const sheet = workbook.getWorksheet("Agrupaciones");
+    const header = sheet?.getRow(1).values as unknown[];
 
     expect(sheet?.getCell("A2").value).not.toBe("Pendiente de implementación");
     expect(sheet?.rowCount).toBeGreaterThan(4000);
-    expect(sheet?.getRow(1).values).toContain("Base Registro");
-    expect(sheet?.getRow(1).values).toContain("Valor hoja agrupada");
-    expect(sheet?.getRow(1).values).toContain("Valor recalculado Empleados");
-    expect(sheet?.getRow(1).values).not.toContain("PDF recalculado");
-    expect(sheet?.getRow(1).values).not.toContain("Dif. PDF");
+    expect(header).toContain("Base Registro");
+    expect(header).toContain("Valor hoja agrupada");
+    expect(header).toContain("Valor recalculado Empleados");
+    expect(header).toContain("Registro periodo completo matched");
+    expect(header).toContain("PDF recalculado");
+    expect(header).toContain("Dif. PDF");
+
+    const baseColumn = header.indexOf("Base Registro");
+    const pdfStatusColumn = header.indexOf("Estado PDF");
+    const normalizedRow = sheet
+      ? Array.from({ length: sheet.rowCount - 1 }, (_, index) => sheet.getRow(index + 2)).find((row) => row.getCell(baseColumn).value === "RETRIBUCIONES NORMALIZADAS")
+      : undefined;
+    expect(normalizedRow?.getCell(pdfStatusColumn).value).toBe("No aplica");
+  });
+
+  test("normalizes negative zero in Agrupaciones export", async () => {
+    const analysis = await compareAnalysis([], [], {
+      tolerance: 1,
+      conceptMap: [],
+      enableAI: false,
+    });
+    const workbook = await exportAnalysisToWorkbook({
+      ...analysis,
+      groupings: [
+        {
+          sourceSheet: "Análisis por puesto",
+          groupingType: "puesto",
+          groupId: "ATSACYC",
+          groupName: "Administrativo/a Técnico SACYC",
+          registroBase: "RETRIBUCIONES (PERIODO COMPLETO)",
+          block: "Salario",
+          metric: "Media",
+          segment: "Mujeres",
+          registroSheetValue: 100,
+          registroRecalculatedValue: 100,
+          excelDifference: -0.004,
+          pdfRegistroRecalculatedValue: 100,
+          pdfRecalculatedValue: 99.996,
+          pdfDifference: -0.004,
+          peopleCount: 1,
+          matchedPeopleCount: 1,
+          womenCount: 1,
+          menCount: 0,
+          matchedWomenCount: 1,
+          matchedMenCount: 0,
+          excludedPdfWithoutRegistroCount: 0,
+          status: "OK",
+          pdfStatus: "OK",
+          detail: "Hoja agrupada comparada contra Empleados.",
+        },
+      ],
+    });
+    const sheet = workbook.getWorksheet("Agrupaciones");
+    const header = sheet?.getRow(1).values as unknown[];
+    const excelDifferenceColumn = header.indexOf("Diferencia Excel");
+    const pdfDifferenceColumn = header.indexOf("Dif. PDF");
+
+    expect(sheet?.getRow(2).getCell(excelDifferenceColumn).value).toBe(0);
+    expect(sheet?.getRow(2).getCell(pdfDifferenceColumn).value).toBe(0);
   });
 });

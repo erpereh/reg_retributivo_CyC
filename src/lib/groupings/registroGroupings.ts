@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
-import type { AnalysisStatus, GroupingComparisonRow, GroupingType, RegistroEmployee, RetributionBlock } from "@/lib/types";
-import { normalizeComparableText } from "@/lib/utils/normalize";
+import type { AnalysisStatus, GroupingComparisonRow, GroupingType, PersonComparisonRow, RegistroEmployee, RetributionBlock } from "@/lib/types";
+import { normalizeComparableText, normalizeEmployeeNumber } from "@/lib/utils/normalize";
 
 export const REGISTRO_GROUPING_BASES = [
   { key: "normalizedPlusVariables", label: "TOTAL RETRIBUCIONES NORMALIZADAS + VARIABLES" },
@@ -96,6 +96,7 @@ const BLOCKS: readonly RetributionBlock[] = ["Salario", "C. Salarial", "Extrasal
 const METRICS: readonly GroupingMetric[] = ["Media", "Mediana"];
 const SEGMENTS: readonly GroupingSegment[] = ["Mujeres", "Varones", "Diferencia %"];
 const NO_GROUP = "[SIN DEFINIR]";
+const PERIOD_COMPLETE_BASE = "RETRIBUCIONES (PERIODO COMPLETO)";
 const RAW_AMOUNT_KEYS: Record<RegistroBaseKey, Record<RetributionBlock, string>> = {
   normalizedPlusVariables: {
     Salario: "total retribuciones normalizadas + variables salario",
@@ -300,6 +301,10 @@ function groupEmployees(definition: GroupingSheetDefinition, employees: readonly
   return grouped;
 }
 
+function groupingDefinitionForType(groupingType: GroupingType): GroupingSheetDefinition | undefined {
+  return GROUPING_SHEETS.find((definition) => definition.groupingType === groupingType);
+}
+
 export function median(values: readonly unknown[]): number {
   const numeric = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value)).sort((left, right) => left - right);
   if (!numeric.length) {
@@ -354,6 +359,12 @@ function roundedDifference(value: number | undefined): number | undefined {
   return Math.round(value * 1_000_000) / 1_000_000;
 }
 
+function matchedBlockAmount(row: PersonComparisonRow, block: RetributionBlock, source: "registro" | "pdf"): number {
+  if (block === "Salario") return source === "registro" ? row.salaryRegistro : row.salaryPdf;
+  if (block === "C. Salarial") return source === "registro" ? row.salaryComplementRegistro : row.salaryComplementPdf;
+  return source === "registro" ? row.extraSalaryRegistro : row.extraSalaryPdf;
+}
+
 function segmentValue(input: {
   readonly employees: readonly RegistroEmployee[];
   readonly baseKey: RegistroBaseKey;
@@ -378,6 +389,58 @@ function segmentValue(input: {
   if (input.segment === "Mujeres") return women;
   if (input.segment === "Varones") return men;
   return differencePercentage(women, men);
+}
+
+function matchedSegmentValue(input: {
+  readonly people: readonly { readonly employee: RegistroEmployee; readonly row: PersonComparisonRow }[];
+  readonly block: RetributionBlock;
+  readonly metric: GroupingMetric;
+  readonly segment: GroupingSegment;
+  readonly source: "registro" | "pdf";
+}): number {
+  const womenValues: number[] = [];
+  const menValues: number[] = [];
+  input.people.forEach((item) => {
+    const amount = matchedBlockAmount(item.row, input.block, input.source);
+    const sex = normalizeSex(item.employee.sex);
+    if (sex === "women") {
+      womenValues.push(amount);
+    } else if (sex === "men") {
+      menValues.push(amount);
+    }
+  });
+
+  const women = input.metric === "Media" ? average(womenValues) : median(womenValues);
+  const men = input.metric === "Media" ? average(menValues) : median(menValues);
+  if (input.segment === "Mujeres") return women;
+  if (input.segment === "Varones") return men;
+  return differencePercentage(women, men);
+}
+
+function groupMatchedPeople(
+  definition: GroupingSheetDefinition,
+  employeesByNumber: ReadonlyMap<string, RegistroEmployee>,
+  people: readonly PersonComparisonRow[],
+) {
+  const grouped = new Map<string, { matched: { employee: RegistroEmployee; row: PersonComparisonRow }[]; women: number; men: number }>();
+  people
+    .filter((row) => row.status !== "Sin Registro" && row.status !== "Sin PDF")
+    .forEach((row) => {
+      const employee = employeesByNumber.get(normalizeEmployeeNumber(row.employeeNumber));
+      if (!employee) {
+        return;
+      }
+      const rawId = rawText(employee, definition.rawGroupIdKey);
+      const rawName = rawText(employee, definition.rawGroupNameKey);
+      const key = groupKey(rawId || rawName || NO_GROUP);
+      const current = grouped.get(key) ?? { matched: [], women: 0, men: 0 };
+      current.matched.push({ employee, row });
+      const sex = normalizeSex(employee.sex);
+      if (sex === "women") current.women += 1;
+      if (sex === "men") current.men += 1;
+      grouped.set(key, current);
+    });
+  return grouped;
 }
 
 function detectedSheetSummary(sheet: ParsedGroupedSheet): DetectedGroupingSheet {
@@ -471,4 +534,68 @@ export function buildRegistroGroupingComparisons(
     groupCount: distinctGroups.size,
     warnings,
   };
+}
+
+export function enrichRegistroGroupingsWithPdf(
+  rows: readonly GroupingComparisonRow[],
+  employees: readonly RegistroEmployee[],
+  people: readonly PersonComparisonRow[],
+  pdfWithoutRegistro: readonly PersonComparisonRow[] = [],
+  options: BuildRegistroGroupingComparisonsOptions,
+): readonly GroupingComparisonRow[] {
+  const employeesByNumber = new Map(employees.map((employee) => [normalizeEmployeeNumber(employee.employeeNumber), employee]));
+  const matchedByGroupingType = new Map<GroupingType, ReturnType<typeof groupMatchedPeople>>();
+
+  GROUPING_SHEETS.forEach((definition) => {
+    matchedByGroupingType.set(definition.groupingType, groupMatchedPeople(definition, employeesByNumber, people));
+  });
+
+  return rows.map((row) => {
+    if (row.registroBase !== PERIOD_COMPLETE_BASE) {
+      return {
+        ...row,
+        excelStatus: row.status,
+        pdfStatus: "No aplica",
+        excludedPdfWithoutRegistroCount: pdfWithoutRegistro.length,
+      };
+    }
+
+    const definition = groupingDefinitionForType(row.groupingType);
+    const matchedGroup = definition ? matchedByGroupingType.get(definition.groupingType)?.get(groupKey(row.groupId)) : undefined;
+    const matched = matchedGroup?.matched ?? [];
+    const metric = row.metric as GroupingMetric;
+    const segment = row.segment as GroupingSegment;
+    const registroMatchedValue = matchedSegmentValue({
+      people: matched,
+      block: row.block,
+      metric,
+      segment,
+      source: "registro",
+    });
+    const pdfValue = matchedSegmentValue({
+      people: matched,
+      block: row.block,
+      metric,
+      segment,
+      source: "pdf",
+    });
+    const pdfDifference = roundedDifference(pdfValue - registroMatchedValue);
+    const pdfStatus = statusFromDifference(pdfDifference, segment, options);
+
+    return {
+      ...row,
+      excelStatus: row.status,
+      pdfRegistroRecalculatedValue: registroMatchedValue,
+      pdfRecalculatedValue: pdfValue,
+      pdfDifference,
+      pdfStatus,
+      matchedPeopleCount: matched.length,
+      matchedWomenCount: matchedGroup?.women ?? 0,
+      matchedMenCount: matchedGroup?.men ?? 0,
+      excludedPdfWithoutRegistroCount: pdfWithoutRegistro.length,
+      detail:
+        row.detail +
+        " Comparación PDF: Registro periodo completo matched frente a PDF agrupado; se excluyen PDF sin Registro y Registro sin PDF.",
+    };
+  });
 }
