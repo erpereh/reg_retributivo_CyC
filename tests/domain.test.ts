@@ -168,6 +168,12 @@ describe("Registro grouped sheets", () => {
     expect(puesto?.columns.map((column) => column.label)).toContain("Puesto");
     expect(puesto?.columns.map((column) => column.label)).toContain("Total personas · Mujeres");
     expect(puesto?.columns.map((column) => column.label)).toContain("Total retribuciones normalizadas + variables · Salario · Media · Mujeres");
+    const groupedHeaderCells = puesto?.groupedHeaders?.flat() ?? [];
+    expect(groupedHeaderCells.find((cell) => cell.label === "TOTAL PERSONAS")?.colSpan).toBe(3);
+    expect(groupedHeaderCells.find((cell) => cell.label === "TOTAL RETRIBUCIONES NORMALIZADAS + VARIABLES")?.colSpan).toBeGreaterThan(10);
+    expect(groupedHeaderCells.find((cell) => cell.label === "RETRIBUCIONES NORMALIZADAS")?.colSpan).toBeGreaterThan(10);
+    expect(groupedHeaderCells.find((cell) => cell.label === "RETRIBUCIONES PERIODO COMPLETO")?.colSpan).toBeGreaterThan(10);
+    expect(groupedHeaderCells.some((cell) => cell.path === "TOTAL RETRIBUCIONES NORMALIZADAS + VARIABLES > Salario > MEDIA > MUJERES")).toBe(true);
     expect(JSON.stringify(puesto?.rows[0])).toContain("Administrativa/o Fuentes Públicas");
     expect(JSON.stringify(puesto?.rows[0])).not.toContain("REGISTRO RETRIBUTIVO");
   });

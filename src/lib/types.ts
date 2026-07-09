@@ -331,6 +331,16 @@ export interface GroupedExcelColumn {
   readonly kind: GroupedExcelCellKind;
 }
 
+export interface GroupedExcelHeaderCell {
+  readonly label: string;
+  readonly colSpan: number;
+  readonly rowSpan?: number;
+  readonly startColumn: number;
+  readonly endColumn: number;
+  readonly level: number;
+  readonly path: string;
+}
+
 export interface GroupedExcelCell {
   readonly value: string | number | boolean | null;
   readonly display: string;
@@ -342,6 +352,7 @@ export type GroupedExcelRow = Readonly<Record<string, GroupedExcelCell>>;
 export interface GroupedExcelSheet {
   readonly sheetName: string;
   readonly status: GroupedExcelSheetStatus;
+  readonly groupedHeaders?: readonly (readonly GroupedExcelHeaderCell[])[];
   readonly columns: readonly GroupedExcelColumn[];
   readonly rows: readonly GroupedExcelRow[];
   readonly visibleRowCount: number;

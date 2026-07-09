@@ -177,6 +177,13 @@ describe("analysisStorage", () => {
           {
             sheetName: "Análisis por puesto",
             status: "ready",
+            groupedHeaders: [
+              [
+                { label: "ID Puesto", colSpan: 1, rowSpan: 2, startColumn: 0, endColumn: 0, level: 0, path: "ID Puesto" },
+                { label: "TOTAL PERSONAS", colSpan: 1, startColumn: 1, endColumn: 1, level: 0, path: "TOTAL PERSONAS" },
+              ],
+              [{ label: "Mujeres", colSpan: 1, startColumn: 1, endColumn: 1, level: 1, path: "TOTAL PERSONAS > Mujeres" }],
+            ],
             columns: [
               { key: "c0", label: "Grupo", sourceColumn: "A", kind: "text" },
               { key: "c1", label: "Importe", sourceColumn: "B", kind: "number" },
@@ -197,6 +204,7 @@ describe("analysisStorage", () => {
     expect(sheet?.originalRowCount).toBe(2105);
     expect(sheet?.savedRowCount).toBe(2000);
     expect(sheet?.visibleRowCount).toBe(2000);
+    expect(sheet?.groupedHeaders?.flat().map((cell) => cell.label)).toContain("TOTAL PERSONAS");
   });
 
   test("saves, lists, opens, deletes and clears analysis history", async () => {

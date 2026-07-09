@@ -10,25 +10,60 @@ const groupedExcelSheetsFixture = [
   {
     sheetName: "Análisis por puesto",
     status: "ready",
+    groupedHeaders: [
+      [
+        { label: "ID Puesto", colSpan: 1, rowSpan: 4, startColumn: 0, endColumn: 0, level: 0, path: "ID Puesto" },
+        { label: "Puesto", colSpan: 1, rowSpan: 4, startColumn: 1, endColumn: 1, level: 0, path: "Puesto" },
+        { label: "TOTAL PERSONAS", colSpan: 2, rowSpan: 3, startColumn: 2, endColumn: 3, level: 0, path: "TOTAL PERSONAS" },
+        {
+          label: "TOTAL RETRIBUCIONES NORMALIZADAS + VARIABLES",
+          colSpan: 1,
+          startColumn: 4,
+          endColumn: 4,
+          level: 0,
+          path: "TOTAL RETRIBUCIONES NORMALIZADAS + VARIABLES",
+        },
+      ],
+      [{ label: "Salario", colSpan: 1, startColumn: 4, endColumn: 4, level: 1, path: "TOTAL RETRIBUCIONES NORMALIZADAS + VARIABLES > Salario" }],
+      [{ label: "Media", colSpan: 1, startColumn: 4, endColumn: 4, level: 2, path: "TOTAL RETRIBUCIONES NORMALIZADAS + VARIABLES > Salario > Media" }],
+      [
+        { label: "Mujeres", colSpan: 1, startColumn: 2, endColumn: 2, level: 3, path: "TOTAL PERSONAS > Mujeres" },
+        { label: "Varones", colSpan: 1, startColumn: 3, endColumn: 3, level: 3, path: "TOTAL PERSONAS > Varones" },
+        {
+          label: "Mujeres",
+          colSpan: 1,
+          startColumn: 4,
+          endColumn: 4,
+          level: 3,
+          path: "TOTAL RETRIBUCIONES NORMALIZADAS + VARIABLES > Salario > Media > Mujeres",
+        },
+      ],
+    ],
     columns: [
-      { key: "c0", label: "Puesto", sourceColumn: "A", kind: "text" },
-      { key: "c1", label: "Total personas · Mujeres", sourceColumn: "B", kind: "number" },
-      { key: "c2", label: "Total personas · Varones", sourceColumn: "C", kind: "number" },
+      { key: "c0", label: "ID Puesto", sourceColumn: "A", kind: "text" },
+      { key: "c1", label: "Puesto", sourceColumn: "B", kind: "text" },
+      { key: "c2", label: "Total personas · Mujeres", sourceColumn: "C", kind: "number" },
+      { key: "c3", label: "Total personas · Varones", sourceColumn: "D", kind: "number" },
+      { key: "c4", label: "Total retribuciones normalizadas + variables · Salario · Media · Mujeres", sourceColumn: "E", kind: "number" },
     ],
     rows: [
       {
-        c0: { value: "Administrativo/a Técnico SACYC", display: "Administrativo/a Técnico SACYC", kind: "text" },
-        c1: { value: 1, display: "1", kind: "number" },
-        c2: { value: 0, display: "0", kind: "number" },
+        c0: { value: "ATSACYC", display: "ATSACYC", kind: "text" },
+        c1: { value: "Administrativo/a Técnico SACYC", display: "Administrativo/a Técnico SACYC", kind: "text" },
+        c2: { value: 1, display: "1", kind: "number" },
+        c3: { value: 0, display: "0", kind: "number" },
+        c4: { value: 23745.72, display: "23.745,72", kind: "number" },
       },
       {
-        c0: { value: "Control de Calidad", display: "Control de Calidad", kind: "text" },
-        c1: { value: 2, display: "2", kind: "number" },
-        c2: { value: 1, display: "1", kind: "number" },
+        c0: { value: "CCAL", display: "CCAL", kind: "text" },
+        c1: { value: "Control de Calidad", display: "Control de Calidad", kind: "text" },
+        c2: { value: 2, display: "2", kind: "number" },
+        c3: { value: 1, display: "1", kind: "number" },
+        c4: { value: 21993.2, display: "21.993,20", kind: "number" },
       },
     ],
     visibleRowCount: 2,
-    visibleColumnCount: 3,
+    visibleColumnCount: 5,
   },
   {
     sheetName: "Análisis por valoración puesto",
@@ -701,17 +736,28 @@ describe("TablesView", () => {
   test("renders Agrupaciones as a grouped Excel sheet viewer", () => {
     render(<TablesView mode="agrupaciones" />);
 
-    expect(screen.getByRole("button", { name: "Análisis por puesto" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Análisis por valoración puesto" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Análisis por categoría" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Análisis por familia de puesto" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Agrupación Categoría Personal" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Puesto" }).getAttribute("title")).toBe("Análisis por puesto");
+    expect(screen.getByRole("button", { name: "Valoración" }).getAttribute("title")).toBe("Análisis por valoración puesto");
+    expect(screen.getByRole("button", { name: "Categoría" }).getAttribute("title")).toBe("Análisis por categoría");
+    expect(screen.getByRole("button", { name: "Familia" }).getAttribute("title")).toBe("Análisis por familia de puesto");
+    expect(screen.getByRole("button", { name: "Cat. personal" }).getAttribute("title")).toBe("Agrupación Categoría Personal");
+    expect(screen.queryByRole("button", { name: "Análisis por puesto" })).toBeNull();
     expect(screen.getByText("Hoja")).toBeTruthy();
+    expect(screen.getByText("Análisis por puesto")).toBeTruthy();
     expect(screen.getByText("Filas visibles")).toBeTruthy();
     expect(screen.getByText("Columnas visibles")).toBeTruthy();
     expect(screen.getByPlaceholderText("Buscar en esta hoja")).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: "Puesto" })).toBeTruthy();
-    expect(screen.getByRole("columnheader", { name: "Total personas · Mujeres" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "ID Puesto" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "TOTAL PERSONAS" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "TOTAL RETRIBUCIONES NORMALIZADAS + VARIABLES" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Salario" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Media" })).toBeTruthy();
+    expect(screen.getAllByRole("columnheader", { name: "Mujeres" }).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByRole("columnheader", { name: "Varones" })).toBeTruthy();
+    expect(screen.getByTitle("TOTAL RETRIBUCIONES NORMALIZADAS + VARIABLES > Salario > Media > Mujeres")).toBeTruthy();
+    expect(screen.queryByText("Total retribuciones normalizadas + variables · Salario · Media · Mujeres")).toBeNull();
+    expect(screen.queryByText("M = Mujeres · V = Varones · Dif. % = Diferencia porcentual")).toBeNull();
     expect(screen.getByText("Administrativo/a Técnico SACYC")).toBeTruthy();
     expect(screen.getByText("Control de Calidad")).toBeTruthy();
 
@@ -728,21 +774,37 @@ describe("TablesView", () => {
     expect(screen.queryByText("Administrativo/a Técnico SACYC")).toBeNull();
     expect(screen.getByText("Control de Calidad")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Análisis por valoración puesto" }));
-    expect(screen.getByRole("columnheader", { name: "Valoración Retributiva" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Valoración" }));
+    expect(screen.getByTitle("Valoración Retributiva").textContent).toBe("Valoración");
     expect(screen.getByText("[SIN DEFINIR]")).toBeTruthy();
+  });
+
+  test("derives grouped headers from flat columns for legacy grouped Excel sheets", () => {
+    appState.value.result.groupedExcelSheets = structuredClone(groupedExcelSheetsFixture).map((sheet) =>
+      sheet.sheetName === "Análisis por puesto" ? { ...sheet, groupedHeaders: undefined } : sheet,
+    );
+
+    render(<TablesView mode="agrupaciones" />);
+
+    expect(screen.getByRole("columnheader", { name: "TOTAL PERSONAS" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "TOTAL RETRIBUCIONES NORMALIZADAS + VARIABLES" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Salario" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Media" })).toBeTruthy();
+    expect(screen.getAllByRole("columnheader", { name: "Mujeres" }).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByRole("columnheader", { name: "Varones" })).toBeTruthy();
+    expect(screen.getByText("Administrativo/a Técnico SACYC")).toBeTruthy();
   });
 
   test("shows clean states for missing, empty, legacy and truncated grouped sheets", () => {
     render(<TablesView mode="agrupaciones" />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Análisis por categoría" }));
+    fireEvent.click(screen.getByRole("button", { name: "Categoría" }));
     expect(screen.getByText("No se ha encontrado esta hoja en el Excel Reg. Retrib.")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Análisis por familia de puesto" }));
+    fireEvent.click(screen.getByRole("button", { name: "Familia" }));
     expect(screen.getByText("No hay datos visibles en esta hoja.")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Agrupación Categoría Personal" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cat. personal" }));
     expect(screen.getByText("Esta hoja se guardó parcialmente en Historial para mantener el rendimiento. Vuelve a analizar el Excel para ver todos los datos.")).toBeTruthy();
 
     appState.value.result.groupedExcelSheets = undefined as never;
