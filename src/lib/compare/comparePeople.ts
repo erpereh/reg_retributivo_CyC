@@ -13,9 +13,10 @@ import type {
   RegistroEmployee,
   UnmappedConceptRow,
 } from "@/lib/types";
-import { findConceptRule, mappingStatusFromConceptType } from "@/lib/compare/conceptMapping";
+import { findConceptRule, isRuleEnabledForComparison, mappingStatusFromConceptType } from "@/lib/compare/conceptMapping";
+import { salaryStatus } from "@/lib/compare/salaryDiff";
 import { roundMoney } from "@/lib/utils/money";
-import { normalizeComparableText, normalizeEmployeeNumber } from "@/lib/utils/normalize";
+import { normalizeComparableText, normalizeEmployeeId, normalizeEmployeeNumber } from "@/lib/utils/normalize";
 
 export interface CompareOptions {
   readonly tolerance: number;
@@ -25,11 +26,17 @@ export interface CompareOptions {
   readonly incidentThreshold?: number;
   readonly conceptMap?: readonly ConceptMappingRule[];
   readonly internalExcelChecks?: readonly InternalExcelCheckRow[];
+  readonly excludedEmployeeIds?: readonly string[];
+}
+
+interface IncludedConceptAggregate {
+  amount: number;
+  pdfConcepts: Set<string>;
 }
 
 interface PayrollAggregate {
   readonly records: PayrollRecord[];
-  readonly included: Map<string, { amount: number; pdfConcepts: Set<string> }>;
+  readonly included: Map<string, IncludedConceptAggregate>;
   readonly totals: { salary: number; salaryComplement: number; extraSalary: number };
   readonly unmapped: Map<string, { amount: number; people: Set<string>; payrolls: Set<string> }>;
   readonly ignored: Map<string, { amount: number; people: Set<string>; payrolls: Set<string>; reason: string }>;
@@ -49,13 +56,11 @@ function emptyMoney(): MoneyByBlock {
 }
 
 function statusFromDifference(difference: number, options: CompareOptions): AnalysisStatus {
-  const abs = Math.abs(difference);
-  const tolerance = Math.max(0, options.tolerance);
-  const incidentThreshold = Math.max(options.reviewThreshold ?? tolerance, options.incidentThreshold ?? 50);
-  if (abs <= tolerance) {
-    return "OK";
-  }
-  return abs >= incidentThreshold ? "Diferencia" : "Revisar";
+  return salaryStatus(difference, {
+    tolerance: options.tolerance,
+    reviewThreshold: options.reviewThreshold,
+    incidentThreshold: options.incidentThreshold,
+  });
 }
 
 function worstStatus(statuses: readonly AnalysisStatus[]): AnalysisStatus {
@@ -99,7 +104,6 @@ function addGrouped(
 
 function decisionTypeOrder(decisionType: UnmappedConceptRow["decisionType"]): number {
   if (decisionType === "Pendiente revision") return 0;
-  if (decisionType === "Justificado") return 1;
   if (decisionType === "Sin mapear real") return 1;
   return 2;
 }
@@ -189,8 +193,7 @@ function nonIncludedReason(input: {
 function shouldIncludeConcept(rule: ConceptMappingRule | undefined, concept: PayrollConcept): rule is ConceptMappingRule & { registroCode: string } {
   if (
     !rule?.registroCode ||
-    !["Incluido", "Justificado"].includes(rule.status) ||
-    rule.includedInComparison === false ||
+    !isRuleEnabledForComparison(rule) ||
     DISALLOWED_INCLUDED_TYPES.has(concept.type)
   ) {
     return false;
@@ -207,11 +210,23 @@ function priorityValue(candidate: IncludedCandidate): number {
 
 function addIncludedConcept(aggregate: PayrollAggregate, candidate: IncludedCandidate): void {
   const { concept, rule } = candidate;
-  const current = aggregate.included.get(rule.registroCode) ?? { amount: 0, pdfConcepts: new Set<string>() };
+  const current = aggregate.included.get(rule.registroCode) ?? {
+    amount: 0,
+    pdfConcepts: new Set<string>(),
+  };
   current.amount = roundMoney(current.amount + concept.amount);
   current.pdfConcepts.add(concept.name);
   aggregate.included.set(rule.registroCode, current);
   aggregate.totals[rule.blockKey] = roundMoney(aggregate.totals[rule.blockKey] + concept.amount);
+}
+
+function normalizeExcludedEmployeeIds(values: readonly string[] | undefined): string[] {
+  return [...new Set((values ?? []).map(normalizeEmployeeId).filter(Boolean))];
+}
+
+function isExcludedEmployee(value: unknown, excluded: ReadonlySet<string>): boolean {
+  const employeeId = normalizeEmployeeId(value);
+  return Boolean(employeeId && excluded.has(employeeId));
 }
 
 function addIgnoredCandidate(aggregate: PayrollAggregate, candidate: IncludedCandidate, reason: string): void {
@@ -267,6 +282,9 @@ function aggregatePayroll(records: readonly PayrollRecord[], conceptMap: readonl
 
     record.concepts.forEach((concept) => {
       const rule = findConceptRule(conceptMap, concept.name);
+      if (rule && !isRuleEnabledForComparison(rule)) {
+        return;
+      }
       if (shouldIncludeConcept(rule, concept)) {
         includedCandidates.push({ concept, rule, employeeNumber, payrollId });
         return;
@@ -361,7 +379,7 @@ function justification(employee: RegistroEmployee | undefined, aggregate: Payrol
   ) {
     return "Registro contiene importes variables, PPE o IT que pueden explicar diferencias entre normalizado y real.";
   }
-  return "Sin justificación detectada.";
+  return "Sin causa detectada.";
 }
 
 function createConceptRows(
@@ -371,13 +389,18 @@ function createConceptRows(
   personFallback?: string,
 ): ConceptComparisonRow[] {
   const rows: ConceptComparisonRow[] = [];
+  const conceptMap = options.conceptMap ?? [];
   employee.concepts.forEach((concept) => {
+    if (isRegistroConceptDisabled(concept.code, conceptMap)) {
+      return;
+    }
     const pdf = aggregate?.included.get(concept.code);
     const pdfAmount = pdf?.amount ?? 0;
     if (!concept.amount && !pdfAmount) {
       return;
     }
     const difference = roundMoney(pdfAmount - concept.amount);
+    const status = statusFromDifference(difference, options);
     rows.push({
       employeeNumber: employee.employeeNumber,
       person: employee.workerName || personFallback,
@@ -388,11 +411,55 @@ function createConceptRows(
       registroAmount: concept.amount,
       pdfAmount,
       difference,
-      status: statusFromDifference(difference, options),
+      status,
+      grossDifference: difference,
+      justifiedAmount: 0,
+      adjustedDifference: difference,
+      grossStatus: status,
+      adjustedStatus: status,
+      isJustified: false,
       detail: "Comparación por código de concepto del Registro frente a conceptos PDF incluidos por el mapa.",
     });
   });
   return rows;
+}
+
+function isRegistroConceptDisabled(code: string, conceptMap: readonly ConceptMappingRule[]): boolean {
+  const normalizedCode = normalizeComparableText(code);
+  const matchingRules = conceptMap.filter((rule) => rule.registroCode && normalizeComparableText(rule.registroCode) === normalizedCode);
+  return matchingRules.length > 0 && matchingRules.every((rule) => !isRuleEnabledForComparison(rule));
+}
+
+function registroTotalsForComparison(employee: RegistroEmployee | undefined, conceptMap: readonly ConceptMappingRule[]): MoneyByBlock {
+  const base = employee?.periodComplete ?? emptyMoney();
+  if (!employee) {
+    return base;
+  }
+
+  let disabledSalary = 0;
+  let disabledSalaryComplement = 0;
+  let disabledExtraSalary = 0;
+  let disabledTotal = 0;
+  employee.concepts.forEach((concept) => {
+    if (!isRegistroConceptDisabled(concept.code, conceptMap)) {
+      return;
+    }
+    if (concept.blockKey === "salary") {
+      disabledSalary = roundMoney(disabledSalary + concept.amount);
+    } else if (concept.blockKey === "salaryComplement") {
+      disabledSalaryComplement = roundMoney(disabledSalaryComplement + concept.amount);
+    } else {
+      disabledExtraSalary = roundMoney(disabledExtraSalary + concept.amount);
+    }
+    disabledTotal = roundMoney(disabledTotal + concept.amount);
+  });
+
+  return {
+    salary: roundMoney(base.salary - disabledSalary),
+    salaryComplement: roundMoney(base.salaryComplement - disabledSalaryComplement),
+    extraSalary: roundMoney(base.extraSalary - disabledExtraSalary),
+    total: roundMoney(base.total - disabledTotal),
+  };
 }
 
 function createUnmappedRows(aggregates: readonly PayrollAggregate[], conceptMap: readonly ConceptMappingRule[]): UnmappedConceptRow[] {
@@ -415,9 +482,8 @@ function createUnmappedRows(aggregates: readonly PayrollAggregate[], conceptMap:
     aggregate.unmapped.forEach((value, key) => {
       const rule = findConceptRule(conceptMap, key);
       const normalized = normalizeComparableText(key);
-      const isJustified = rule?.status === "Justificado";
       const isPending = Boolean(rule?.registroCode) || normalized === "paga 40 anos";
-      const decisionType: UnmappedConceptRow["decisionType"] = isJustified ? "Justificado" : isPending ? "Pendiente revision" : "Sin mapear real";
+      const decisionType: UnmappedConceptRow["decisionType"] = isPending ? "Pendiente revision" : "Sin mapear real";
       const current = combined.get(key) ?? {
         amount: 0,
         people: new Set<string>(),
@@ -428,11 +494,9 @@ function createUnmappedRows(aggregates: readonly PayrollAggregate[], conceptMap:
         decisionType,
         includedInComparison: false,
         recommendedAction:
-          decisionType === "Justificado"
-            ? "Mantener visible y auditable; preparado para diferencia ajustada posterior."
-            : decisionType === "Pendiente revision"
-              ? pendingReviewAction(key)
-              : "Mantener en revision hasta identificar codigo Registro.",
+          decisionType === "Pendiente revision"
+            ? pendingReviewAction(key)
+            : "Mantener en revision hasta identificar codigo Registro.",
         reason: nonIncludedReason({ pdfConcept: key, decisionType, fallback: rule?.reason }),
       };
       current.amount = roundMoney(current.amount + value.amount);
@@ -500,14 +564,28 @@ function createIgnoredRows(aggregates: readonly PayrollAggregate[]): IgnoredConc
     .sort((a, b) => Math.abs(b.totalDetected) - Math.abs(a.totalDetected));
 }
 
+function justifiedConceptSummary(rows: readonly ConceptComparisonRow[]): { summary: string; count: number } {
+  const justified = rows.filter((row) => row.isJustified);
+  const names = [...new Set(justified.map((row) => row.pdfConcept || row.registroCode).filter(Boolean))];
+  return {
+    summary: names.join("; "),
+    count: justified.length,
+  };
+}
+
 export async function compareAnalysis(
   payrollRecords: readonly PayrollRecord[],
   registroRecords: readonly RegistroEmployee[],
   options: CompareOptions,
 ): Promise<AnalysisResult> {
   const conceptMap = options.conceptMap ?? [];
-  const payrollByEmployee = groupPayroll(payrollRecords);
-  const registroByEmployee = new Map(registroRecords.map((record) => [normalizeEmployeeNumber(record.employeeNumber), record]));
+  const excludedEmployeeIdsApplied = normalizeExcludedEmployeeIds(options.excludedEmployeeIds);
+  const excludedSet = new Set(excludedEmployeeIdsApplied);
+  const filteredPayrollRecords = payrollRecords.filter((record) => !isExcludedEmployee(record.employeeNumber, excludedSet));
+  const filteredRegistroRecords = registroRecords.filter((record) => !isExcludedEmployee(record.employeeNumber, excludedSet));
+  const filteredInternalExcelChecks = (options.internalExcelChecks ?? []).filter((row) => !isExcludedEmployee(row.employeeNumber, excludedSet));
+  const payrollByEmployee = groupPayroll(filteredPayrollRecords);
+  const registroByEmployee = new Map(filteredRegistroRecords.map((record) => [normalizeEmployeeNumber(record.employeeNumber), record]));
   const allEmployeeNumbers = new Set([...registroByEmployee.keys(), ...payrollByEmployee.keys()]);
   const people: PersonComparisonRow[] = [];
   const normalizedVsReal: NormalizedVsRealRow[] = [];
@@ -517,23 +595,39 @@ export async function compareAnalysis(
   allEmployeeNumbers.forEach((employeeNumber) => {
     const employee = registroByEmployee.get(employeeNumber);
     const records = payrollByEmployee.get(employeeNumber) ?? [];
+    const hasRegistro = Boolean(employee);
+    const hasPdf = records.length > 0;
     const aggregate = aggregatePayroll(records, conceptMap);
     aggregates.push(aggregate);
     const pdfTotal = roundMoney(aggregate.totals.salary + aggregate.totals.salaryComplement + aggregate.totals.extraSalary);
-    const registro = employee?.periodComplete ?? emptyMoney();
+    const registro = registroTotalsForComparison(employee, conceptMap);
     const salaryDifference = roundMoney(aggregate.totals.salary - registro.salary);
     const salaryComplementDifference = roundMoney(aggregate.totals.salaryComplement - registro.salaryComplement);
     const extraSalaryDifference = roundMoney(aggregate.totals.extraSalary - registro.extraSalary);
     const totalDifference = roundMoney(pdfTotal - registro.total);
     const unmappedCount = [...aggregate.unmapped.values()].reduce((sum, item) => sum + item.payrolls.size, 0);
+    const person = records[0]?.workerName || employee?.workerName;
+    const conceptRowsForEmployee = employee ? createConceptRows(employee, aggregate, options, person) : [];
+    if (employee) {
+      concepts.push(...conceptRowsForEmployee);
+    }
+    const justifiedSalaryAmount = 0;
+    const justifiedSalaryComplementAmount = 0;
+    const justifiedExtraSalaryAmount = 0;
+    const justifiedTotalAmount = 0;
+    const adjustedSalaryDifference = salaryDifference;
+    const adjustedSalaryComplementDifference = salaryComplementDifference;
+    const adjustedExtraSalaryDifference = extraSalaryDifference;
+    const adjustedTotalDifference = totalDifference;
     const status = personStatus({
-      hasRegistro: Boolean(employee),
-      hasPdf: records.length > 0,
+      hasRegistro,
+      hasPdf,
       unmappedCount,
       differences: [salaryDifference, salaryComplementDifference, extraSalaryDifference, totalDifference],
       options,
     });
-    const person = records[0]?.workerName || employee?.workerName;
+    const adjustedStatus = status;
+    const justifiedSummary = justifiedConceptSummary(conceptRowsForEmployee);
 
     people.push({
       employeeNumber,
@@ -553,6 +647,22 @@ export async function compareAnalysis(
       registroTotal: registro.total,
       pdfTotal,
       totalDifference,
+      grossSalaryDifference: salaryDifference,
+      grossSalaryComplementDifference: salaryComplementDifference,
+      grossExtraSalaryDifference: extraSalaryDifference,
+      grossTotalDifference: totalDifference,
+      justifiedSalaryAmount,
+      justifiedSalaryComplementAmount,
+      justifiedExtraSalaryAmount,
+      justifiedTotalAmount,
+      adjustedSalaryDifference,
+      adjustedSalaryComplementDifference,
+      adjustedExtraSalaryDifference,
+      adjustedTotalDifference,
+      grossStatus: status,
+      adjustedStatus,
+      justifiedConceptsSummary: justifiedSummary.summary,
+      justifiedConceptsCount: justifiedSummary.count,
       pdfControlTotalDevengado: payrollControlTotal(records),
       payrollCount: records.length,
       unmappedConceptsCount: unmappedCount,
@@ -563,7 +673,6 @@ export async function compareAnalysis(
     });
 
     if (employee) {
-      concepts.push(...createConceptRows(employee, aggregate, options, person));
       const normalizedPlusVariables = employee.normalizedPlusVariables.total;
       const normalized = employee.normalized.total;
       const periodComplete = employee.periodComplete.total;
@@ -606,6 +715,19 @@ export async function compareAnalysis(
   const matchedSalaryComplementDifference = roundMoney(matchedPeopleRows.reduce((sum, row) => sum + row.salaryComplementDifference, 0));
   const matchedExtraSalaryDifference = roundMoney(matchedPeopleRows.reduce((sum, row) => sum + row.extraSalaryDifference, 0));
   const matchedTotalDifference = roundMoney(matchedPeopleRows.reduce((sum, row) => sum + row.totalDifference, 0));
+  const matchedJustifiedSalaryAmount = 0;
+  const matchedJustifiedSalaryComplementAmount = 0;
+  const matchedJustifiedExtraSalaryAmount = 0;
+  const matchedJustifiedTotalAmount = 0;
+  const matchedAdjustedSalaryDifference = matchedSalaryDifference;
+  const matchedAdjustedSalaryComplementDifference = matchedSalaryComplementDifference;
+  const matchedAdjustedExtraSalaryDifference = matchedExtraSalaryDifference;
+  const matchedAdjustedTotalDifference = matchedTotalDifference;
+  const peopleWithGrossDifferences = matchedPeopleRows.filter((row) => row.grossStatus === "Diferencia" || row.grossStatus === "Revisar").length;
+  const peopleWithAdjustedDifferences = peopleWithDifferences;
+  const peopleOkAdjusted = matchedPeopleRows.filter((row) => row.status === "OK").length;
+  const conceptsJustifiedActive = 0;
+  const conceptsJustifiedApplied = 0;
   const conceptsPendingReview = unmappedConcepts.filter((row) => row.decisionType === "Pendiente revision").length;
   const conceptsIgnored = unmappedConcepts.filter((row) => row.decisionType === "Ignorado").length;
   const conceptsRealUnmapped = unmappedConcepts.filter((row) => row.decisionType === "Sin mapear real").length;
@@ -626,6 +748,23 @@ export async function compareAnalysis(
       totalSalaryComplementDifference: matchedSalaryComplementDifference,
       totalExtraSalaryDifference: matchedExtraSalaryDifference,
       totalGlobalDifference: matchedTotalDifference,
+      peopleWithGrossDifferences,
+      peopleWithAdjustedDifferences,
+      matchedGrossTotalDifference: matchedTotalDifference,
+      matchedGrossSalaryDifference: matchedSalaryDifference,
+      matchedGrossSalaryComplementDifference: matchedSalaryComplementDifference,
+      matchedGrossExtraSalaryDifference: matchedExtraSalaryDifference,
+      matchedJustifiedTotalAmount,
+      matchedJustifiedSalaryAmount,
+      matchedJustifiedSalaryComplementAmount,
+      matchedJustifiedExtraSalaryAmount,
+      matchedAdjustedTotalDifference,
+      matchedAdjustedSalaryDifference,
+      matchedAdjustedSalaryComplementDifference,
+      matchedAdjustedExtraSalaryDifference,
+      peopleOkAdjusted,
+      conceptsJustifiedActive,
+      conceptsJustifiedApplied,
       matchedPeople: matchedPeopleRows.length,
       matchedTotalDifference,
       matchedSalaryDifference,
@@ -641,7 +780,7 @@ export async function compareAnalysis(
       conceptsRealUnmapped,
       pendingReviewAmount: pendingDecisionPdfTotal,
       pendingDecisionPdfTotal,
-      internalExcelDifferences: (options.internalExcelChecks ?? []).filter((row) => row.status !== "OK").length,
+      internalExcelDifferences: filteredInternalExcelChecks.filter((row) => row.status !== "OK").length,
       groupingDifferences: 0,
       tolerance: options.tolerance,
       aiEnabled: options.enableAI !== false,
@@ -649,8 +788,8 @@ export async function compareAnalysis(
       reviewThreshold,
       incidentThreshold,
     },
-    payrollRecords,
-    registroEmployees: registroRecords,
+    payrollRecords: filteredPayrollRecords,
+    registroEmployees: filteredRegistroRecords,
     people: people.sort((a, b) => a.employeeNumber.localeCompare(b.employeeNumber, "es")),
     normalizedVsReal: normalizedVsReal.sort((a, b) => a.employeeNumber.localeCompare(b.employeeNumber, "es")),
     concepts,
@@ -659,8 +798,9 @@ export async function compareAnalysis(
     pdfWithoutRegistro,
     registroWithoutPdf,
     groupings: [],
-    internalExcelChecks: options.internalExcelChecks ?? [],
+    internalExcelChecks: filteredInternalExcelChecks,
     conceptMap,
+    excludedEmployeeIdsApplied,
     errors: [],
     criteria: [
       "Clave principal: matricula / ID RH.",
@@ -669,8 +809,11 @@ export async function compareAnalysis(
       "Total Devengado PDF se usa solo como control auxiliar.",
       `Tolerancia usada: ${options.tolerance} EUR.`,
       `Umbral revisar: ${reviewThreshold} EUR; umbral diferencia: ${incidentThreshold} EUR.`,
+      excludedEmployeeIdsApplied.length
+        ? `Exclusiones por matricula aplicadas: ${excludedEmployeeIdsApplied.length}.`
+        : "Sin exclusiones por matricula aplicadas.",
       options.enableAI === false
-        ? "IA desactivada; justificaciones deterministas."
+        ? "IA desactivada; explicaciones deterministas."
         : "Gemini solo puede sugerir textos y mapeos, nunca calcular importes.",
     ],
   };

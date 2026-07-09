@@ -42,9 +42,9 @@ export function describePersonCause(row: PersonComparisonRow, tolerance: number)
 
   if (row.status === "Sin Registro") {
     return {
-      label: "PDF sin Registro",
-      description: "La matricula aparece en PDF pero no existe como empleado del Registro.",
-      review: "Revisar la hoja Empleados del Registro y confirmar si la matricula debe incorporarse.",
+      label: "Recibo sin Reg. Retrib.",
+      description: "La matrícula aparece en Recibo pero no existe como empleado del Reg. Retrib.",
+      review: "Revisar la hoja Empleados del Reg. Retrib. y confirmar si la matrícula debe incorporarse.",
     };
   }
 
@@ -69,7 +69,7 @@ export function describePersonCause(row: PersonComparisonRow, tolerance: number)
     return {
       label: "Teletrabajo",
       description: "La diferencia se parece a un importe de teletrabajo no incluido o tratado aparte.",
-      review: "Revisar conceptos extrasalariales de PDF y su criterio de inclusion en Registro.",
+      review: "Revisar conceptos extrasalariales de Recibo y su criterio de inclusión en Reg. Retrib.",
     };
   }
 
@@ -77,14 +77,14 @@ export function describePersonCause(row: PersonComparisonRow, tolerance: number)
     return {
       label: "Bolsa vacaciones",
       description: "La diferencia coincide con el patron esperado para Bolsa de Vacaciones.",
-      review: "Revisar el complemento salarial asociado y el codigo Registro sugerido.",
+      review: "Revisar el complemento salarial asociado y el código Reg. Retrib. sugerido.",
     };
   }
 
   if (row.unmappedConceptsCount > 0) {
     return {
       label: "Concepto pendiente",
-      description: "La fila tiene conceptos PDF pendientes o no incluidos que requieren decision.",
+      description: "La fila tiene conceptos de Recibo pendientes o no incluidos que requieren decisión.",
       review: "Revisar conceptos no incluidos y decidir si deben mapearse, ignorarse o mantenerse pendientes.",
     };
   }
@@ -100,7 +100,7 @@ export function describePersonCause(row: PersonComparisonRow, tolerance: number)
   return {
     label: "Sin causa clara",
     description: "No se detecta una causa determinista con los datos disponibles.",
-    review: "Revisar detalle de Registro, PDF y conceptos relacionados.",
+    review: "Revisar detalle de Reg. Retrib., Recibo y conceptos relacionados.",
   };
 }
 
@@ -111,7 +111,7 @@ export function describeConceptCause(row: ConceptComparisonRow, tolerance: numbe
     return {
       label: "Teletrabajo",
       description: "El concepto o importe se parece a teletrabajo.",
-      review: "Confirmar si corresponde a extrasalarial y si debe incluirse en el Registro.",
+      review: "Confirmar si corresponde a extrasalarial y si debe incluirse en el Reg. Retrib.",
     };
   }
 
@@ -119,7 +119,7 @@ export function describeConceptCause(row: ConceptComparisonRow, tolerance: numbe
     return {
       label: "Bolsa vacaciones",
       description: "El concepto o importe coincide con el patron esperado de Bolsa de Vacaciones.",
-      review: "Revisar el criterio de inclusion y el codigo Registro asociado a Bolsa de Vacaciones.",
+      review: "Revisar el criterio de inclusión y el código Reg. Retrib. asociado a Bolsa de Vacaciones.",
     };
   }
 
@@ -127,7 +127,7 @@ export function describeConceptCause(row: ConceptComparisonRow, tolerance: numbe
     return {
       label: "Reclasificación",
       description: "El concepto apunta a una posible clasificacion distinta entre bloques.",
-      review: "Revisar bloque, codigo Registro y criterio de clasificacion aplicado.",
+      review: "Revisar bloque, código Reg. Retrib. y criterio de clasificación aplicado.",
     };
   }
 
@@ -135,7 +135,7 @@ export function describeConceptCause(row: ConceptComparisonRow, tolerance: numbe
     return {
       label: "Revisión",
       description: "El concepto requiere revision de mapeo o criterio de inclusion.",
-      review: "Revisar regla usada, codigo Registro y decision del concepto.",
+      review: "Revisar regla usada, código Reg. Retrib. y decisión del concepto.",
     };
   }
 
@@ -150,6 +150,6 @@ export function describeConceptCause(row: ConceptComparisonRow, tolerance: numbe
   return {
     label: "Sin causa clara",
     description: "No se detecta una causa determinista para este concepto.",
-    review: "Comparar importe Registro, PDF y regla aplicada.",
+    review: "Comparar importe Reg. Retrib., Recibo y regla aplicada.",
   };
 }

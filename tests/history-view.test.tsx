@@ -55,11 +55,13 @@ describe("HistoryView", () => {
   test("keeps the six history metrics in one compact desktop row", () => {
     render(<HistoryView />);
 
-    const metricLabels = ["PDFs", "Personas", "Con diferencias", "Pendientes", "Ignorados", "Dif. matched"];
+    const metricLabels = ["Recibos", "Personas", "Con diferencias", "Pendientes", "Ignorados", "Diferencia"];
 
     metricLabels.forEach((label) => expect(screen.getByText(label)).toBeTruthy());
 
-    const metricGrid = screen.getByText("Dif. matched").closest("dl");
+    expect(screen.getByText("1.234,56 EUR")).toBeTruthy();
+    const metricGrid = screen.getByText("Diferencia").closest("dl");
+    expect(screen.queryByText(/ajustad/i)).toBeNull();
 
     expect(metricGrid?.className).toContain("xl:grid-cols-6");
   });

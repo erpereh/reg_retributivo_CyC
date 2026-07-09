@@ -77,12 +77,10 @@ const DEFAULT_RULES: readonly DefaultRule[] = [
     pdfConcept: "Abono teletrabajo",
     aliases: ["Teletrabajo", "Compensación teletrabajo"],
     registroCode: "CSP_I_COMP_TELETR_COVID",
-    status: "Justificado",
+    status: "Incluido",
     includedInComparison: true,
-    includedInAdjustedComparison: false,
     active: true,
-    reason:
-      "Abono teletrabajo detectado en PDF pero no informado en Registro. Se mantiene visible y auditable, pero se excluirá de la diferencia ajustada cuando se implemente esa subfase.",
+    reason: "Abono teletrabajo incluido en el analisis cuando la regla esta activa.",
   },
   { pdfConcept: "Lote de Navidad", registroCode: "CSP_I_LOTE_NAVIDAD" },
   { pdfConcept: "Seguro Medico", registroCode: "CYC_SEG_SALUD" },
@@ -188,6 +186,7 @@ function normalizeAliases(aliases: ConceptMappingRule["aliases"]): readonly stri
 }
 
 export function normalizeConceptMappingRule(rule: ConceptMappingRule): ConceptMappingRule {
+  const active = rule.active ?? true;
   return {
     ...rule,
     normalizedPdfConcept: rule.normalizedPdfConcept || normalizePdfConcept(rule.pdfConcept),
@@ -196,9 +195,13 @@ export function normalizeConceptMappingRule(rule: ConceptMappingRule): ConceptMa
     allowInformative: rule.allowInformative ?? false,
     dedupePriority: defaultDedupePriority(rule),
     includedInComparison: rule.includedInComparison ?? (rule.status === "Incluido" || rule.status === "Justificado"),
-    includedInAdjustedComparison: rule.includedInAdjustedComparison ?? rule.status !== "Justificado",
-    active: rule.active ?? true,
+    includedInAdjustedComparison: rule.includedInAdjustedComparison ?? true,
+    active,
   };
+}
+
+export function isRuleEnabledForComparison(rule: Pick<ConceptMappingRule, "active" | "includedInComparison">): boolean {
+  return rule.active !== false && rule.includedInComparison !== false;
 }
 
 export function buildDefaultConceptMap(codes: AvailableConceptCodes): ConceptMappingRule[] {
@@ -221,16 +224,14 @@ export function buildDefaultConceptMap(codes: AvailableConceptCodes): ConceptMap
       allowInformative: rule.allowInformative ?? false,
       dedupePriority: rule.dedupePriority ?? "devengo",
       includedInComparison: included,
-      includedInAdjustedComparison: rule.includedInAdjustedComparison ?? status !== "Justificado",
+      includedInAdjustedComparison: rule.includedInAdjustedComparison ?? true,
       active: rule.active ?? true,
       reason:
         rule.reason ??
         (location
           ? status === "Incluido"
             ? "Mapeo por defecto validado contra codigos del Excel."
-            : status === "Justificado"
-              ? "Visible y auditable, preparado para excluirse de la diferencia ajustada en una fase posterior."
-              : "Sugerencia de mapeo pendiente de revision; no incluida automaticamente."
+            : "Sugerencia de mapeo pendiente de revision; no incluida automaticamente."
           : `El codigo ${rule.registroCode} no existe en el Excel cargado.`),
     });
   });
@@ -269,16 +270,16 @@ export function findConceptRule(
   pdfConcept: string,
 ): ConceptMappingRule | undefined {
   const normalized = normalizePdfConcept(pdfConcept);
-  return rules.find((rule) => {
+  for (const rule of rules) {
     const normalizedRule = normalizeConceptMappingRule(rule);
-    if (normalizedRule.active === false) {
-      return false;
-    }
     if ((normalizedRule.normalizedPdfConcept || normalizePdfConcept(normalizedRule.pdfConcept)) === normalized) {
-      return true;
+      return normalizedRule;
     }
-    return (normalizedRule.aliases ?? []).some((alias) => normalizePdfConcept(alias) === normalized);
-  });
+    if ((normalizedRule.aliases ?? []).some((alias) => normalizePdfConcept(alias) === normalized)) {
+      return normalizedRule;
+    }
+  }
+  return undefined;
 }
 
 export function mappingStatusFromConceptType(type: string): MappingStatus {
@@ -308,8 +309,8 @@ export function validateConceptMapForCodes(
         ...rule,
         block: location.block,
         blockKey: location.blockKey,
-        includedInComparison: (rule.status === "Incluido" || rule.status === "Justificado") && rule.includedInComparison !== false,
-        includedInAdjustedComparison: rule.includedInAdjustedComparison ?? rule.status !== "Justificado",
+        includedInComparison: rule.includedInComparison ?? (rule.status === "Incluido" || rule.status === "Justificado"),
+        includedInAdjustedComparison: rule.includedInAdjustedComparison ?? true,
       };
     }),
   );

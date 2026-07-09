@@ -106,6 +106,7 @@ const appState = vi.hoisted(() => ({
       reviewThreshold: 1,
       incidentThreshold: 50,
       aiModel: "gemini-3.1-flash-lite",
+      excludedEmployeeIds: [],
       conceptMap: [],
     },
     updateSettings: vi.fn(),
@@ -156,6 +157,7 @@ const appState = vi.hoisted(() => ({
     registroFile: undefined,
     analyzing: false,
     saveConceptMapAndRefresh: vi.fn(),
+    saveExclusionsAndRefresh: vi.fn(),
     pushToast: vi.fn(),
     refreshAiStatus: vi.fn(),
     testAiConnection: vi.fn(),
@@ -171,19 +173,23 @@ describe("SettingsView", () => {
     window.localStorage.clear();
     appState.value.updateSettings.mockClear();
     appState.value.saveConceptMapAndRefresh.mockClear();
+    appState.value.saveExclusionsAndRefresh.mockClear();
     appState.value.pushToast.mockClear();
     appState.value.settings.conceptMap = [];
+    appState.value.settings.excludedEmployeeIds = [];
     appState.value.activeAnalysis.result.conceptMap = cloneDefaultConceptMap();
   });
 
-  test("renders auto explain disabled by default and clears only AI explanation cache", () => {
+  test("renders AI configuration without global toggles and clears only AI explanation cache", () => {
     window.localStorage.setItem(AI_EXPLANATION_CACHE_KEY, JSON.stringify({ cached: true }));
     window.localStorage.setItem("retributivo.history.v1", "history");
 
     render(<SettingsView />);
 
     expect(screen.getByRole("heading", { name: "Ajustes" })).toBeTruthy();
-    expect(screen.getByRole("switch", { name: /Abrir explicación IA automáticamente/i }).getAttribute("aria-checked")).toBe("false");
+    expect(screen.queryByRole("switch", { name: /Activar IA por defecto/i })).toBeNull();
+    expect(screen.queryByRole("switch", { name: /Abrir explicación IA automáticamente/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /Probar conexión IA/i })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /Borrar caché de explicaciones/i }));
 
@@ -192,12 +198,14 @@ describe("SettingsView", () => {
     expect(screen.getByText(/Caché de explicaciones IA borrada/i)).toBeTruthy();
   });
 
-  test("renders the visual editor with only the required primary actions", () => {
+  test("renders the concept analysis editor with only active/desactivated usage controls", () => {
     render(<SettingsView />);
 
-    expect(screen.getByRole("heading", { name: "Mapa de conceptos" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Conceptos del análisis" })).toBeTruthy();
     expect(screen.queryByText(/Esta fase solo clasifica reglas/i)).toBeNull();
-    expect(screen.getByText("Las reglas justificadas siguen visibles y auditables. La diferencia ajustada se aplicará en una subfase posterior.")).toBeTruthy();
+    expect(screen.getByText("Activa o desactiva conceptos para decidir qué entra en la comparativa.")).toBeTruthy();
+    expect(screen.getByText("Activo = se usa en el análisis. Desactivado = se ignora al actualizar datos.")).toBeTruthy();
+    expect(screen.queryByText(/justificad/i)).toBeNull();
     expect(screen.getByRole("button", { name: /^Crear regla$/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Guardar mapa/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Actualizar datos/i })).toBeTruthy();
@@ -257,35 +265,72 @@ describe("SettingsView", () => {
     expect(screen.queryByRole("button", { name: /^En uso/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /^No usados/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Pendientes \d/i })).toBeNull();
-    expect(screen.getByRole("button", { name: /Reglas totales 8/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Activadas 7/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Desactivadas 1/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Detectadas 1/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Pendientes sin regla 1/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Conceptos totales 8/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Activos 7/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Desactivados 1/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Detectados 1/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Sin configurar 1/i })).toBeTruthy();
 
     const teleworkRow = screen.getByText("Abono teletrabajo").closest("tr");
     expect(teleworkRow).toBeTruthy();
     expect(within(teleworkRow as HTMLTableRowElement).getByText("CSP_I_COMP_TELETR_COVID")).toBeTruthy();
     expect(within(teleworkRow as HTMLTableRowElement).getAllByText("Extrasalarial").length).toBeGreaterThanOrEqual(1);
-    expect(within(teleworkRow as HTMLTableRowElement).getAllByText("Justificado").length).toBeGreaterThanOrEqual(1);
-    expect(within(teleworkRow as HTMLTableRowElement).getAllByText("Sí").length).toBeGreaterThanOrEqual(2);
+    expect(within(teleworkRow as HTMLTableRowElement).queryByText("Justificado")).toBeNull();
+    expect(within(teleworkRow as HTMLTableRowElement).getByText("Activo")).toBeTruthy();
+    expect(within(teleworkRow as HTMLTableRowElement).getAllByText("Sí").length).toBeGreaterThanOrEqual(1);
     expect(within(teleworkRow as HTMLTableRowElement).getByRole("button", { name: /Desactivar regla Abono teletrabajo/i })).toBeTruthy();
+    expect(screen.queryByText(/Las reglas justificadas se descuentan/i)).toBeNull();
+    expect(screen.queryByText(/fase posterior|subfase posterior/i)).toBeNull();
   });
 
-  test("filters by state, activation, detected flag and block", () => {
+  test("manages employee exclusion chips without duplicates", () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<SettingsView />);
 
-    fireEvent.change(screen.getByLabelText("Estado"), { target: { value: "Justificado" } });
-    expect(screen.getByText("Abono teletrabajo")).toBeTruthy();
-    expect(screen.queryByText("Salario Base")).toBeNull();
+    expect(screen.getByRole("heading", { name: /Exclusiones por matr/i })).toBeTruthy();
+    expect(screen.getByText(/0 matr/i)).toBeTruthy();
 
-    fireEvent.change(screen.getByLabelText("Estado"), { target: { value: "Todos" } });
-    fireEvent.change(screen.getByLabelText("Activación"), { target: { value: "Desactivadas" } });
+    const input = screen.getByPlaceholderText(/10074 o BC6/i);
+    fireEvent.change(input, { target: { value: " 10074 " } });
+    fireEvent.click(screen.getByRole("button", { name: "Añadir" }));
+
+    expect(screen.getByText("10074")).toBeTruthy();
+    expect(appState.value.updateSettings).toHaveBeenLastCalledWith({ excludedEmployeeIds: ["10074"] });
+    expect(appState.value.pushToast).toHaveBeenCalledWith(expect.objectContaining({ title: "Matrícula excluida." }));
+
+    fireEvent.change(input, { target: { value: "10074" } });
+    fireEvent.click(screen.getByRole("button", { name: "Añadir" }));
+
+    expect(screen.getAllByText("10074")).toHaveLength(1);
+    expect(appState.value.pushToast).toHaveBeenCalledWith(expect.objectContaining({ title: "La matrícula ya estaba excluida." }));
+
+    fireEvent.change(input, { target: { value: "10076, bc6\n10189" } });
+    fireEvent.click(screen.getByRole("button", { name: "Añadir" }));
+
+    expect(screen.getByText("10076")).toBeTruthy();
+    expect(screen.getByText("BC6")).toBeTruthy();
+    expect(screen.getByText("10189")).toBeTruthy();
+    expect(screen.getByText(/4 matr/i)).toBeTruthy();
+    expect(screen.getByText(/Vuelve a analizar o pulsa Actualizar datos/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Quitar 10076/i }));
+    expect(screen.queryByText("10076")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Limpiar lista/i }));
+    expect(screen.queryByText("10074")).toBeNull();
+    expect(screen.getByText(/0 matr/i)).toBeTruthy();
+  });
+
+  test("filters by usage, detected flag and block", () => {
+    render(<SettingsView />);
+
+    expect(screen.queryByLabelText("Estado")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Uso"), { target: { value: "Desactivados" } });
     expect(screen.getByText("Kilometraje con Retencion")).toBeTruthy();
     expect(screen.queryByText("Abono teletrabajo")).toBeNull();
 
-    fireEvent.change(screen.getByLabelText("Activación"), { target: { value: "Todas" } });
-    fireEvent.change(screen.getByLabelText("Detectado"), { target: { value: "Detectado en análisis" } });
+    fireEvent.change(screen.getByLabelText("Uso"), { target: { value: "Todos" } });
+    fireEvent.change(screen.getByLabelText("Detectado"), { target: { value: "Detectados" } });
     expect(screen.getByText("Abono teletrabajo")).toBeTruthy();
     expect(screen.getByText("Concepto pendiente")).toBeTruthy();
     expect(screen.queryByText("Seguro Medico")).toBeNull();
@@ -314,7 +359,7 @@ describe("SettingsView", () => {
 
     const pendingRow = screen.getByText("Concepto pendiente").closest("tr");
     expect(pendingRow).toBeTruthy();
-    expect(within(pendingRow as HTMLTableRowElement).getByText("Sin regla")).toBeTruthy();
+    expect(within(pendingRow as HTMLTableRowElement).getByText("No hay regla.")).toBeTruthy();
     expect(within(pendingRow as HTMLTableRowElement).getByRole("button", { name: /Crear regla Concepto pendiente/i }).getAttribute("title")).toBe("Crear regla");
     const disabledPower = within(pendingRow as HTMLTableRowElement).getByRole("button", { name: /Crea una regla para poder activarla o desactivarla Concepto pendiente/i });
     expect(disabledPower.getAttribute("title")).toBe("Crea una regla para poder activarla o desactivarla");
@@ -351,8 +396,8 @@ describe("SettingsView", () => {
     render(<SettingsView />);
 
     fireEvent.click(screen.getByRole("button", { name: /Crear regla Concepto pendiente/i }));
-    fireEvent.change(screen.getByLabelText(/Código Registro/i), { target: { value: "CODIGO_INEXISTENTE" } });
-    expect(screen.getByText(/Este código no existe en el Registro cargado/i)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/Código Reg\. Retrib\./i), { target: { value: "CODIGO_INEXISTENTE" } });
+    expect(screen.getByText(/Este código no existe en el Reg\. Retrib\. cargado/i)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Guardar regla/i }));
     fireEvent.click(screen.getByRole("button", { name: /Guardar mapa/i }));
     fireEvent.click(screen.getByRole("button", { name: /Actualizar datos/i }));

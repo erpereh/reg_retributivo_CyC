@@ -6,7 +6,7 @@ import { useAppState } from "@/components/app/AppState";
 import { Badge } from "@/components/common/Badge";
 import { Card } from "@/components/common/Card";
 import { SectionHeader } from "@/components/common/SectionHeader";
-import { Toggle } from "@/components/common/Toggle";
+import { EmployeeExclusionsCard } from "@/components/settings/EmployeeExclusionsCard";
 import { ConceptMapEditor } from "@/components/settings/concept-map/ConceptMapEditor";
 import { clearAiExplanationCache } from "@/lib/ai/explainCache";
 
@@ -82,22 +82,9 @@ export function SettingsView() {
               <p className="text-xs font-semibold uppercase text-muted">Modelo actual</p>
               <p className="mt-1 font-mono text-sm font-semibold text-ink">{aiStatus?.model ?? settings.aiModel}</p>
             </div>
-            <div className="rounded-2xl bg-slate-50 p-4">
-              <Toggle
-                checked={settings.enableAIByDefault}
-                onChange={(enableAIByDefault) => updateSettings({ enableAIByDefault })}
-                label="Activar IA por defecto"
-                description="Si falta API key o ENABLE_AI_REVIEW=false, se usarán observaciones deterministas."
-              />
-            </div>
-            <div className="rounded-2xl bg-slate-50 p-4">
-              <Toggle
-                checked={settings.autoExplainOnOpen}
-                onChange={(autoExplainOnOpen) => updateSettings({ autoExplainOnOpen })}
-                label="Abrir explicación IA automáticamente"
-                description="Desactivado por defecto. Si se activa, solo lanza una explicación al abrir un modal y nunca bloquea el detalle determinista."
-              />
-            </div>
+            <p className="rounded-2xl bg-slate-50 p-4 text-sm leading-6 text-muted">
+              Gemini solo se usa bajo demanda desde el detalle de una persona o concepto. No genera observaciones globales ni se ejecuta al analizar.
+            </p>
             <p className="text-sm leading-6 text-muted">La API key se configura desde el archivo .env. No se guarda en el navegador.</p>
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => void testAiConnection()} disabled={aiTesting || !aiStatus?.configured} className="btn-primary">
@@ -157,6 +144,8 @@ export function SettingsView() {
           </div>
         </Card>
       </section>
+
+      <EmployeeExclusionsCard />
 
       <ConceptMapEditor />
 

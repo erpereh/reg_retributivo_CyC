@@ -10,7 +10,7 @@ import { parsePayrollPdf } from "@/lib/parsers/payrollPdfParser";
 import { parseRegistroRetributivo } from "@/lib/parsers/registroRetributivoParser";
 import type { ConceptMappingRule, GroupingComparisonRow, PersonComparisonRow, PayrollRecord, RegistroEmployee } from "@/lib/types";
 import { formatEuro, parseSpanishMoney } from "@/lib/utils/money";
-import { normalizeComparableText, normalizeProfessionalGroup } from "@/lib/utils/normalize";
+import { normalizeComparableText, normalizeEmployeeId, normalizeProfessionalGroup } from "@/lib/utils/normalize";
 import { parsePayrollPeriod, toIsoDate } from "@/lib/utils/spanishDates";
 
 const root = process.cwd();
@@ -88,6 +88,13 @@ describe("money utilities", () => {
 describe("normalization utilities", () => {
   test("normalizes accents, casing and duplicated whitespace", () => {
     expect(normalizeComparableText("  MARÍA   José  ")).toBe("maria jose");
+  });
+
+  test("normalizes employee ids without numeric conversion", () => {
+    expect(normalizeEmployeeId(" 10074 ")).toBe("10074");
+    expect(normalizeEmployeeId("bc6")).toBe("BC6");
+    expect(normalizeEmployeeId(" 10 074 ")).toBe("10074");
+    expect(normalizeEmployeeId(" 00123 ")).toBe("00123");
   });
 
   test("normalizes professional group ordinal variants", () => {
@@ -325,6 +332,11 @@ describe("concept mapping", () => {
       status: "Incluido",
       registroCode: "SSP_KM_SIN_RETEN",
     });
+    expect(map.find((rule) => normalizeComparableText(rule.pdfConcept) === "abono teletrabajo")).toMatchObject({
+      status: "Incluido",
+      includedInComparison: true,
+      active: true,
+    });
   });
 
   test("resolves rule block from the Excel concept code location instead of hardcoded defaults", () => {
@@ -356,13 +368,13 @@ describe("concept mapping", () => {
     const telework = map.find((rule) => normalizeComparableText(rule.pdfConcept) === "abono teletrabajo");
 
     expect(telework).toMatchObject({
-      status: "Justificado",
+      status: "Incluido",
       registroCode: "CSP_I_COMP_TELETR_COVID",
       block: "Extrasalarial",
       aliases: ["Teletrabajo", "Compensación teletrabajo"],
       active: true,
       includedInComparison: true,
-      includedInAdjustedComparison: false,
+      includedInAdjustedComparison: true,
     });
 
     const result = await compareAnalysis(
@@ -423,12 +435,114 @@ describe("concept mapping", () => {
       },
     );
 
-    expect(result.concepts.find((row) => row.registroCode === "CSP_I_COMP_TELETR_COVID")?.pdfAmount).toBe(0);
-    expect(result.unmappedConcepts.find((row) => row.pdfConcept === "Abono teletrabajo")).toBeTruthy();
+    expect(result.concepts.find((row) => row.registroCode === "CSP_I_COMP_TELETR_COVID")).toBeUndefined();
+    expect(result.people.find((row) => row.employeeNumber === "10048")?.totalDifference).toBe(0);
+    expect(result.unmappedConcepts.find((row) => row.pdfConcept === "Abono teletrabajo")).toBeUndefined();
   });
 });
 
 describe("comparison engine", () => {
+  test("empty excludedEmployeeIds does not change comparison results", async () => {
+    const employee = emptyRegistroEmployee({
+      employeeNumber: "E1",
+      workerName: "PERSONA TEST",
+      periodComplete: { salary: 100, salaryComplement: 0, extraSalary: 0, total: 100 },
+      concepts: [{ block: "Salario", blockKey: "salary", code: "SAL_TEST", amount: 100 }],
+    });
+    const payrollRecords: PayrollRecord[] = [
+      {
+        sourceFile: "PDF_TEST.pdf",
+        periodLabel: "Enero 2025",
+        workerName: "PERSONA TEST",
+        employeeNumber: "E1",
+        concepts: [{ name: "Salario Test", amount: 100, type: "devengo" }],
+      },
+    ];
+    const options = {
+      tolerance: 1,
+      enableAI: false,
+      conceptMap: [testRule({ pdfConcept: "Salario Test", block: "Salario", blockKey: "salary", registroCode: "SAL_TEST", status: "Incluido" })],
+    };
+
+    const baseline = await compareAnalysis(payrollRecords, [employee], options);
+    const withEmptyExclusions = await compareAnalysis(payrollRecords, [employee], { ...options, excludedEmployeeIds: [] });
+
+    expect(withEmptyExclusions.people).toEqual(baseline.people);
+    expect(withEmptyExclusions.concepts).toEqual(baseline.concepts);
+    expect(withEmptyExclusions.summary).toMatchObject({
+      uniquePeople: baseline.summary.uniquePeople,
+      matchedPeople: baseline.summary.matchedPeople,
+      totalGlobalDifference: baseline.summary.totalGlobalDifference,
+    });
+    expect(withEmptyExclusions.excludedEmployeeIdsApplied).toEqual([]);
+  });
+
+  test("exclusions remove PDF-only, Registro-only and matched rows before metrics", async () => {
+    const matched = emptyRegistroEmployee({
+      employeeNumber: "MATCH1",
+      workerName: "MATCHED PERSON",
+      periodComplete: { salary: 100, salaryComplement: 0, extraSalary: 0, total: 100 },
+      concepts: [{ block: "Salario", blockKey: "salary", code: "SAL_TEST", amount: 100 }],
+    });
+    const registroOnly = emptyRegistroEmployee({
+      employeeNumber: "REG1",
+      workerName: "REGISTRO ONLY",
+      periodComplete: { salary: 300, salaryComplement: 0, extraSalary: 0, total: 300 },
+      concepts: [{ block: "Salario", blockKey: "salary", code: "SAL_TEST", amount: 300 }],
+    });
+    const kept = emptyRegistroEmployee({
+      employeeNumber: "KEEP1",
+      workerName: "KEEP PERSON",
+      periodComplete: { salary: 200, salaryComplement: 0, extraSalary: 0, total: 200 },
+      concepts: [{ block: "Salario", blockKey: "salary", code: "SAL_TEST", amount: 200 }],
+    });
+    const payrollRecords: PayrollRecord[] = [
+      {
+        sourceFile: "PDF_TEST.pdf",
+        periodLabel: "Enero 2025",
+        workerName: "MATCHED PERSON",
+        employeeNumber: " match 1 ",
+        concepts: [{ name: "Salario Test", amount: 120, type: "devengo" }],
+      },
+      {
+        sourceFile: "PDF_TEST.pdf",
+        periodLabel: "Enero 2025",
+        workerName: "PDF ONLY",
+        employeeNumber: "bc6",
+        concepts: [{ name: "Salario Test", amount: 500, type: "devengo" }],
+      },
+      {
+        sourceFile: "PDF_TEST.pdf",
+        periodLabel: "Enero 2025",
+        workerName: "KEEP PERSON",
+        employeeNumber: "KEEP1",
+        concepts: [{ name: "Salario Test", amount: 210, type: "devengo" }],
+      },
+    ];
+    const result = await compareAnalysis(payrollRecords, [matched, registroOnly, kept], {
+      tolerance: 1,
+      enableAI: false,
+      excludedEmployeeIds: ["MATCH1", "BC6", " REG 1 "],
+      conceptMap: [testRule({ pdfConcept: "Salario Test", block: "Salario", blockKey: "salary", registroCode: "SAL_TEST", status: "Incluido" })],
+    });
+
+    expect(result.excludedEmployeeIdsApplied).toEqual(["MATCH1", "BC6", "REG1"]);
+    expect(result.people.map((row) => row.employeeNumber)).toEqual(["KEEP1"]);
+    expect(result.concepts.map((row) => row.employeeNumber)).toEqual(["KEEP1"]);
+    expect(result.pdfWithoutRegistro).toEqual([]);
+    expect(result.registroWithoutPdf).toEqual([]);
+    expect(result.unmappedConcepts).toEqual([]);
+    expect(result.summary).toMatchObject({
+      uniquePeople: 1,
+      matchedPeople: 1,
+      peopleInPdfWithoutRegistro: 0,
+      peopleInRegistroWithoutPdf: 0,
+      matchedGrossTotalDifference: 10,
+      matchedAdjustedTotalDifference: 10,
+      totalGlobalDifference: 10,
+    });
+  });
+
   test("uses employee number as key and calculates PDF totals from included mapped concepts", async () => {
     const registro = await parseRegistroRetributivo(readFileSync(registroFile));
     const result = await compareAnalysis(
@@ -579,6 +693,166 @@ describe("comparison engine", () => {
     expect(result.people.find((item) => item.employeeNumber === "10048")?.pdfTotal).toBe(50);
   });
 
+  test("treats active legacy justified concepts as normal differences without adjusted discounts", async () => {
+    const employee = emptyRegistroEmployee({
+      employeeNumber: "10048",
+      periodComplete: { salary: 0, salaryComplement: 0, extraSalary: 0, total: 0 },
+      concepts: [
+        { block: "Extrasalarial", blockKey: "extraSalary", code: "CSP_I_COMP_TELETR_COVID", amount: 0 },
+        { block: "Extrasalarial", blockKey: "extraSalary", code: "ROUND_TEST", amount: 0 },
+      ],
+    });
+    const result = await compareAnalysis(
+      [
+        {
+          sourceFile: "PDF_TEST.pdf",
+          periodLabel: "Del 1 al 31 Enero 2025",
+          workerName: "PERSONA TEST",
+          employeeNumber: "10048",
+          concepts: [
+            { name: "Abono teletrabajo", amount: 208, type: "devengo" },
+            { name: "Redondeo Test", amount: 0.05, type: "devengo" },
+          ],
+        },
+      ],
+      [employee],
+      {
+        tolerance: 1,
+        enableAI: false,
+        conceptMap: [
+          testRule({
+            pdfConcept: "Abono teletrabajo",
+            block: "Extrasalarial",
+            blockKey: "extraSalary",
+            registroCode: "CSP_I_COMP_TELETR_COVID",
+            status: "Justificado",
+            includedInComparison: true,
+            includedInAdjustedComparison: false,
+            active: true,
+            reason: "Teletrabajo justificado por criterio configurable.",
+          }),
+          testRule({
+            pdfConcept: "Redondeo Test",
+            block: "Extrasalarial",
+            blockKey: "extraSalary",
+            registroCode: "ROUND_TEST",
+            status: "Incluido",
+            includedInComparison: true,
+          }),
+        ],
+      },
+    );
+
+    const person = result.people.find((row) => row.employeeNumber === "10048");
+    const telework = result.concepts.find((row) => row.registroCode === "CSP_I_COMP_TELETR_COVID");
+
+    expect(person?.totalDifference).toBeCloseTo(208.05, 2);
+    expect(person?.grossTotalDifference).toBeCloseTo(208.05, 2);
+    expect(person?.justifiedTotalAmount).toBe(0);
+    expect(person?.adjustedTotalDifference).toBeCloseTo(208.05, 2);
+    expect(person?.status).toBe("Diferencia");
+    expect(person?.grossStatus).toBe("Diferencia");
+    expect(person?.adjustedStatus).toBe("Diferencia");
+    expect(person?.justifiedConceptsCount).toBe(0);
+    expect(person?.justifiedConceptsSummary).toBe("");
+
+    expect(telework).toMatchObject({
+      difference: 208,
+      grossDifference: 208,
+      justifiedAmount: 0,
+      adjustedDifference: 208,
+      status: "Diferencia",
+      grossStatus: "Diferencia",
+      adjustedStatus: "Diferencia",
+      isJustified: false,
+    });
+    expect(telework?.justificationReason).toBeUndefined();
+  });
+
+  test("treats negative legacy justified differences as normal differences", async () => {
+    const employee = emptyRegistroEmployee({
+      employeeNumber: "NEG01",
+      periodComplete: { salary: 0, salaryComplement: 0, extraSalary: 100, total: 100 },
+      concepts: [{ block: "Extrasalarial", blockKey: "extraSalary", code: "CSP_I_COMP_TELETR_COVID", amount: 100 }],
+    });
+    const result = await compareAnalysis(
+      [
+        {
+          sourceFile: "PDF_TEST.pdf",
+          periodLabel: "Del 1 al 31 Enero 2025",
+          workerName: "PERSONA TEST",
+          employeeNumber: "NEG01",
+          concepts: [{ name: "Abono teletrabajo", amount: 50, type: "devengo" }],
+        },
+      ],
+      [employee],
+      {
+        tolerance: 1,
+        enableAI: false,
+        conceptMap: [
+          testRule({
+            pdfConcept: "Abono teletrabajo",
+            block: "Extrasalarial",
+            blockKey: "extraSalary",
+            registroCode: "CSP_I_COMP_TELETR_COVID",
+            status: "Justificado",
+            includedInComparison: true,
+            includedInAdjustedComparison: false,
+            active: true,
+          }),
+        ],
+      },
+    );
+
+    const telework = result.concepts.find((row) => row.employeeNumber === "NEG01");
+    expect(telework?.grossDifference).toBe(-50);
+    expect(telework?.justifiedAmount).toBe(0);
+    expect(telework?.adjustedDifference).toBe(-50);
+    expect(result.people.find((row) => row.employeeNumber === "NEG01")?.adjustedTotalDifference).toBe(-50);
+  });
+
+  test("ignores disabled mapped concepts completely instead of reporting them as differences or pending", async () => {
+    const employee = emptyRegistroEmployee({
+      employeeNumber: "DIS01",
+      periodComplete: { salary: 0, salaryComplement: 0, extraSalary: 0, total: 0 },
+      concepts: [{ block: "Extrasalarial", blockKey: "extraSalary", code: "CSP_I_COMP_TELETR_COVID", amount: 0 }],
+    });
+    const result = await compareAnalysis(
+      [
+        {
+          sourceFile: "PDF_TEST.pdf",
+          periodLabel: "Del 1 al 31 Enero 2025",
+          workerName: "PERSONA TEST",
+          employeeNumber: "DIS01",
+          concepts: [{ name: "Abono teletrabajo", amount: 208, type: "devengo" }],
+        },
+      ],
+      [employee],
+      {
+        tolerance: 1,
+        enableAI: false,
+        conceptMap: [
+          testRule({
+            pdfConcept: "Abono teletrabajo",
+            block: "Extrasalarial",
+            blockKey: "extraSalary",
+            registroCode: "CSP_I_COMP_TELETR_COVID",
+            status: "Justificado",
+            includedInComparison: false,
+            active: false,
+          }),
+        ],
+      },
+    );
+
+    const person = result.people.find((row) => row.employeeNumber === "DIS01");
+    expect(person?.pdfTotal).toBe(0);
+    expect(person?.totalDifference).toBe(0);
+    expect(person?.status).toBe("OK");
+    expect(result.concepts.find((row) => row.registroCode === "CSP_I_COMP_TELETR_COVID")).toBeUndefined();
+    expect(result.unmappedConcepts.map((row) => row.pdfConcept)).not.toContain("Abono teletrabajo");
+  });
+
   test("explains mostly compensated differences between retribution blocks", async () => {
     const employee = emptyRegistroEmployee({
       employeeNumber: "COMP01",
@@ -649,6 +923,11 @@ describe("comparison engine", () => {
     const person10048 = result.people.find((row) => row.employeeNumber === "10048");
     const person10050 = result.people.find((row) => row.employeeNumber === "10050");
     const person10072 = result.people.find((row) => row.employeeNumber === "10072");
+    const person10123 = result.people.find((row) => row.employeeNumber === "10123");
+    const telework10048 = result.concepts.find((row) => row.employeeNumber === "10048" && row.registroCode === "CSP_I_COMP_TELETR_COVID");
+    const telework10050 = result.concepts.find((row) => row.employeeNumber === "10050" && row.registroCode === "CSP_I_COMP_TELETR_COVID");
+    const telework10072 = result.concepts.find((row) => row.employeeNumber === "10072" && row.registroCode === "CSP_I_COMP_TELETR_COVID");
+    const bolsa10072 = result.concepts.find((row) => row.employeeNumber === "10072" && row.registroCode === "SSP_VACACIONES");
     const kmWithRetention = result.concepts.find((row) => row.employeeNumber === "10048" && row.registroCode === "SSP_KM_CON_RETEN");
     const kmWithoutRetention = result.concepts.find((row) => row.employeeNumber === "10048" && row.registroCode === "SSP_KM_SIN_RETEN");
     const km10099WithRetention = result.concepts.find((row) => row.employeeNumber === "10099" && row.registroCode === "SSP_KM_CON_RETEN");
@@ -661,8 +940,26 @@ describe("comparison engine", () => {
     expect(concept10048Health?.pdfAmount).toBeCloseTo(817.11, 2);
     expect(Math.abs(person10048?.totalDifference ?? 0)).toBeCloseTo(208.05, 2);
     expect(Math.abs(person10050?.totalDifference ?? 0)).toBeCloseTo(208.01, 2);
+    expect(person10048?.grossTotalDifference).toBeCloseTo(208.05, 2);
+    expect(person10048?.justifiedTotalAmount).toBe(0);
+    expect(person10048?.adjustedTotalDifference).toBeCloseTo(person10048?.totalDifference ?? 0, 2);
+    expect(person10048?.adjustedStatus).toBe(person10048?.status);
+    expect(person10050?.justifiedTotalAmount).toBe(0);
+    expect(person10050?.adjustedTotalDifference).toBeCloseTo(person10050?.totalDifference ?? 0, 2);
     expect(person10072?.salaryComplementDifference).toBeCloseTo(841.92, 2);
     expect(Math.abs(person10072?.extraSalaryDifference ?? 0)).toBeCloseTo(208.01, 2);
+    expect(telework10048?.isJustified).toBe(false);
+    expect(telework10048?.justifiedAmount).toBe(0);
+    expect(telework10050?.isJustified).toBe(false);
+    expect(telework10072?.isJustified).toBe(false);
+    expect(bolsa10072?.isJustified).toBe(false);
+    expect(person10072?.justifiedTotalAmount).toBe(0);
+    expect(person10072?.adjustedTotalDifference).toBeCloseTo(person10072?.totalDifference ?? 0, 2);
+    expect(person10123?.justifiedTotalAmount).toBe(0);
+    expect(person10123?.salaryDifference).toBeCloseTo(3679.81, 2);
+    expect(person10123?.salaryComplementDifference).toBeCloseTo(-3679.8, 2);
+    expect(person10123?.adjustedSalaryDifference).toBeCloseTo(person10123?.salaryDifference ?? 0, 2);
+    expect(person10123?.adjustedSalaryComplementDifference).toBeCloseTo(person10123?.salaryComplementDifference ?? 0, 2);
     expect(kmWithRetention?.pdfAmount).toBeGreaterThan(0);
     expect(kmWithoutRetention?.pdfAmount).toBeGreaterThan(0);
     expect(km10099WithRetention?.pdfAmount).toBeCloseTo(km10099WithRetention?.registroAmount ?? 0, 2);
@@ -677,25 +974,21 @@ describe("comparison engine", () => {
     expect(employee10358.find((row) => row.registroCode === "CSP_I_COMP_PTO_TRA")?.pdfAmount).toBeGreaterThan(0);
     expect(result.summary.totalGlobalDifference).toBe(result.summary.matchedTotalDifference);
     expect(result.summary.peopleInPdfWithoutRegistro).toBe(9);
+    const manualExclusions = ["10074", "10076", "10189", "10336", "10474", "10475", "10476", "10477", "BC6"];
+    expect(result.pdfWithoutRegistro?.map((row) => row.employeeNumber).sort()).toEqual([...manualExclusions].sort());
     expect(result.summary.peopleInRegistroWithoutPdf).toBeGreaterThanOrEqual(0);
-    expect(result.summary.conceptsPendingReview).toBe(2);
-    expect(result.summary.conceptsIgnored).toBe(35);
-    expect(result.summary.conceptsNotIncluded).toBe(37);
+    expect(result.summary.conceptsPendingReview).toBe(1);
+    expect(result.summary.conceptsIgnored).toBe(19);
+    expect(result.summary.conceptsNotIncluded).toBe(20);
     expect(result.summary.conceptsRealUnmapped).toBe(0);
-    expect(result.summary.pendingDecisionPdfTotal).toBeCloseTo(16358.04, 2);
+    expect(result.summary.pendingDecisionPdfTotal).toBeCloseTo(1953.39, 2);
 
     const nonIncludedOrder = result.unmappedConcepts.map((row) => row.decisionType);
-    expect(nonIncludedOrder.slice(0, 2)).toEqual(["Pendiente revision", "Pendiente revision"]);
-    expect(nonIncludedOrder.lastIndexOf("Pendiente revision")).toBe(1);
+    expect(nonIncludedOrder.slice(0, 1)).toEqual(["Pendiente revision"]);
+    expect(nonIncludedOrder.lastIndexOf("Pendiente revision")).toBe(0);
 
     const maternity = result.unmappedConcepts.find((row) => normalizeComparableText(row.pdfConcept) === "prestacion teorica maternidad");
-    expect(maternity).toMatchObject({
-      decisionType: "Pendiente revision",
-      includedInComparison: false,
-      suggestedBlock: "C. Salarial",
-      suggestedRegistroCode: "CSP_I_AJUSTE_MATERNIDAD",
-    });
-    expect(maternity?.reason).toContain("teorica");
+    expect(maternity).toBeUndefined();
 
     const fortyYears = result.unmappedConcepts.find((row) => normalizeComparableText(row.pdfConcept) === "paga 40 anos");
     expect(fortyYears).toMatchObject({
@@ -707,11 +1000,35 @@ describe("comparison engine", () => {
     expect(fortyYears?.reason).toContain("No existe codigo exacto");
 
     const ignoredHealth = result.unmappedConcepts.find((row) => normalizeComparableText(row.pdfConcept) === "seguro medico mensual");
-    expect(ignoredHealth).toMatchObject({
-      decisionType: "Ignorado",
-      includedInComparison: false,
+    expect(ignoredHealth).toBeUndefined();
+
+    const filtered = await compareAnalysis(payrollRecords, registro.records, {
+      tolerance: 1,
+      conceptMap: buildDefaultConceptMap(registro.conceptCodes),
+      enableAI: false,
+      excludedEmployeeIds: manualExclusions,
     });
-    expect(ignoredHealth?.reason).toContain("duplicado");
+    const filteredIds = new Set([
+      ...filtered.people.map((row) => row.employeeNumber),
+      ...filtered.concepts.map((row) => row.employeeNumber),
+      ...(filtered.pdfWithoutRegistro ?? []).map((row) => row.employeeNumber),
+      ...(filtered.registroWithoutPdf ?? []).map((row) => row.employeeNumber),
+    ]);
+    manualExclusions.forEach((employeeId) => expect(filteredIds.has(employeeId)).toBe(false));
+    expect(filtered.summary.peopleInPdfWithoutRegistro).toBe(0);
+    expect(filtered.excludedEmployeeIdsApplied).toEqual(manualExclusions);
+
+    const workbook = await exportAnalysisToWorkbook(filtered);
+    const serializedComparisons = JSON.stringify(
+      ["Personas", "Conceptos", "PDF_sin_Registro", "Registro_sin_PDF", "Conceptos_no_incluidos", "Agrupaciones"].map(
+        (sheetName) => workbook.getWorksheet(sheetName)?.model,
+      ),
+    );
+    manualExclusions.forEach((employeeId) => expect(serializedComparisons).not.toContain(employeeId));
+    const criteriosModel = JSON.stringify(workbook.getWorksheet("Criterios")?.model);
+    expect(criteriosModel).toContain("Exclusiones aplicadas");
+    manualExclusions.forEach((employeeId) => expect(criteriosModel).toContain(employeeId));
+    expect(criteriosModel).toContain("Excluida manualmente desde Ajustes");
   });
 });
 
@@ -746,8 +1063,8 @@ describe("Excel export", () => {
       "Criterios",
     ]);
     expect(workbook.getWorksheet("Conceptos_sin_mapear")).toBeUndefined();
-    expect(workbook.getWorksheet("Dashboard")?.getCell("B2").value).toBe("Comparativa Nominas vs Registro Retributivo");
-    expect(workbook.getWorksheet("Dashboard")?.getCell("E4").value).toBe("Registro: registro.xlsx");
+    expect(workbook.getWorksheet("Dashboard")?.getCell("B2").value).toBe("Comparativa Recibos vs Registro Retributivo");
+    expect(workbook.getWorksheet("Dashboard")?.getCell("E4").value).toBe("Reg. Retrib.: registro.xlsx");
     expect(workbook.getWorksheet("Agrupaciones")?.getCell("A3").value).toBe("Pendiente de implementacion / Sin datos calculados");
     workbook.worksheets.forEach((sheet) => {
       expect(sheet.views[0]?.state).toBe("frozen");
@@ -766,7 +1083,7 @@ describe("Excel export", () => {
     ).toBe(true);
     expect(
       [...(workbook.getWorksheet("Dashboard")?.getColumn(8).values ?? [])].some(
-        (value) => typeof value === "string" && value.includes("PDF sin Registro se muestra separado"),
+        (value) => typeof value === "string" && value.includes("Recibo sin Reg. Retrib. se muestra separado"),
       ),
     ).toBe(true);
     expect(
@@ -778,19 +1095,41 @@ describe("Excel export", () => {
       undefined,
       "Tipo decision",
       "Incluido en calculo",
-      "Concepto PDF",
+      "Concepto Recibo",
       "Total detectado",
       "N personas",
-      "N nominas",
+      "N recibos",
       "Ejemplos matriculas",
       "Sugerencia bloque",
-      "Sugerencia codigo Registro",
+      "Sugerencia codigo Reg. Retrib.",
       "Accion recomendada",
       "Motivo",
     ]);
-    expect(workbook.getWorksheet("Personas")?.getRow(1).values).toContain("Causa probable");
-    expect(workbook.getWorksheet("Personas")?.getRow(1).values).toContain("Observaciones / detalle breve");
-    expect(workbook.getWorksheet("Conceptos")?.getRow(1).values).toContain("Regla / detalle");
+    const personHeaders = workbook.getWorksheet("Personas")?.getRow(1).values;
+    const conceptHeaders = workbook.getWorksheet("Conceptos")?.getRow(1).values;
+    expect(personHeaders).toContain("Causa probable");
+    expect(personHeaders).toContain("Observaciones / detalle breve");
+    expect(personHeaders).toContain("Dif. Total");
+    expect(personHeaders).toContain("Estado");
+    expect(personHeaders).not.toContain("Dif. total bruta");
+    expect(personHeaders).not.toContain("Importe justificado");
+    expect(personHeaders).not.toContain("Dif. total ajustada");
+    expect(personHeaders).not.toContain("Estado bruto");
+    expect(personHeaders).not.toContain("Estado ajustado");
+    expect(conceptHeaders).toContain("Regla / detalle");
+    expect(conceptHeaders).toContain("Diferencia");
+    expect(conceptHeaders).toContain("Estado");
+    expect(conceptHeaders).not.toContain("Dif. bruta");
+    expect(conceptHeaders).not.toContain("Importe justificado");
+    expect(conceptHeaders).not.toContain("Dif. ajustada");
+    expect(conceptHeaders).not.toContain("Estado bruto");
+    expect(conceptHeaders).not.toContain("Estado ajustado");
+    expect(workbook.getWorksheet("Dashboard")?.model).toEqual(expect.objectContaining({ name: "Dashboard" }));
+    expect(JSON.stringify(workbook.getWorksheet("Dashboard")?.model)).toContain("Diferencia total matched");
+    expect(JSON.stringify(workbook.getWorksheet("Dashboard")?.model)).not.toContain("Diferencia ajustada matched");
+    expect(JSON.stringify(workbook.getWorksheet("Criterios")?.model)).toContain("Conceptos desactivados");
+    expect(JSON.stringify(workbook.getWorksheet("Criterios")?.model)).not.toContain("Conceptos justificados");
+    expect(JSON.stringify(workbook.getWorksheet("Criterios")?.model)).not.toContain("includedInAdjustedComparison");
     expect(workbook.getWorksheet("Personas")?.getColumn(6).numFmt).toContain("EUR");
 
     const buffer = await workbook.xlsx.writeBuffer();
@@ -846,17 +1185,19 @@ describe("Excel export", () => {
     const conceptHeader = conceptsSheet?.getRow(1).values as unknown[];
     const exportedPerson = peopleSheet?.getRow(2);
     const exportedConcept = Array.from({ length: (conceptsSheet?.rowCount ?? 1) - 1 }, (_, index) => conceptsSheet?.getRow(index + 2)).find(
-      (row) => row?.getCell(conceptHeader.indexOf("Codigo Registro")).value === "COMP_TEST",
+      (row) => row?.getCell(conceptHeader.indexOf("Codigo Reg. Retrib.")).value === "COMP_TEST",
     );
     const sourcePerson = analysis.people.find((row) => row.employeeNumber === "E1");
     const sourceConcept = analysis.concepts.find((row) => row.registroCode === "COMP_TEST");
 
-    expect(exportedPerson?.getCell(personHeader.indexOf("Total Registro")).value).toBe(sourcePerson?.registroTotal);
-    expect(exportedPerson?.getCell(personHeader.indexOf("Total PDF")).value).toBe(sourcePerson?.pdfTotal);
+    expect(exportedPerson?.getCell(personHeader.indexOf("Total Reg. Retrib.")).value).toBe(sourcePerson?.registroTotal);
+    expect(exportedPerson?.getCell(personHeader.indexOf("Total Recibo")).value).toBe(sourcePerson?.pdfTotal);
     expect(exportedPerson?.getCell(personHeader.indexOf("Dif. Total")).value).toBe(sourcePerson?.totalDifference);
-    expect(exportedConcept?.getCell(conceptHeader.indexOf("Registro")).value).toBe(sourceConcept?.registroAmount);
-    expect(exportedConcept?.getCell(conceptHeader.indexOf("PDF")).value).toBe(sourceConcept?.pdfAmount);
+    expect(exportedPerson?.getCell(personHeader.indexOf("Estado")).value).toBe(sourcePerson?.status);
+    expect(exportedConcept?.getCell(conceptHeader.indexOf("Reg. Retrib.")).value).toBe(sourceConcept?.registroAmount);
+    expect(exportedConcept?.getCell(conceptHeader.indexOf("Recibo")).value).toBe(sourceConcept?.pdfAmount);
     expect(exportedConcept?.getCell(conceptHeader.indexOf("Diferencia")).value).toBe(sourceConcept?.difference);
+    expect(exportedConcept?.getCell(conceptHeader.indexOf("Estado")).value).toBe(sourceConcept?.status);
     expect((exportedConcept?.getCell(1).fill as { fgColor?: { argb?: string } }).fgColor?.argb).toBeTruthy();
   });
 
@@ -887,16 +1228,16 @@ describe("Excel export", () => {
 
     expect(sheet?.getCell("A3").value).not.toBe("Pendiente de implementacion");
     expect(sheet?.rowCount).toBeGreaterThan(4000);
-    expect(header).toContain("Base Registro");
+    expect(header).toContain("Base Reg. Retrib.");
     expect(header).toContain("Hoja agrupada");
     expect(header).toContain("Recalculado Empleados");
-    expect(header).toContain("Registro periodo completo matched");
-    expect(header).toContain("PDF recalculado");
-    expect(header).toContain("Dif. PDF");
-    expect(header).toContain("Estado PDF");
+    expect(header).toContain("Reg. Retrib. periodo completo matched");
+    expect(header).toContain("Recibo recalculado");
+    expect(header).toContain("Dif. Recibo");
+    expect(header).toContain("Estado Recibo");
 
-    const baseColumn = header.indexOf("Base Registro");
-    const pdfStatusColumn = header.indexOf("Estado PDF");
+    const baseColumn = header.indexOf("Base Reg. Retrib.");
+    const pdfStatusColumn = header.indexOf("Estado Recibo");
     const normalizedRow = sheet
       ? Array.from({ length: sheet.rowCount - 2 }, (_, index) => sheet.getRow(index + 3)).find((row) => row.getCell(baseColumn).value === "RETRIBUCIONES NORMALIZADAS")
       : undefined;
@@ -943,7 +1284,7 @@ describe("Excel export", () => {
     const sheet = workbook.getWorksheet("Agrupaciones");
     const header = sheet?.getRow(2).values as unknown[];
     const excelDifferenceColumn = header.indexOf("Dif. Excel");
-    const pdfDifferenceColumn = header.indexOf("Dif. PDF");
+    const pdfDifferenceColumn = header.indexOf("Dif. Recibo");
 
     expect(sheet?.getRow(3).getCell(excelDifferenceColumn).value).toBe(0);
     expect(sheet?.getRow(3).getCell(pdfDifferenceColumn).value).toBe(0);

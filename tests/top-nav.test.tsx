@@ -42,12 +42,13 @@ describe("TopNav", () => {
     expect(appState.value.setView).toHaveBeenCalledWith("personas");
   });
 
-  test("includes the Cuadre Excel tab between concepts and groupings", () => {
+  test("keeps Conceptos hidden from the main navigation", () => {
     render(<TopNav />);
 
     const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
 
-    expect(tabs).toEqual(["Dashboard", "Personas", "Conceptos", "Cuadre Excel", "Agrupaciones", "Historial", "Ajustes"]);
+    expect(tabs).toEqual(["Dashboard", "Personas", "Cuadre Excel", "Agrupaciones", "Historial", "Ajustes"]);
+    expect(screen.queryByRole("tab", { name: "Conceptos" })).toBeNull();
 
     fireEvent.click(screen.getByRole("tab", { name: "Cuadre Excel" }));
 

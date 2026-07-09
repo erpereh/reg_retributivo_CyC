@@ -14,9 +14,9 @@ export function Header({ canExport, onExport, onReset, exporting }: HeaderProps)
     <header className="border-b border-line bg-white">
       <div className="flex flex-col gap-4 px-4 py-5 sm:px-6 xl:flex-row xl:items-center xl:justify-between xl:px-8">
         <div>
-          <h1 className="text-2xl font-semibold tracking-normal text-ink">Comparativa Nominas vs Registro Retributivo</h1>
+          <h1 className="text-2xl font-semibold tracking-normal text-ink">Comparativa Recibos vs Registro Retributivo</h1>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-muted">
-            Analiza PDFs de nomina contra el Excel heredado, detecta diferencias de dato maestro y exporta una comparativa limpia.
+            Analiza recibos contra el Excel heredado, detecta diferencias de dato maestro y exporta una comparativa limpia.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

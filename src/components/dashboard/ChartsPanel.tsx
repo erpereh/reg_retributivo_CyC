@@ -18,6 +18,11 @@ const STATUS_COLORS: Record<string, string> = {
   "Sin mapear": "#c2410c",
 };
 
+const STATUS_LABELS: Record<string, string> = {
+  "Sin Registro": "Recibo sin Reg. Retrib.",
+  "Sin PDF": "Reg. Retrib. sin Recibo",
+};
+
 function ProfessionalChartCard({
   title,
   subtitle,
@@ -42,13 +47,16 @@ function ProfessionalChartCard({
 }
 
 function EmptyChart() {
-  return <EmptyState icon={BarChart3} title="Sin datos para graficar" description="Sube nóminas PDF y el Excel Registro para ver diferencias retributivas." />;
+  return <EmptyState icon={BarChart3} title="Sin datos para graficar" description="Sube recibos y el Excel Reg. Retrib. para ver diferencias retributivas." />;
 }
 
 function countByStatus(result: AnalysisResult): Array<{ name: string; value: number; color: string }> {
   const counts = new Map<string, number>();
-  (result.people ?? []).forEach((item) => counts.set(item.status, (counts.get(item.status) ?? 0) + 1));
-  return [...counts.entries()].map(([name, value]) => ({ name, value, color: STATUS_COLORS[name] ?? "#2563eb" }));
+  (result.people ?? []).forEach((item) => {
+    const status = item.status;
+    counts.set(status, (counts.get(status) ?? 0) + 1);
+  });
+  return [...counts.entries()].map(([status, value]) => ({ name: STATUS_LABELS[status] ?? status, value, color: STATUS_COLORS[status] ?? "#2563eb" }));
 }
 
 function EuroTooltip({ active, payload, label }: Readonly<{ active?: boolean; payload?: readonly { value?: number; name?: string }[]; label?: string }>) {
@@ -161,9 +169,9 @@ export function ChartsPanel({ result }: Readonly<{ result?: AnalysisResult }>) {
     { name: "Extrasalarial", value: result.summary.matchedExtraSalaryDifference ?? result.summary.totalExtraSalaryDifference },
   ];
   const separatedAmounts = [
-    { name: "Dif. matched", value: result.summary.matchedTotalDifference ?? result.summary.totalGlobalDifference, tone: "bg-primary" },
+    { name: "Diferencia total matched", value: result.summary.matchedTotalDifference ?? result.summary.totalGlobalDifference, tone: "bg-primary" },
     { name: "Pendiente decisión", value: result.summary.pendingDecisionPdfTotal ?? result.summary.pendingReviewAmount ?? 0, tone: "bg-orange-500" },
-    { name: "PDF sin Registro", value: result.summary.totalPdfWithoutRegistro ?? 0, tone: "bg-violet-600" },
+    { name: "Recibo sin Reg. Retrib.", value: result.summary.totalPdfWithoutRegistro ?? 0, tone: "bg-violet-600" },
   ];
   const topPeople = [...(result.people ?? [])]
     .sort((a, b) => Math.abs(b.totalDifference) - Math.abs(a.totalDifference))
@@ -179,7 +187,7 @@ export function ChartsPanel({ result }: Readonly<{ result?: AnalysisResult }>) {
         {statusRows.length ? <StatusDonut rows={statusRows} animate={animate} /> : <EmptyChart />}
       </ProfessionalChartCard>
 
-      <ProfessionalChartCard title="Diferencias matched por bloque" subtitle="Solo personas encontradas en Registro y PDF; positivos y negativos se mantienen visibles." badge="EUR">
+      <ProfessionalChartCard title="Diferencias matched por bloque" subtitle="Solo personas encontradas en Reg. Retrib. y Recibo; positivos y negativos se mantienen visibles." badge="EUR">
         <div className="h-72">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={byBlock} margin={{ top: 10, right: 10, bottom: 4, left: -4 }}>
@@ -215,7 +223,7 @@ export function ChartsPanel({ result }: Readonly<{ result?: AnalysisResult }>) {
         )}
       </ProfessionalChartCard>
 
-      <ProfessionalChartCard title="Importes separados" subtitle="Comparación visual entre matched, pendiente y PDF sin Registro sin mezclar ámbitos." badge="No se suman">
+      <ProfessionalChartCard title="Importes separados" subtitle="Comparación visual entre matched, pendiente y Recibo sin Reg. Retrib. sin mezclar ámbitos." badge="No se suman">
         <SeparatedAmounts rows={separatedAmounts} />
       </ProfessionalChartCard>
     </section>

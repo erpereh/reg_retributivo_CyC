@@ -25,9 +25,9 @@ export interface ExportWorkbookMetadata {
   readonly schemaVersion?: number;
 }
 
-const NOTE_MATCHED = "La diferencia matched no incluye PDF sin Registro ni conceptos pendientes de decision.";
-const NOTE_PDF_WITHOUT_REGISTRO = "PDF sin Registro se muestra separado porque no existe matricula equivalente en el Registro.";
-const NOTE_GROUPINGS = "Las diferencias de agrupaciones PDF son por metrica agrupada; medias y medianas no son importes aditivos.";
+const NOTE_MATCHED = "La diferencia matched no incluye Recibo sin Reg. Retrib. ni conceptos pendientes de decision.";
+const NOTE_PDF_WITHOUT_REGISTRO = "Recibo sin Reg. Retrib. se muestra separado porque no existe matricula equivalente en el Reg. Retrib.";
+const NOTE_GROUPINGS = "Las diferencias de agrupaciones Recibo son por metrica agrupada; medias y medianas no son importes aditivos.";
 
 function configureColumns(sheet: ExcelJS.Worksheet, widths: readonly number[]): void {
   widths.forEach((width, index) => {
@@ -217,7 +217,7 @@ function addDashboard(workbook: ExcelJS.Workbook, analysis: AnalysisResult, meta
   sheet.views = [{ state: "frozen", ySplit: 8 }];
   configureColumns(sheet, [3, 22, 22, 3, 22, 22, 3, 22, 22, 3]);
   sheet.mergeCells("B2:I2");
-  sheet.getCell("B2").value = "Comparativa Nominas vs Registro Retributivo";
+  sheet.getCell("B2").value = "Comparativa Recibos vs Registro Retributivo";
   styleTitle(sheet.getCell("B2"));
   sheet.getRow(2).height = 34;
 
@@ -225,7 +225,7 @@ function addDashboard(workbook: ExcelJS.Workbook, analysis: AnalysisResult, meta
   sheet.mergeCells("E4:F4");
   sheet.mergeCells("H4:I4");
   sheet.getCell("B4").value = `Generado: ${formatDateTime(metadata.exportedAt ?? analysis.summary.generatedAt)}`;
-  sheet.getCell("E4").value = `Registro: ${metadata.registroFileName ?? "No disponible"}`;
+  sheet.getCell("E4").value = `Reg. Retrib.: ${metadata.registroFileName ?? "No disponible"}`;
   sheet.getCell("H4").value = `IA: ${analysis.summary.aiEnabled || metadata.aiEnabled ? `Activa (${metadata.aiModel ?? analysis.summary.aiModel ?? "modelo configurado"})` : "No activa"}`;
   ["B4", "E4", "H4"].forEach((address) => {
     const cell = sheet.getCell(address);
@@ -237,7 +237,7 @@ function addDashboard(workbook: ExcelJS.Workbook, analysis: AnalysisResult, meta
   sheet.mergeCells("E5:F5");
   sheet.mergeCells("H5:I5");
   sheet.getCell("B5").value = `Recibos procesados: ${analysis.summary.pdfsAnalyzed}`;
-  sheet.getCell("E5").value = `PDFs cargados: ${metadata.pdfFileCount ?? "No disponible"}`;
+  sheet.getCell("E5").value = `Recibos cargados: ${metadata.pdfFileCount ?? "No disponible"}`;
   sheet.getCell("H5").value = `Tolerancia: ${formatMoneyText(analysis.summary.tolerance)} EUR`;
   ["B5", "E5", "H5"].forEach((address) => {
     const cell = sheet.getCell(address);
@@ -245,32 +245,44 @@ function addDashboard(workbook: ExcelJS.Workbook, analysis: AnalysisResult, meta
     cell.alignment = { wrapText: true, vertical: "middle" };
   });
 
+  if (analysis.excludedEmployeeIdsApplied?.length) {
+    sheet.mergeCells("B6:I6");
+    const exclusionsCell = sheet.getCell("B6");
+    exclusionsCell.value = `Exclusiones aplicadas: ${analysis.excludedEmployeeIdsApplied.length} matriculas`;
+    exclusionsCell.font = { bold: true, color: { argb: `FF${COLORS.mutedText}` }, size: 10 };
+    exclusionsCell.alignment = { wrapText: true, vertical: "middle" };
+  }
+
   addDashboardCard(sheet, 8, 2, "Personas analizadas", analysis.summary.uniquePeople, "Base total del analisis", "blue");
-  addDashboardCard(sheet, 8, 5, "Personas matched", analysis.summary.matchedPeople ?? 0, "Registro y PDF encontrados", "green");
+  addDashboardCard(sheet, 8, 5, "Personas matched", analysis.summary.matchedPeople ?? 0, "Reg. Retrib. y Recibo encontrados", "green");
   addDashboardCard(sheet, 8, 8, "Personas con diferencia", analysis.summary.peopleWithDifferences, "Requieren revision", "red");
 
-  addDashboardCard(sheet, 12, 2, "Diferencia matched", `${formatMoneyText(analysis.summary.matchedTotalDifference ?? analysis.summary.totalGlobalDifference)} EUR`, "Solo personas matched", "red");
-  addDashboardCard(sheet, 12, 5, "PDF sin Registro", analysis.summary.peopleInPdfWithoutRegistro ?? 0, `${formatMoneyText(analysis.summary.totalPdfWithoutRegistro ?? 0)} EUR separado`, "violet");
-  addDashboardCard(sheet, 12, 8, "Pendiente decision", `${formatMoneyText(analysis.summary.pendingDecisionPdfTotal ?? 0)} EUR`, `${analysis.summary.conceptsPendingReview ?? 0} conceptos`, "orange");
+  addDashboardCard(sheet, 12, 2, "Diferencia total matched", `${formatMoneyText(analysis.summary.matchedTotalDifference ?? analysis.summary.totalGlobalDifference)} EUR`, "Solo personas matched", "green");
+  addDashboardCard(sheet, 12, 5, "Reg. Retrib. sin Recibo", analysis.summary.peopleInRegistroWithoutPdf ?? 0, "Personas del Excel sin recibo", "gray");
+  addDashboardCard(sheet, 12, 8, "Conceptos desactivados", analysis.summary.conceptsIgnored ?? 0, "Fuera del analisis", "gray");
 
-  addDashboardCard(sheet, 16, 2, "Conceptos ignorados", analysis.summary.conceptsIgnored ?? 0, "Excluidos por criterio", "gray");
-  addDashboardCard(sheet, 16, 5, "Cuadre interno Excel", internalExcelStatus(analysis), `${analysis.summary.internalExcelDifferences} con diferencia`, analysis.summary.internalExcelDifferences ? "orange" : "green");
-  addDashboardCard(sheet, 16, 8, "Agrupaciones PDF", groupingPdfAffectedCount(analysis), `${groupingPdfDifferenceCount(analysis)} filas con diferencia`, groupingPdfDifferenceCount(analysis) ? "orange" : "green");
+  addDashboardCard(sheet, 16, 2, "Recibo sin Reg. Retrib.", analysis.summary.peopleInPdfWithoutRegistro ?? 0, `${formatMoneyText(analysis.summary.totalPdfWithoutRegistro ?? 0)} EUR separado`, "violet");
+  addDashboardCard(sheet, 16, 5, "Pendiente decision", `${formatMoneyText(analysis.summary.pendingDecisionPdfTotal ?? 0)} EUR`, `${analysis.summary.conceptsPendingReview ?? 0} conceptos`, "orange");
+  addDashboardCard(sheet, 16, 8, "Conceptos sin configurar", analysis.summary.conceptsRealUnmapped ?? 0, "Sin codigo claro", "red");
 
-  addSectionHeader(sheet, 21, "Resumen separado de importes y estados", 2, 9);
-  const header = sheet.getRow(22);
-  sheet.mergeCells("B22:C22");
-  sheet.mergeCells("E22:F22");
-  sheet.mergeCells("H22:I22");
-  sheet.getCell("B22").value = "Bloque";
-  sheet.getCell("E22").value = "Valor";
-  sheet.getCell("H22").value = "Nota / detalle";
+  addDashboardCard(sheet, 20, 2, "Conceptos ignorados", analysis.summary.conceptsIgnored ?? 0, "Excluidos por criterio", "gray");
+  addDashboardCard(sheet, 20, 5, "Cuadre interno Excel", internalExcelStatus(analysis), `${analysis.summary.internalExcelDifferences} con diferencia`, analysis.summary.internalExcelDifferences ? "orange" : "green");
+  addDashboardCard(sheet, 20, 8, "Agrupaciones Recibo", groupingPdfAffectedCount(analysis), `${groupingPdfDifferenceCount(analysis)} filas con diferencia`, groupingPdfDifferenceCount(analysis) ? "orange" : "green");
+
+  addSectionHeader(sheet, 25, "Resumen separado de importes y estados", 2, 9);
+  const header = sheet.getRow(26);
+  sheet.mergeCells("B26:C26");
+  sheet.mergeCells("E26:F26");
+  sheet.mergeCells("H26:I26");
+  sheet.getCell("B26").value = "Bloque";
+  sheet.getCell("E26").value = "Valor";
+  sheet.getCell("H26").value = "Nota / detalle";
   styleHeaderRow(header);
   [
-    ["Diferencia matched", analysis.summary.matchedTotalDifference ?? analysis.summary.totalGlobalDifference, "Solo Registro/PDF encontrados", NOTE_MATCHED],
-    ["PDF sin Registro", analysis.summary.totalPdfWithoutRegistro ?? 0, `${analysis.summary.peopleInPdfWithoutRegistro ?? 0} personas`, NOTE_PDF_WITHOUT_REGISTRO],
+    ["Diferencia total matched", analysis.summary.matchedTotalDifference ?? analysis.summary.totalGlobalDifference, "Solo Reg. Retrib./Recibo encontrados", NOTE_MATCHED],
+    ["Recibo sin Reg. Retrib.", analysis.summary.totalPdfWithoutRegistro ?? 0, `${analysis.summary.peopleInPdfWithoutRegistro ?? 0} personas`, NOTE_PDF_WITHOUT_REGISTRO],
     ["Importe pendiente de decision", analysis.summary.pendingDecisionPdfTotal ?? 0, `${analysis.summary.conceptsPendingReview ?? 0} conceptos pendientes`, "No incluido en la diferencia matched hasta decision manual."],
-    ["Agrupaciones PDF", maxGroupedPdfDifference(analysis), `${groupingPdfDifferenceCount(analysis)} filas con diferencia`, NOTE_GROUPINGS],
+    ["Agrupaciones Recibo", maxGroupedPdfDifference(analysis), `${groupingPdfDifferenceCount(analysis)} filas con diferencia`, NOTE_GROUPINGS],
   ].forEach(([name, value, detail, note]) => {
     const row = sheet.addRow([]);
     sheet.mergeCells(row.number, 2, row.number, 3);
@@ -286,9 +298,9 @@ function addDashboard(workbook: ExcelJS.Workbook, analysis: AnalysisResult, meta
       cell.border = { bottom: { style: "hair", color: { argb: `FF${COLORS.line}` } } };
     });
   });
-  sheet.autoFilter = { from: { row: 22, column: 2 }, to: { row: 26, column: 9 } };
+  sheet.autoFilter = { from: { row: 26, column: 2 }, to: { row: 32, column: 9 } };
 
-  addSectionHeader(sheet, 29, "Notas de lectura", 2, 9);
+  addSectionHeader(sheet, 35, "Notas de lectura", 2, 9);
   [NOTE_MATCHED, NOTE_PDF_WITHOUT_REGISTRO, NOTE_GROUPINGS].forEach((note) => {
     const row = sheet.addRow([undefined, note]);
     sheet.mergeCells(row.number, 2, row.number, 9);
@@ -307,23 +319,24 @@ function addResumen(workbook: ExcelJS.Workbook, analysis: AnalysisResult, metada
   [
     ["Informacion del analisis", "Fecha de generacion", formatDateTime(analysis.summary.generatedAt), ""],
     ["Informacion del analisis", "Fecha de exportacion", formatDateTime(metadata.exportedAt), ""],
-    ["Informacion del analisis", "Excel Registro", metadata.registroFileName ?? "No disponible", ""],
+    ["Informacion del analisis", "Excel Reg. Retrib.", metadata.registroFileName ?? "No disponible", ""],
     ["Informacion del analisis", "Recibos procesados", analysis.summary.pdfsAnalyzed, `${analysis.summary.pdfsFailed} con error`],
     ["Informacion del analisis", "Tolerancia", analysis.summary.tolerance, "EUR"],
+    ["Informacion del analisis", "Exclusiones aplicadas", analysis.excludedEmployeeIdsApplied?.length ?? 0, "Matriculas excluidas manualmente desde Ajustes"],
     ["Personas", "Personas analizadas", analysis.summary.uniquePeople, ""],
-    ["Personas", "Personas matched Registro/PDF", analysis.summary.matchedPeople ?? 0, "Base de la diferencia matched"],
+    ["Personas", "Personas matched Reg. Retrib./Recibo", analysis.summary.matchedPeople ?? 0, "Base de la diferencia matched"],
     ["Personas", "Personas con diferencia", analysis.summary.peopleWithDifferences, ""],
-    ["Personas", "Diferencia matched", zeroMoney(analysis.summary.matchedTotalDifference ?? analysis.summary.totalGlobalDifference) ?? 0, NOTE_MATCHED],
+    ["Personas", "Diferencia total matched", zeroMoney(analysis.summary.matchedTotalDifference ?? analysis.summary.totalGlobalDifference) ?? 0, NOTE_MATCHED],
     ["Conceptos", "Conceptos pendientes revision", analysis.summary.conceptsPendingReview ?? 0, ""],
     ["Conceptos", "Conceptos ignorados", analysis.summary.conceptsIgnored ?? 0, ""],
     ["Conceptos", "Conceptos sin mapear reales", analysis.summary.conceptsRealUnmapped ?? 0, ""],
     ["Conceptos", "Importe pendiente de decision", zeroMoney(analysis.summary.pendingDecisionPdfTotal ?? 0) ?? 0, "No incluido en diferencia matched"],
-    ["PDF / Registro sin pareja", "PDF sin Registro", analysis.summary.peopleInPdfWithoutRegistro ?? 0, `${formatMoneyText(analysis.summary.totalPdfWithoutRegistro ?? 0)} EUR separado`],
-    ["PDF / Registro sin pareja", "Registro sin PDF", analysis.summary.peopleInRegistroWithoutPdf ?? 0, ""],
+    ["Recibo / Reg. Retrib. sin pareja", "Recibo sin Reg. Retrib.", analysis.summary.peopleInPdfWithoutRegistro ?? 0, `${formatMoneyText(analysis.summary.totalPdfWithoutRegistro ?? 0)} EUR separado`],
+    ["Recibo / Reg. Retrib. sin pareja", "Reg. Retrib. sin Recibo", analysis.summary.peopleInRegistroWithoutPdf ?? 0, ""],
     ["Cuadre interno Excel", "Cuadres internos con diferencias", analysis.summary.internalExcelDifferences, internalExcelStatus(analysis)],
     ["Agrupaciones", "Agrupaciones Excel con diferencia", groupingExcelDifferenceCount(analysis), "Validacion hoja agrupada vs Empleados"],
-    ["Agrupaciones", "Agrupaciones PDF con diferencia", groupingPdfDifferenceCount(analysis), NOTE_GROUPINGS],
-    ["Agrupaciones", "Mayor diferencia PDF agrupada", zeroMoney(maxGroupedPdfDifference(analysis)) ?? 0, "No sumar diferencias agrupadas como total salarial"],
+    ["Agrupaciones", "Agrupaciones Recibo con diferencia", groupingPdfDifferenceCount(analysis), NOTE_GROUPINGS],
+    ["Agrupaciones", "Mayor diferencia Recibo agrupada", zeroMoney(maxGroupedPdfDifference(analysis)) ?? 0, "No sumar diferencias agrupadas como total salarial"],
     ["Criterios principales", "IA", analysis.summary.aiEnabled || metadata.aiEnabled ? "Activa" : "No activa", "Sin API key ni solicitudes/respuestas IA"],
   ].forEach((row) => sheet.addRow(row));
   finalizeTableSheet(sheet, {
@@ -343,17 +356,17 @@ function addPersonas(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void
     "Centro",
     "Puesto",
     "Categoria",
-    "Salario Registro",
-    "Salario PDF",
+    "Salario Reg. Retrib.",
+    "Salario Recibo",
     "Dif. Salario",
-    "C. Salarial Registro",
-    "C. Salarial PDF",
+    "C. Salarial Reg. Retrib.",
+    "C. Salarial Recibo",
     "Dif. C. Salarial",
-    "Extrasalarial Registro",
-    "Extrasalarial PDF",
+    "Extrasalarial Reg. Retrib.",
+    "Extrasalarial Recibo",
     "Dif. Extrasalarial",
-    "Total Registro",
-    "Total PDF",
+    "Total Reg. Retrib.",
+    "Total Recibo",
     "Dif. Total",
     "Estado",
     "Causa probable",
@@ -403,8 +416,8 @@ function sortConcepts(rows: readonly ConceptComparisonRow[]): ConceptComparisonR
   const priority = (row: ConceptComparisonRow): number => {
     if (row.status === "Diferencia") return 0;
     if (row.status === "Revisar") return 1;
-    if (["Sin mapear", "Sin Registro", "Sin PDF"].includes(row.status)) return 2;
-    if (row.status === "OK") return 3;
+    if (["Sin mapear", "Sin Registro", "Sin PDF"].includes(row.status)) return 3;
+    if (row.status === "OK") return 4;
     return 4;
   };
   return [...rows].sort((left, right) => {
@@ -422,10 +435,10 @@ function addConceptos(workbook: ExcelJS.Workbook, analysis: AnalysisResult): voi
     "Persona",
     "Centro",
     "Bloque",
-    "Codigo Registro",
-    "Concepto PDF",
-    "Registro",
-    "PDF",
+    "Codigo Reg. Retrib.",
+    "Concepto Recibo",
+    "Reg. Retrib.",
+    "Recibo",
     "Diferencia",
     "Estado",
     "Causa probable",
@@ -473,13 +486,13 @@ function addConceptosNoIncluidos(workbook: ExcelJS.Workbook, analysis: AnalysisR
   const headers = [
     "Tipo decision",
     "Incluido en calculo",
-    "Concepto PDF",
+    "Concepto Recibo",
     "Total detectado",
     "N personas",
-    "N nominas",
+    "N recibos",
     "Ejemplos matriculas",
     "Sugerencia bloque",
-    "Sugerencia codigo Registro",
+    "Sugerencia codigo Reg. Retrib.",
     "Accion recomendada",
     "Motivo",
   ];
@@ -525,7 +538,7 @@ function addNormalizado(workbook: ExcelJS.Workbook, analysis: AnalysisResult): v
     "Normalizado + variables",
     "Normalizado",
     "Periodo completo",
-    "Real PDF",
+    "Real Recibo",
     "Diferencia",
     "Estado",
     "Observacion / causa probable",
@@ -547,7 +560,7 @@ function addNormalizado(workbook: ExcelJS.Workbook, analysis: AnalysisResult): v
         zeroMoney(item.realPdf),
         zeroMoney(item.diffPdfVsPeriodComplete),
         item.status,
-        item.possibleJustification || item.detail,
+        item.detail,
       ]);
       applyStatusStyle(row.getCell(10), item.status);
     });
@@ -563,14 +576,14 @@ function addNormalizado(workbook: ExcelJS.Workbook, analysis: AnalysisResult): v
 function addPersonasSinRegistro(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void {
   const sheet = workbook.addWorksheet("PDF_sin_Registro");
   sheet.mergeCells("A1:K1");
-  sheet.getCell("A1").value = "Estas matriculas se excluyen de la diferencia matched y de agrupaciones PDF porque no tienen datos maestros en Registro.";
+  sheet.getCell("A1").value = "Estas matriculas se excluyen de la diferencia matched y de agrupaciones Recibo porque no tienen datos maestros en Reg. Retrib.";
   styleNoteRow(sheet.getRow(1), 1, 11);
-  const headers = ["Matricula", "Persona", "Centro", "Salario PDF", "C. Salarial PDF", "Extrasalarial PDF", "Total PDF", "N nominas", "Periodos", "Estado", "Observacion"];
+  const headers = ["Matricula", "Persona", "Centro", "Salario Recibo", "C. Salarial Recibo", "Extrasalarial Recibo", "Total Recibo", "N recibos", "Periodos", "Estado", "Observacion"];
   sheet.addRow(headers);
   styleHeaderRow(sheet.getRow(2));
   const rows = analysis.pdfWithoutRegistro ?? analysis.people.filter((item) => item.status === "Sin Registro");
   if (!rows.length) {
-    addEmptyState(sheet, "No hay matriculas de PDF sin Registro.", headers.length);
+    addEmptyState(sheet, "No hay matriculas de Recibo sin Reg. Retrib.", headers.length);
   } else {
     rows.forEach((item) => {
       const row = sheet.addRow([
@@ -601,12 +614,12 @@ function addPersonasSinRegistro(workbook: ExcelJS.Workbook, analysis: AnalysisRe
 
 function addRegistroSinPdf(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void {
   const sheet = workbook.addWorksheet("Registro_sin_PDF");
-  const headers = ["Matricula", "Persona", "Centro", "Puesto", "Categoria", "Total Registro", "Estado", "Observacion"];
+  const headers = ["Matricula", "Persona", "Centro", "Puesto", "Categoria", "Total Reg. Retrib.", "Estado", "Observacion"];
   sheet.addRow(headers);
   styleHeaderRow(sheet.getRow(1));
   const rows = analysis.registroWithoutPdf ?? analysis.people.filter((item) => item.status === "Sin PDF");
   if (!rows.length) {
-    addEmptyState(sheet, "No hay empleados de Registro sin PDF.", headers.length);
+    addEmptyState(sheet, "No hay empleados de Reg. Retrib. sin Recibo.", headers.length);
   } else {
     rows.forEach((item) => {
       const row = sheet.addRow([item.employeeNumber, item.person, item.workplace, item.position, item.category, zeroMoney(item.registroTotal), item.status, item.detail]);
@@ -674,11 +687,11 @@ function addAgrupaciones(workbook: ExcelJS.Workbook, analysis: AnalysisResult): 
   const sheet = workbook.addWorksheet("Agrupaciones");
   sheet.mergeCells("A1:S1");
   sheet.getCell("A1").value =
-    "Validacion Excel compara hoja agrupada vs Empleados recalculado. Comparacion PDF usa solo Registro periodo completo matched vs PDF agrupado; PDF sin Registro queda excluido por falta de datos maestros de agrupacion. Medias y medianas no son importes aditivos.";
+    "La validacion interna Excel se calcula sobre el Reg. Retrib. completo. Las exclusiones manuales se aplican a comparativas Recibo/matched y resultados de analisis. Medias y medianas no son importes aditivos.";
   styleNoteRow(sheet.getRow(1), 1, 19);
   const headers = [
     "Hoja",
-    "Base Registro",
+    "Base Reg. Retrib.",
     "Agrupacion",
     "Bloque",
     "Metrica",
@@ -687,10 +700,10 @@ function addAgrupaciones(workbook: ExcelJS.Workbook, analysis: AnalysisResult): 
     "Recalculado Empleados",
     "Dif. Excel",
     "Estado Excel",
-    "Registro periodo completo matched",
-    "PDF recalculado",
-    "Dif. PDF",
-    "Estado PDF",
+    "Reg. Retrib. periodo completo matched",
+    "Recibo recalculado",
+    "Dif. Recibo",
+    "Estado Recibo",
     "N personas",
     "N matched",
     "Mujeres",
@@ -762,24 +775,57 @@ function addCriterios(workbook: ExcelJS.Workbook, analysis: AnalysisResult, meta
     ["Version schema", metadata.schemaVersion ?? "", ""],
     ["Privacidad", "No se exportan NIF, IBAN, cuentas bancarias ni datos bancarios.", ""],
     ["Clave principal", "Matricula / ID RH.", ""],
-    ["PDF", "Importe comparativo calculado como suma de conceptos incluidos por mapa editable.", ""],
+    ["Recibo", "Importe comparativo calculado como suma de conceptos incluidos por mapa editable.", ""],
     ["Mapa de conceptos", "Las reglas por defecto solo incluyen codigos que existen en el Excel cargado.", ""],
     ["IA", analysis.summary.aiEnabled || metadata.aiEnabled ? `Activa (${metadata.aiModel ?? analysis.summary.aiModel ?? "modelo configurado"})` : "No activa", "No se exportan solicitudes/respuestas IA ni API keys"],
     ["Conceptos pendientes de decision", pendingConcepts.slice(0, 25).join("; ") || "Sin pendientes", pendingConcepts.length > 25 ? `${pendingConcepts.length - 25} adicionales no listados` : ""],
     ["Conceptos ignorados relevantes", ignoredConcepts.slice(0, 25).join("; ") || "Sin ignorados", ignoredConcepts.length > 25 ? `${ignoredConcepts.length - 25} adicionales no listados` : ""],
     ...analysis.criteria.map((criterion) => ["Criterio adicional", criterion, ""]),
   ].forEach((row) => sheet.addRow(row));
+  sheet.addRow([]);
+  const exclusionsTitle = sheet.addRow(["Exclusiones aplicadas"]);
+  sheet.mergeCells(exclusionsTitle.number, 1, exclusionsTitle.number, 2);
+  styleSectionTitle(exclusionsTitle.getCell(1));
+  const exclusionsHeader = sheet.addRow(["Matricula", "Motivo"]);
+  styleHeaderRow(exclusionsHeader);
+  const excludedEmployeeIds = analysis.excludedEmployeeIdsApplied ?? [];
+  if (excludedEmployeeIds.length) {
+    excludedEmployeeIds.forEach((employeeId) => {
+      sheet.addRow([employeeId, "Excluida manualmente desde Ajustes"]);
+    });
+  } else {
+    sheet.addRow(["No hay matriculas excluidas."]);
+  }
+  sheet.addRow([]);
+  const disabledTitle = sheet.addRow(["Conceptos desactivados"]);
+  sheet.mergeCells(disabledTitle.number, 1, disabledTitle.number, 4);
+  styleSectionTitle(disabledTitle.getCell(1));
+  const disabledHeader = sheet.addRow(["Concepto Recibo", "Codigo Reg. Retrib.", "Bloque", "Motivo"]);
+  styleHeaderRow(disabledHeader);
+  const disabledRules = analysis.conceptMap.filter((rule) => rule.active === false || rule.includedInComparison === false);
+  if (disabledRules.length) {
+    disabledRules.forEach((rule) => {
+      sheet.addRow([
+        rule.pdfConcept,
+        rule.registroCode,
+        rule.block,
+        "Desactivado manualmente desde Ajustes",
+      ]);
+    });
+  } else {
+    sheet.addRow(["Sin conceptos desactivados"]);
+  }
   finalizeTableSheet(sheet, {
     headerRow: 3,
-    headerRows: [1, 3],
-    widths: [32, 112, 42],
-    autoFilterToColumn: 3,
+    headerRows: [1, 3, exclusionsHeader.number, disabledHeader.number],
+    widths: [32, 112, 42, 72],
+    autoFilterToColumn: 4,
   });
 }
 
 export async function exportAnalysisToWorkbook(analysis: AnalysisResult, metadata: ExportWorkbookMetadata = {}): Promise<ExcelJS.Workbook> {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = "Comparativa Nominas Registro";
+  workbook.creator = "Comparativa Recibos Reg. Retrib.";
   workbook.created = new Date(analysis.summary.generatedAt);
   workbook.modified = new Date(metadata.exportedAt ?? Date.now());
 

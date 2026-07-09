@@ -29,11 +29,11 @@ export function FileUpload({
         <label className="block rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 transition hover:border-primary">
           <span className="flex items-center gap-2 text-sm font-semibold text-ink">
             <FolderUp className="h-4 w-4 text-primary" aria-hidden="true" />
-            Carpeta o multiples PDFs
+            Carpeta o múltiples recibos
           </span>
-          <span className="mt-1 block text-xs text-muted">Selecciona todos los recibos de nomina a comparar.</span>
+          <span className="mt-1 block text-xs text-muted">Selecciona todos los recibos a comparar.</span>
           <span className="mt-3 inline-flex min-h-10 items-center rounded-md border border-line bg-white px-3 text-sm font-semibold text-ink">
-            Seleccionar PDFs
+            Seleccionar recibos
           </span>
           <span className="ml-3 text-sm text-muted">
             {pdfFiles.length ? `${pdfFiles.length} archivo(s)` : "Ningun archivo seleccionado"}
@@ -60,7 +60,7 @@ export function FileUpload({
         <label className="block rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 transition hover:border-primary">
           <span className="flex items-center gap-2 text-sm font-semibold text-ink">
             <FileSpreadsheet className="h-4 w-4 text-primary" aria-hidden="true" />
-            Excel Registro
+            Excel Reg. Retrib.
           </span>
           <span className="mt-1 block text-xs text-muted">Usa el Registro Retributivo heredado o equivalente.</span>
           <span className="mt-3 inline-flex min-h-10 items-center rounded-md border border-line bg-white px-3 text-sm font-semibold text-ink">

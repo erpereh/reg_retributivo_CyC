@@ -23,17 +23,33 @@ const appState = {
           salaryComplementPdf: 400,
           salaryComplementDifference: -100,
           extraSalaryRegistro: 50,
-          extraSalaryPdf: 50,
-          extraSalaryDifference: 0,
+          extraSalaryPdf: 258.01,
+          extraSalaryDifference: 208.01,
           registroTotal: 1550,
-          pdfTotal: 1550,
-          totalDifference: 0,
-          pdfControlTotalDevengado: 1550,
+          pdfTotal: 1758.01,
+          totalDifference: 208.01,
+          grossSalaryDifference: 100,
+          grossSalaryComplementDifference: -100,
+          grossExtraSalaryDifference: 208.01,
+          grossTotalDifference: 208.01,
+          justifiedSalaryAmount: 0,
+          justifiedSalaryComplementAmount: 0,
+          justifiedExtraSalaryAmount: 0,
+          justifiedTotalAmount: 0,
+          adjustedSalaryDifference: 100,
+          adjustedSalaryComplementDifference: -100,
+          adjustedExtraSalaryDifference: 208.01,
+          adjustedTotalDifference: 208.01,
+          grossStatus: "Diferencia",
+          adjustedStatus: "Diferencia",
+          justifiedConceptsSummary: "",
+          justifiedConceptsCount: 0,
+          pdfControlTotalDevengado: 1758.01,
           payrollCount: 1,
           unmappedConceptsCount: 0,
-          status: "OK",
-          detail: "Detalle",
-          periods: ["Enero 2025"],
+          status: "Diferencia",
+          detail: "Teletrabajo activo",
+          periods: ["Del 1 al 31 Enero 2025", "Del 1 al 28 Febrero 2025", "Del 1 al 31 Marzo 2025", "Del 1 al 30 Abril 2025"],
           files: ["PDF_ENERO.pdf"],
         },
         {
@@ -126,6 +142,12 @@ const appState = {
           registroAmount: 0,
           pdfAmount: 208.01,
           difference: 208.01,
+          grossDifference: 208.01,
+          justifiedAmount: 0,
+          adjustedDifference: 208.01,
+          grossStatus: "Diferencia",
+          adjustedStatus: "Diferencia",
+          isJustified: false,
           status: "Diferencia",
           detail: "Diferencia de concepto",
         },
@@ -270,7 +292,7 @@ const appState = {
           payrollCount: 1,
           exampleEmployeeNumbers: ["10072"],
           suggestedBlock: "C. Salarial",
-          action: "Pendiente revisiÃ³n",
+          action: "Pendiente revisión",
           recommendedAction: "Revisar codigo Registro",
           reason: "No existe codigo exacto",
         },
@@ -324,7 +346,7 @@ describe("TablesView", () => {
     const { rerender } = render(<TablesView mode="personas" />);
 
     expect(screen.getByRole("heading", { name: "Personas" })).toBeTruthy();
-    expect(screen.getByText(/Compara por matrícula los importes del Registro frente a los importes detectados en nóminas PDF/i)).toBeTruthy();
+    expect(screen.getByText(/Compara por matrícula los importes del Reg\. Retrib\. frente a los importes detectados en recibos/i)).toBeTruthy();
     expect(screen.getByText(/Salario, Complemento Salarial y Extrasalarial/i)).toBeTruthy();
 
     rerender(<TablesView mode="conceptos" />);
@@ -333,13 +355,45 @@ describe("TablesView", () => {
 
     rerender(<TablesView mode="agrupaciones" />);
     expect(screen.getByRole("heading", { name: "Agrupaciones" })).toBeTruthy();
-    expect(screen.getByText(/Comprueba que las hojas agrupadas del Registro cuadran con los datos recalculados desde la hoja Empleados/i)).toBeTruthy();
+    expect(screen.getByText(/Comprueba que las hojas agrupadas del Reg\. Retrib\. cuadran con los datos recalculados desde la hoja Empleados/i)).toBeTruthy();
+    expect(screen.getByText(/Las agrupaciones usan importes matched del análisis\./i)).toBeTruthy();
+    expect(screen.queryByText(/ajustad/i)).toBeNull();
   });
 
   test("does not use technical implementation copy as the main table subtitle", () => {
     render(<TablesView mode="personas" />);
 
     expect(screen.queryByText(/scroll horizontal|sticky|clicar cualquier fila/i)).toBeNull();
+  });
+
+  test("shows person and concept columns without legacy adjusted or justified badges", () => {
+    const { rerender } = render(<TablesView mode="personas" />);
+
+    expect(screen.getByRole("columnheader", { name: "Total Reg. Retrib." })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Total Recibo" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Diferencia" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Estado" })).toBeTruthy();
+    expect(screen.queryByRole("columnheader", { name: "Justificado" })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "Dif. ajustada" })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "Estado ajustado" })).toBeNull();
+
+    const personRow = screen.getByText("10048").closest("tr") as HTMLTableRowElement;
+    expect(within(personRow).getByText("Diferencia")).toBeTruthy();
+    expect(within(personRow).queryByText("OK ajustado")).toBeNull();
+    expect(within(personRow).queryByText("Justificado")).toBeNull();
+
+    rerender(<TablesView mode="conceptos" />);
+
+    expect(screen.getAllByRole("columnheader", { name: "Diferencia" }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByRole("columnheader", { name: "Estado" }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByRole("columnheader", { name: "Importe justificado" })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "Dif. ajustada" })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "Estado ajustado" })).toBeNull();
+    expect(screen.getAllByRole("columnheader", { name: "Motivo" }).length).toBeGreaterThanOrEqual(1);
+
+    const teleworkRow = screen.getAllByText("Abono teletrabajo")[0]?.closest("tr") as HTMLTableRowElement;
+    expect(within(teleworkRow).getByText("Diferencia")).toBeTruthy();
+    expect(within(teleworkRow).queryByText("Justificado")).toBeNull();
   });
 
   test("opens a deterministic person detail modal from the whole clickable row", () => {
@@ -351,8 +405,24 @@ describe("TablesView", () => {
 
     expect(screen.getByRole("dialog", { name: /Detalle persona/i })).toBeTruthy();
     expect(screen.getByText(/Causa probable/i)).toBeTruthy();
+    expect(screen.getByText("Periodos")).toBeTruthy();
+    expect(screen.getAllByTestId("period-chip").map((chip) => chip.textContent)).toEqual([
+      "Del 1 al 31 Enero 2025",
+      "Del 1 al 28 Febrero 2025",
+      "Del 1 al 31 Marzo 2025",
+      "Del 1 al 30 Abril 2025",
+    ]);
+    expect(screen.queryByText(/Del 1 al 31 Enero 2025; Del 1 al 28 Febrero 2025/)).toBeNull();
     expect(screen.getByRole("button", { name: /Analizar con IA/i }).hasAttribute("disabled")).toBe(true);
     expect(screen.getByText("IA no configurada. Añade GEMINI_API_KEY en .env")).toBeTruthy();
+  });
+
+  test("keeps Personas fixed in compact density without density selector", () => {
+    render(<TablesView mode="personas" />);
+
+    expect(screen.queryByRole("button", { name: "Cómoda" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Compacta" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Ver Recibo sin Reg. Retrib." })).toBeTruthy();
   });
 
   test("shows a compact person concept table before AI with filters, ordering and expandable detail", () => {
@@ -362,16 +432,18 @@ describe("TablesView", () => {
     const conceptSection = screen.getByRole("region", { name: /Conceptos de la persona/i });
 
     expect(within(conceptSection).getByText("Conceptos de la persona")).toBeTruthy();
-    expect(within(conceptSection).getByText(/Comparativa de conceptos del Registro/i)).toBeTruthy();
+    expect(within(conceptSection).getByText(/Comparativa de conceptos del Reg\. Retrib\./i)).toBeTruthy();
     expect(within(conceptSection).queryByRole("columnheader", { name: "Persona" })).toBeNull();
     expect(within(conceptSection).queryByRole("columnheader", { name: "Matrícula" })).toBeNull();
-    expect(within(conceptSection).getByText(/Diferencia total de conceptos visibles/i)).toBeTruthy();
-    expect(within(conceptSection).getByText(/Conceptos con diferencia real/i)).toBeTruthy();
+    expect(within(conceptSection).getByText(/Diferencia visible/i)).toBeTruthy();
+    expect(within(conceptSection).getByText(/Conceptos con diferencia/i)).toBeTruthy();
+    expect(within(conceptSection).queryByText(/ajustad/i)).toBeNull();
+    expect(within(conceptSection).queryByText(/justificad/i)).toBeNull();
     expect(within(conceptSection).getByText(/Conceptos OK/i)).toBeTruthy();
 
     const content = conceptSection.textContent ?? "";
     expect(content.indexOf("Abono teletrabajo")).toBeLessThan(content.indexOf("Salario Base"));
-    expect(content.indexOf("Salario Base")).toBeLessThan(content.indexOf("Seguro Medico"));
+    expect(content).toContain("Seguro Medico");
 
     fireEvent.click(within(conceptSection).getByRole("button", { name: /OK/i }));
     expect(within(conceptSection).getByText("Antiguedad")).toBeTruthy();
@@ -412,9 +484,47 @@ describe("TablesView", () => {
     expect(content.indexOf("Complemento IT")).toBeLessThan(content.indexOf("Ajuste extrasalarial"));
   });
 
+  test("does not request an AI explanation automatically when opening a detail modal", async () => {
+    appState.value.aiStatus = { configured: true, enabled: true, model: "gemini-3.1-flash-lite" };
+    appState.value.settings = { autoExplainOnOpen: true };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          explanation: {
+            summary: "No deberia solicitarse automaticamente.",
+            probableCauses: ["Auto"],
+            registroReview: ["Registro"],
+            pdfReview: ["PDF"],
+            recommendedActions: ["Accion"],
+            confidence: "Baja",
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    render(<TablesView mode="personas" />);
+    fireEvent.click(screen.getByText("10048"));
+
+    expect(screen.getByRole("dialog", { name: /Detalle persona/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Analizar con IA/i })).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Bajo demanda, sobre datos estructurados ya calculados. No recalcula ni modifica resultados. No se envían nombres, NIF, IBAN, bancos ni documentos completos.",
+      ),
+    ).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   test("requests an AI explanation on demand without sending the person name", async () => {
     appState.value.aiStatus = { configured: true, enabled: true, model: "gemini-3.1-flash-lite" };
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
       new Response(
         JSON.stringify({
           explanation: {
@@ -428,7 +538,22 @@ describe("TablesView", () => {
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       ),
-    );
+    )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            explanation: {
+              summary: "Diferencia regenerada.",
+              probableCauses: ["Concepto regenerado."],
+              registroReview: ["Revisar Registro otra vez."],
+              pdfReview: ["Revisar PDF otra vez."],
+              recommendedActions: ["Documentar regeneracion."],
+              confidence: "Alta",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
 
     render(<TablesView mode="personas" />);
     fireEvent.click(screen.getByText("10048"));
@@ -443,9 +568,26 @@ describe("TablesView", () => {
     expect(body.payload.topConceptDifferences.map((item: { registroCode: string }) => item.registroCode)).toContain("SSP_SAL_BASE");
     expect(body.payload.relatedNotIncludedConcepts.map((item: { pdfConcept: string }) => item.pdfConcept)).toContain("Prestacion Teorica Maternidad");
     expect(screen.getByText("Causas probables")).toBeTruthy();
-    expect(screen.getByText(/revisar en Registro/i)).toBeTruthy();
-    expect(screen.getByText(/revisar en PDF/i)).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Regenerar/i })).toBeTruthy();
+    expect(screen.getByText(/revisar en Reg\. Retrib\./i)).toBeTruthy();
+    expect(screen.getByText(/revisar en Recibo/i)).toBeTruthy();
+    expect(screen.getByText("Explicación IA guardada para este análisis.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Regenerar IA/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Copiar explicación/i })).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /Detalle persona/i })).toBeNull());
+    fireEvent.click(screen.getByText("10048"));
+
+    expect(await screen.findByText("Diferencia explicada.")).toBeTruthy();
+    expect(screen.getByText("Explicación IA guardada para este análisis.")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /Regenerar IA/i }));
+    expect(await screen.findByText("Diferencia regenerada.")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getByRole("button", { name: /Copiar explicación/i }));
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("Diferencia regenerada."));
   });
 
   test("removes detail buttons and opens the concept modal from the row", () => {
@@ -565,35 +707,35 @@ describe("TablesView", () => {
     render(<TablesView mode="agrupaciones" />);
 
     expect(screen.getAllByText("Validación Excel").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Comparación PDF").length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/usa solo personas matched y excluye matrículas PDF sin Registro/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Comparación Recibo").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/usa solo personas matched y excluye matrículas Recibo sin Reg\. Retrib\./i).length).toBeGreaterThan(0);
     expect(screen.getByText("Las hojas agrupadas cuadran con Empleados.")).toBeTruthy();
     expect(screen.getByText("Hojas analizadas")).toBeTruthy();
     expect(screen.getByText("Agrupaciones calculadas")).toBeTruthy();
     expect(screen.queryByText("Filas Excel OK")).toBeNull();
     expect(screen.getByText("Filas Excel con diferencia")).toBeTruthy();
-    expect(screen.getByText("Filas PDF con diferencia")).toBeTruthy();
-    expect(screen.getByText("PDF sin Registro excluidos")).toBeTruthy();
-    expect(screen.queryByText("Dif. PDF Salario")).toBeNull();
-    expect(screen.queryByText("Dif. PDF C. Salarial")).toBeNull();
-    expect(screen.queryByText("Dif. PDF Extrasalarial")).toBeNull();
-    const maxPdfCard = screen.getByText("Mayor diferencia PDF").closest("div");
-    const affectedCard = screen.getByText("Agrupaciones PDF afectadas").closest("div");
+    expect(screen.getByText("Filas Recibo con diferencia")).toBeTruthy();
+    expect(screen.getByText("Recibo sin Reg. Retrib. excluidos")).toBeTruthy();
+    expect(screen.queryByText("Dif. Recibo Salario")).toBeNull();
+    expect(screen.queryByText("Dif. Recibo C. Salarial")).toBeNull();
+    expect(screen.queryByText("Dif. Recibo Extrasalarial")).toBeNull();
+    const maxPdfCard = screen.getByText("Mayor diferencia Recibo").closest("div");
+    const affectedCard = screen.getByText("Agrupaciones Recibo afectadas").closest("div");
     expect(maxPdfCard).toBeTruthy();
     expect(affectedCard).toBeTruthy();
     expect(within(maxPdfCard as HTMLElement).getByText("30,00 EUR")).toBeTruthy();
     expect(within(affectedCard as HTMLElement).getByText("1")).toBeTruthy();
-    expect(screen.getByRole("columnheader", { name: "Base Registro" })).toBeTruthy();
-    expect(screen.queryByRole("columnheader", { name: /PDF recalculado/i })).toBeNull();
-    expect(screen.queryByRole("columnheader", { name: /Dif. PDF/i })).toBeNull();
+    expect(screen.getByRole("columnheader", { name: "Base Reg. Retrib." })).toBeTruthy();
+    expect(screen.queryByRole("columnheader", { name: /Recibo recalculado/i })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: /Dif. Recibo/i })).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Comparación PDF" }));
+    fireEvent.click(screen.getByRole("button", { name: "Comparación Recibo" }));
 
     expect(screen.getByDisplayValue("RETRIBUCIONES (PERIODO COMPLETO)")).toBeTruthy();
-    expect(screen.getByText(/Las diferencias PDF se muestran por métrica agrupada/i)).toBeTruthy();
-    expect(screen.getByRole("columnheader", { name: "Registro periodo completo matched" })).toBeTruthy();
-    expect(screen.getByRole("columnheader", { name: "PDF recalculado" })).toBeTruthy();
-    expect(screen.getByRole("columnheader", { name: "Dif. PDF" })).toBeTruthy();
+    expect(screen.getByText(/Las diferencias Recibo se muestran por métrica agrupada/i)).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Reg. Retrib. periodo completo matched" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Recibo recalculado" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Dif. Recibo" })).toBeTruthy();
     expect(screen.queryByText("TOTAL RETRIBUCIONES NORMALIZADAS + VARIABLES")).toBeNull();
 
     const groupingCell = screen.getAllByText("Administrativo/a Técnico SACYC").find((element) => element.tagName === "TD");
@@ -602,9 +744,9 @@ describe("TablesView", () => {
 
     expect(screen.getByRole("dialog", { name: /Detalle agrupación/i })).toBeTruthy();
     expect(screen.getByText("Población Excel")).toBeTruthy();
-    expect(screen.getByText("Población matched PDF")).toBeTruthy();
+    expect(screen.getByText("Población matched Recibo")).toBeTruthy();
     expect(screen.getByText("Diferencia Excel")).toBeTruthy();
-    expect(screen.getByText("Diferencia PDF")).toBeTruthy();
+    expect(screen.getByText("Diferencia Recibo")).toBeTruthy();
     expect(screen.getAllByText("Esta diferencia corresponde a la métrica agrupada seleccionada.").length).toBeGreaterThan(0);
   });
 
@@ -639,7 +781,7 @@ describe("TablesView", () => {
     ];
 
     render(<TablesView mode="agrupaciones" />);
-    fireEvent.click(screen.getByRole("button", { name: "Comparación PDF" }));
+    fireEvent.click(screen.getByRole("button", { name: "Comparación Recibo" }));
 
     expect(screen.queryByText(/-0,00/)).toBeNull();
     expect(screen.getAllByText("0,00 EUR").length).toBeGreaterThan(0);

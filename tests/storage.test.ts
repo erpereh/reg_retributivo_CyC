@@ -23,6 +23,7 @@ const settings: AppSettings = {
   reviewThreshold: 5,
   incidentThreshold: 80,
   aiModel: "gemini-3.1-flash-lite",
+  excludedEmployeeIds: ["10074", "BC6"],
   conceptMap: [
     {
       pdfConcept: "Concepto Manual",
@@ -76,6 +77,7 @@ function sampleAnalysis(id: string, createdAt: string): StoredAnalysis {
       conceptMap: [],
       errors: [],
       criteria: [],
+      excludedEmployeeIdsApplied: [],
     },
   };
 }
@@ -130,6 +132,34 @@ describe("analysisStorage", () => {
 
     saveActiveAnalysisId(undefined);
     expect(loadActiveAnalysisId()).toBeUndefined();
+  });
+
+  test("defaults missing exclusion fields for legacy settings and analyses", async () => {
+    window.localStorage.setItem(
+      "retributivo.settings.v1",
+      JSON.stringify({
+        defaultTolerance: 2,
+        enableAIByDefault: false,
+        autoExplainOnOpen: false,
+        reviewThreshold: 5,
+        incidentThreshold: 80,
+        aiModel: "gemini-3.1-flash-lite",
+        conceptMap: [],
+      }),
+    );
+
+    expect(loadSettings().excludedEmployeeIds).toEqual([]);
+
+    const legacyLike = sampleAnalysis("legacy-like", "2026-07-03T10:00:00.000Z");
+    await saveAnalysis({
+      ...legacyLike,
+      result: {
+        ...legacyLike.result,
+        excludedEmployeeIdsApplied: undefined as never,
+      },
+    });
+
+    expect((await getAnalysis("legacy-like"))?.result.excludedEmployeeIdsApplied).toEqual([]);
   });
 
   test("saves, lists, opens, deletes and clears analysis history", async () => {

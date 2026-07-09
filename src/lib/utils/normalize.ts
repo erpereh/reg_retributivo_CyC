@@ -27,11 +27,15 @@ export function normalizeNif(value: unknown): string {
     .replace(/[^0-9A-Z]/g, "");
 }
 
-export function normalizeEmployeeNumber(value: unknown): string {
+export function normalizeEmployeeId(value: unknown): string {
   return String(value ?? "")
     .trim()
     .toUpperCase()
     .replace(/\s+/g, "");
+}
+
+export function normalizeEmployeeNumber(value: unknown): string {
+  return normalizeEmployeeId(value);
 }
 
 export function normalizeProfessionalGroup(value: unknown): string {

@@ -11,7 +11,9 @@ interface BadgeProps {
 }
 
 export function Badge({ value, className }: BadgeProps) {
-  const text = displayText(value) || "Sin dato";
+  const rawText = displayText(value);
+  const text =
+    rawText === "Sin Registro" ? "Recibo sin Reg. Retrib." : rawText === "Sin PDF" ? "Reg. Retrib. sin Recibo" : rawText || "Sin dato";
   const lower = text.toLowerCase();
   const danger = lower.includes("alta") || lower.includes("incidencia") || lower.includes("falta");
   const warning = lower.includes("media") || lower.includes("revisar");

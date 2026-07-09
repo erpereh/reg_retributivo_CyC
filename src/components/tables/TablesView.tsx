@@ -36,44 +36,35 @@ const PERSONAS_HEADERS: readonly TableHeader[] = [
   { key: "workplace", label: "Centro" },
   { key: "position", label: "Puesto" },
   { key: "category", label: "Categoría" },
-  { key: "salaryRegistro", label: "Salario Registro" },
-  { key: "salaryPdf", label: "Salario PDF" },
-  { key: "salaryDiff", label: "Dif." },
-  { key: "salaryComplementRegistro", label: "C. Salarial Registro" },
-  { key: "salaryComplementPdf", label: "C. Salarial PDF" },
-  { key: "salaryComplementDiff", label: "Dif." },
-  { key: "extraSalaryRegistro", label: "Extrasalarial Registro" },
-  { key: "extraSalaryPdf", label: "Extrasalarial PDF" },
-  { key: "extraSalaryDiff", label: "Dif." },
-  { key: "registroTotal", label: "Total Registro" },
-  { key: "pdfTotal", label: "Total PDF" },
-  { key: "totalDiff", label: "Dif. Total" },
+  { key: "registroTotal", label: "Total Reg. Retrib." },
+  { key: "pdfTotal", label: "Total Recibo" },
+  { key: "difference", label: "Diferencia" },
   { key: "status", label: "Estado" },
 ];
 
 const CONCEPTOS_HEADERS: readonly TableHeader[] = [
   { key: "employeeNumber", label: "Matrícula" },
   { key: "person", label: "Persona" },
-  { key: "cause", label: "Causa" },
   { key: "block", label: "Bloque" },
-  { key: "registroCode", label: "Código Registro" },
-  { key: "pdfConcept", label: "Concepto PDF" },
-  { key: "registroAmount", label: "Registro" },
-  { key: "pdfAmount", label: "PDF" },
+  { key: "registroCode", label: "Código Reg. Retrib." },
+  { key: "pdfConcept", label: "Concepto Recibo" },
+  { key: "registroAmount", label: "Reg. Retrib." },
+  { key: "pdfAmount", label: "Recibo" },
   { key: "difference", label: "Diferencia" },
   { key: "status", label: "Estado" },
+  { key: "reason", label: "Motivo" },
 ];
 
 const CONCEPTOS_NO_INCLUIDOS_HEADERS: readonly TableHeader[] = [
   { key: "decisionType", label: "Tipo decisión" },
   { key: "includedInComparison", label: "Incluido en cálculo" },
-  { key: "pdfConcept", label: "Concepto PDF" },
+  { key: "pdfConcept", label: "Concepto Recibo" },
   { key: "totalDetected", label: "Total detectado" },
   { key: "peopleCount", label: "Personas" },
-  { key: "payrollCount", label: "Nóminas" },
+  { key: "payrollCount", label: "Recibos" },
   { key: "exampleEmployeeNumbers", label: "Ejemplos matrículas" },
   { key: "suggestedBlock", label: "Sugerencia bloque" },
-  { key: "suggestedRegistroCode", label: "Sugerencia código Registro" },
+  { key: "suggestedRegistroCode", label: "Sugerencia código Reg. Retrib." },
   { key: "recommendedAction", label: "Acción recomendada" },
   { key: "reason", label: "Motivo" },
 ];
@@ -100,6 +91,12 @@ function rowTone(status?: string): string {
   }
 }
 
+function statusLabel(status: string): string {
+  if (status === "Sin Registro") return "Recibo sin Reg. Retrib.";
+  if (status === "Sin PDF") return "Reg. Retrib. sin Recibo";
+  return status;
+}
+
 function diffClass(value: number): string {
   if (value > 0) return "text-red-700";
   if (value < 0) return "text-blue-700";
@@ -118,15 +115,11 @@ function FiltersPanel({
   filters,
   centers,
   groups,
-  density,
-  onDensityChange,
   onChange,
 }: Readonly<{
   filters: DashboardFilters;
   centers: readonly string[];
   groups: readonly string[];
-  density: TableDensity;
-  onDensityChange: (density: TableDensity) => void;
   onChange: (filters: DashboardFilters) => void;
 }>) {
   const quick = (status: string) => onChange({ ...filters, status });
@@ -175,7 +168,7 @@ function FiltersPanel({
             <option value="">Todos</option>
             {["OK", "Revisar", "Diferencia", "Sin mapear", "Sin PDF", "Sin Registro"].map((item) => (
               <option key={item} value={item}>
-                {item}
+                {statusLabel(item)}
               </option>
             ))}
           </select>
@@ -189,7 +182,7 @@ function FiltersPanel({
           Ver pendientes
         </button>
         <button type="button" className="btn-ghost min-h-10 px-4" onClick={() => quick("Sin Registro")}>
-          Ver PDF sin Registro
+          Ver Recibo sin Reg. Retrib.
         </button>
         <button type="button" className="btn-ghost min-h-10 px-4" onClick={() => quick("OK")}>
           Ver OK
@@ -197,18 +190,6 @@ function FiltersPanel({
         <button type="button" className="btn-secondary min-h-10 px-4" onClick={() => onChange(EMPTY_FILTERS)}>
           Limpiar filtros
         </button>
-        <div className="ml-auto flex rounded-full bg-slate-100 p-1">
-          {(["comfortable", "compact"] as const).map((item) => (
-            <button
-              key={item}
-              type="button"
-              onClick={() => onDensityChange(item)}
-              className={cn("min-h-9 rounded-full px-3 text-xs font-semibold transition", density === item ? "bg-white text-ink shadow-subtle" : "text-muted")}
-            >
-              {item === "comfortable" ? "Cómoda" : "Compacta"}
-            </button>
-          ))}
-        </div>
       </div>
     </Card>
   );
@@ -244,16 +225,53 @@ function ModalField({ label, value }: Readonly<{ label: string; value?: string |
   );
 }
 
+function PeriodChips({ periods }: Readonly<{ periods: readonly string[] }>) {
+  return (
+    <div className="md:col-span-4">
+      <p className="text-xs font-semibold uppercase text-muted">Periodos</p>
+      {periods.length ? (
+        <div className="mt-2 flex max-h-24 flex-wrap gap-2 overflow-y-auto pr-1">
+          {periods.map((period) => (
+            <span
+              key={period}
+              data-testid="period-chip"
+              className="inline-flex rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs font-semibold leading-5 text-blue-900"
+            >
+              {displayText(period)}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-1 text-sm font-semibold text-ink">Sin dato</p>
+      )}
+    </div>
+  );
+}
+
 function MoneyTriplet({ label, registro, pdf, diff }: Readonly<{ label: string; registro: number; pdf: number; diff: number }>) {
   return (
     <div className="rounded-2xl border border-line bg-slate-50 p-4">
       <p className="text-sm font-semibold text-ink">{label}</p>
       <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-        <ModalField label="Registro" value={formatEuro(registro)} />
-        <ModalField label="PDF" value={formatEuro(pdf)} />
+        <ModalField label="Reg. Retrib." value={formatEuro(registro)} />
+        <ModalField label="Recibo" value={formatEuro(pdf)} />
         <ModalField label="Dif." value={formatEuro(diff)} />
       </div>
     </div>
+  );
+}
+
+function PersonSummarySection({ row }: Readonly<{ row: PersonComparisonRow }>) {
+  return (
+    <section className="mt-6 rounded-3xl border border-line bg-slate-50 p-4" aria-label="Resumen">
+      <h3 className="text-lg font-semibold text-ink">Resumen</h3>
+      <div className="mt-4 grid gap-3 md:grid-cols-4">
+        <ModalField label="Total Reg. Retrib." value={formatEuro(row.registroTotal)} />
+        <ModalField label="Total Recibo" value={formatEuro(row.pdfTotal)} />
+        <ModalField label="Diferencia" value={formatEuro(row.totalDifference)} />
+        <ModalField label="Estado" value={row.status} />
+      </div>
+    </section>
   );
 }
 
@@ -264,8 +282,8 @@ function conceptRowKey(row: ConceptComparisonRow, index: number): string {
 function conceptPriority(row: ConceptComparisonRow): number {
   if (row.status === "Diferencia") return 0;
   if (row.status === "Revisar") return 1;
-  if (["Sin mapear", "Sin PDF", "Sin Registro"].includes(row.status)) return 2;
-  if (row.status === "OK") return 3;
+  if (["Sin mapear", "Sin PDF", "Sin Registro"].includes(row.status)) return 3;
+  if (row.status === "OK") return 4;
   return 4;
 }
 
@@ -308,7 +326,7 @@ function PersonConceptsSection({
     [person.employeeNumber, unmappedConcepts],
   );
   const okCount = personConcepts.filter((row) => row.status === "OK").length;
-  const realDifferenceCount = personConcepts.filter((row) => Math.abs(row.difference) > tolerance).length;
+  const realDifferenceCount = personConcepts.filter((row) => Math.abs(row.difference) > tolerance || row.status === "Diferencia").length;
   const reviewCount = personConcepts.filter(isReviewConcept).length;
   const visibleDifference = visibleConcepts.reduce((sum, row) => sum + row.difference, 0);
   const filterOptions: Array<{ label: string; value: PersonConceptFilter }> = [
@@ -323,7 +341,7 @@ function PersonConceptsSection({
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h3 className="text-lg font-semibold text-ink">Conceptos de la persona</h3>
-          <p className="mt-1 text-sm leading-6 text-muted">Comparativa de conceptos del Registro contra los importes detectados en PDF para esta matrícula.</p>
+          <p className="mt-1 text-sm leading-6 text-muted">Comparativa de conceptos del Reg. Retrib. contra los importes detectados en recibos para esta matrícula.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           {filterOptions.map((item) => (
@@ -343,9 +361,9 @@ function PersonConceptsSection({
         {[
           ["Conceptos totales", personConcepts.length],
           ["Conceptos OK", okCount],
-          ["Conceptos con diferencia real", realDifferenceCount],
+          ["Conceptos con diferencia", realDifferenceCount],
           ["Conceptos en revisión", reviewCount],
-          ["Diferencia total de conceptos visibles", formatEuro(visibleDifference)],
+          ["Diferencia visible", formatEuro(visibleDifference)],
         ].map(([label, value]) => (
           <div key={label} className="rounded-2xl bg-slate-50 px-3 py-3">
             <p className="text-xs font-semibold uppercase text-muted">{label}</p>
@@ -356,10 +374,10 @@ function PersonConceptsSection({
 
       {personConcepts.length ? (
         <div className="mt-4 max-h-[420px] overflow-auto rounded-2xl border border-line">
-          <table className="w-full min-w-[1040px] border-separate border-spacing-0 text-left text-sm">
+          <table className="w-full min-w-[920px] border-separate border-spacing-0 text-left text-sm">
             <thead className="sticky top-0 z-20 bg-slate-100 text-muted shadow-subtle">
               <tr>
-                {["Bloque", "Código Registro", "Concepto PDF", "Registro", "PDF", "Diferencia", "Estado", "Causa"].map((header) => (
+                {["Bloque", "Código Reg. Retrib.", "Concepto Recibo", "Reg. Retrib.", "Recibo", "Diferencia", "Estado", "Motivo"].map((header) => (
                   <th key={`person-concept-${header}`} className="border-b border-line px-3 py-3 text-xs font-semibold uppercase">
                     {header}
                   </th>
@@ -395,10 +413,11 @@ function PersonConceptsSection({
                       <tr className="bg-white">
                         <td colSpan={8} className="border-b border-line/70 p-4">
                           <div className="grid gap-3 rounded-2xl bg-slate-50 p-4 md:grid-cols-4">
-                            <ModalField label="Código Registro" value={row.registroCode} />
-                            <ModalField label="Concepto PDF" value={row.pdfConcept} />
+                            <ModalField label="Código Reg. Retrib." value={row.registroCode} />
+                            <ModalField label="Concepto Recibo" value={row.pdfConcept} />
                             <ModalField label="Bloque" value={row.block} />
                             <ModalField label="Diferencia" value={formatEuro(row.difference)} />
+                            <ModalField label="Estado" value={row.status} />
                             <div className="md:col-span-2">
                               <p className="text-sm font-semibold text-ink">Causa probable: {conceptCause.label}</p>
                               <p className="mt-1 text-sm leading-6 text-muted">{displayText(conceptCause.description)}</p>
@@ -429,7 +448,7 @@ function PersonConceptsSection({
             <table className="w-full min-w-[760px] text-left text-sm">
               <thead className="bg-orange-50 text-muted">
                 <tr>
-                  {["Concepto PDF", "Total detectado", "Tipo decisión", "Motivo", "Acción recomendada"].map((header) => (
+                  {["Concepto Recibo", "Total detectado", "Tipo decisión", "Motivo", "Acción recomendada"].map((header) => (
                     <th key={`person-unmapped-${header}`} className="px-3 py-2 text-xs font-semibold uppercase">{header}</th>
                   ))}
                 </tr>
@@ -520,32 +539,35 @@ function DetailModal({
               <ModalField label="Puesto" value={state.row.position} />
               <ModalField label="Categoría" value={state.row.category} />
               <ModalField label="Estado" value={state.row.status} />
-              <ModalField label="Nóminas" value={state.row.payrollCount} />
-              <ModalField label="Periodos" value={state.row.periods.join("; ")} />
+              <ModalField label="Recibos" value={state.row.payrollCount} />
+              <PeriodChips periods={state.row.periods} />
             </>
           ) : state.kind === "concept" ? (
             <>
               <ModalField label="Matrícula" value={state.row.employeeNumber} />
               <ModalField label="Persona" value={state.row.person} />
               <ModalField label="Bloque" value={state.row.block} />
-              <ModalField label="Código Registro" value={state.row.registroCode} />
-              <ModalField label="Concepto PDF" value={state.row.pdfConcept} />
+              <ModalField label="Código Reg. Retrib." value={state.row.registroCode} />
+              <ModalField label="Concepto Recibo" value={state.row.pdfConcept} />
               <ModalField label="Estado" value={state.row.status} />
+              <ModalField label="Motivo" value={state.row.detail} />
               <ModalField label="Regla usada" value={state.row.detail} />
             </>
           ) : (
             <>
-              <ModalField label="Concepto PDF" value={state.row.pdfConcept} />
+              <ModalField label="Concepto Recibo" value={state.row.pdfConcept} />
               <ModalField label="Total detectado" value={formatEuro(state.row.totalDetected)} />
               <ModalField label="Personas" value={state.row.peopleCount} />
-              <ModalField label="Nóminas" value={state.row.payrollCount} />
+              <ModalField label="Recibos" value={state.row.payrollCount} />
               <ModalField label="Ejemplos matrículas" value={state.row.exampleEmployeeNumbers.join("; ")} />
               <ModalField label="Tipo decisión" value={state.row.decisionType} />
               <ModalField label="Sugerencia bloque" value={state.row.suggestedBlock} />
-              <ModalField label="Sugerencia código Registro" value={state.row.suggestedRegistroCode} />
+              <ModalField label="Sugerencia código Reg. Retrib." value={state.row.suggestedRegistroCode} />
             </>
           )}
         </div>
+
+        {state.kind === "person" ? <PersonSummarySection row={state.row} /> : null}
 
         {state.kind === "person" ? (
           <div className="mt-6 grid gap-3 md:grid-cols-2">
@@ -561,7 +583,9 @@ function DetailModal({
         ) : null}
 
         {state.kind === "person" ? (
-          <PersonConceptsSection person={state.row} concepts={concepts} unmappedConcepts={unmappedConcepts} tolerance={tolerance} />
+          <>
+            <PersonConceptsSection person={state.row} concepts={concepts} unmappedConcepts={unmappedConcepts} tolerance={tolerance} />
+          </>
         ) : null}
 
         <div className="mt-6 grid gap-4 md:grid-cols-2">
@@ -607,10 +631,10 @@ function PersonasTable({ density, onOpen }: Readonly<{ density: TableDensity; on
 
   return (
     <div className="space-y-3">
-      <TableSummary visible={rows.length} total={allRows.length} difference={totalDifference} extra={`PDF sin Registro visible: ${formatEuro(pdfWithoutRegistro)}`} />
+      <TableSummary visible={rows.length} total={allRows.length} difference={totalDifference} extra={`Recibo sin Reg. Retrib. visible: ${formatEuro(pdfWithoutRegistro)}`} />
       <Card className="overflow-hidden p-0">
         <div className="max-h-[70dvh] overflow-auto">
-          <table className="w-full min-w-[1780px] border-separate border-spacing-0 text-left text-sm">
+          <table className="w-full min-w-[1320px] border-separate border-spacing-0 text-left text-sm">
             <thead className="sticky top-0 z-20 bg-slate-100 text-muted shadow-subtle">
               <tr>
                 {PERSONAS_HEADERS.map((header, index) => (
@@ -648,15 +672,6 @@ function PersonasTable({ density, onOpen }: Readonly<{ density: TableDensity; on
                     <td className={cn("border-b border-line/70", cellPadding(density))}>{displayText(row.workplace)}</td>
                     <td className={cn("border-b border-line/70", cellPadding(density))}>{displayText(row.position)}</td>
                     <td className={cn("border-b border-line/70", cellPadding(density))}>{displayText(row.category)}</td>
-                    <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density))}>{formatEuro(row.salaryRegistro)}</td>
-                    <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density))}>{formatEuro(row.salaryPdf)}</td>
-                    <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density), diffClass(row.salaryDifference))}>{formatEuro(row.salaryDifference)}</td>
-                    <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density))}>{formatEuro(row.salaryComplementRegistro)}</td>
-                    <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density))}>{formatEuro(row.salaryComplementPdf)}</td>
-                    <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density), diffClass(row.salaryComplementDifference))}>{formatEuro(row.salaryComplementDifference)}</td>
-                    <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density))}>{formatEuro(row.extraSalaryRegistro)}</td>
-                    <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density))}>{formatEuro(row.extraSalaryPdf)}</td>
-                    <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density), diffClass(row.extraSalaryDifference))}>{formatEuro(row.extraSalaryDifference)}</td>
                     <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density))}>{formatEuro(row.registroTotal)}</td>
                     <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density))}>{formatEuro(row.pdfTotal)}</td>
                     <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density), diffClass(row.totalDifference))}>{formatEuro(row.totalDifference)}</td>
@@ -728,7 +743,6 @@ function ConceptosTable({ density, onOpen }: Readonly<{ density: TableDensity; o
                   >
                     <td className={cn(stickyFirstColumn(density), "border-b border-line/70 font-mono")}>{displayText(row.employeeNumber)}</td>
                     <td className={cn("min-w-[220px] border-b border-line/70 font-semibold", cellPadding(density))}>{displayText(row.person)}</td>
-                    <td className={cn("border-b border-line/70", cellPadding(density))}><CauseBadge cause={cause} /></td>
                     <td className={cn("border-b border-line/70", cellPadding(density))}>{displayText(row.block)}</td>
                     <td className={cn("border-b border-line/70 font-mono", cellPadding(density))}>{displayText(row.registroCode)}</td>
                     <td className={cn("max-w-[260px] truncate border-b border-line/70", cellPadding(density))}>{displayText(row.pdfConcept)}</td>
@@ -736,6 +750,9 @@ function ConceptosTable({ density, onOpen }: Readonly<{ density: TableDensity; o
                     <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density))}>{formatEuro(row.pdfAmount)}</td>
                     <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density), diffClass(row.difference))}>{formatEuro(row.difference)}</td>
                     <td className={cn("border-b border-line/70", cellPadding(density))}><Badge value={row.status} /></td>
+                    <td className={cn("max-w-[320px] border-b border-line/70", cellPadding(density))}>
+                      {displayText(row.detail || cause.label)}
+                    </td>
                   </tr>
                 );
               })}
@@ -788,11 +805,6 @@ function AgrupacionesTable() {
   return <AgrupacionesView />;
 }
 
-function loadDensity(): TableDensity {
-  if (typeof window === "undefined") return "comfortable";
-  return window.localStorage.getItem("retributivo-table-density") === "compact" ? "compact" : "comfortable";
-}
-
 function viewTitle(mode: Extract<AppView, "personas" | "conceptos" | "agrupaciones">): string {
   if (mode === "personas") return "Personas";
   if (mode === "conceptos") return "Conceptos";
@@ -801,32 +813,27 @@ function viewTitle(mode: Extract<AppView, "personas" | "conceptos" | "agrupacion
 
 function viewSubtitle(mode: Extract<AppView, "personas" | "conceptos" | "agrupaciones">): string {
   if (mode === "personas") {
-    return "Compara por matrícula los importes del Registro frente a los importes detectados en nóminas PDF, separados por Salario, Complemento Salarial y Extrasalarial.";
+    return "Compara por matrícula los importes del Reg. Retrib. frente a los importes detectados en recibos, separados por Salario, Complemento Salarial y Extrasalarial.";
   }
   if (mode === "conceptos") {
     return "Revisa el detalle concepto a concepto para localizar qué partidas cuadran, cuáles generan diferencias y cuáles requieren revisión.";
   }
-  return "Comprueba que las hojas agrupadas del Registro cuadran con los datos recalculados desde la hoja Empleados.";
+  return "Comprueba que las hojas agrupadas del Reg. Retrib. cuadran con los datos recalculados desde la hoja Empleados. Las agrupaciones usan importes matched del análisis.";
 }
 
 export function TablesView({ mode }: Readonly<{ mode: Extract<AppView, "personas" | "conceptos" | "agrupaciones"> }>) {
   const { result, filters, setFilters } = useAppState();
-  const [density, setDensity] = useState<TableDensity>(() => loadDensity());
+  const density: TableDensity = "compact";
   const [modal, setModal] = useState<DetailModalState | undefined>();
   const people = result?.people ?? [];
   const centers = unique(people.map((item) => item.workplace));
   const groups = unique(people.flatMap((item) => [item.position, item.category]));
 
-  const updateDensity = (next: TableDensity) => {
-    setDensity(next);
-    window.localStorage.setItem("retributivo-table-density", next);
-  };
-
   if (!result) {
     return (
       <div className="space-y-6">
         <SectionHeader title={viewTitle(mode)} subtitle={viewSubtitle(mode)} />
-        <EmptyState icon={Table2} title="No hay análisis activo" description="Carga el Registro Retributivo y las nóminas PDF para generar una comparativa antes de revisar esta sección." />
+        <EmptyState icon={Table2} title="No hay análisis activo" description="Carga el Registro Retributivo y los recibos para generar una comparativa antes de revisar esta sección." />
       </div>
     );
   }
@@ -835,7 +842,7 @@ export function TablesView({ mode }: Readonly<{ mode: Extract<AppView, "personas
     <div className="space-y-6">
       <SectionHeader title={viewTitle(mode)} subtitle={viewSubtitle(mode)} />
       {mode !== "agrupaciones" ? (
-        <FiltersPanel filters={filters} centers={centers} groups={groups} density={density} onDensityChange={updateDensity} onChange={setFilters} />
+        <FiltersPanel filters={filters} centers={centers} groups={groups} onChange={setFilters} />
       ) : null}
       {mode === "personas" ? (
         <PersonasTable density={density} onOpen={setModal} />

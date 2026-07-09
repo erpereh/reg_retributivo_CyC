@@ -52,17 +52,17 @@ function HistoryCard({
                 <p className="max-w-[420px] truncate text-sm text-muted">{displayText(analysis.registroFileName)}</p>
               </div>
               {active ? <Badge value="Análisis activo" /> : null}
-              <Badge value={analysis.config.enableAI ? "IA activada" : "IA desactivada"} />
+              <Badge value="IA bajo demanda" />
             </div>
 
             <dl className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
               {[
-                ["PDFs", analysis.pdfCount],
+                ["Recibos", analysis.pdfCount],
                 ["Personas", summary?.uniquePeople ?? 0],
                 ["Con diferencias", summary?.peopleWithDifferences ?? 0],
                 ["Pendientes", summary?.conceptsPendingReview ?? 0],
                 ["Ignorados", summary?.conceptsIgnored ?? 0],
-                ["Dif. matched", formatEuro(summary?.matchedTotalDifference ?? summary?.totalGlobalDifference ?? 0)],
+                ["Diferencia", formatEuro(summary?.matchedTotalDifference ?? summary?.totalGlobalDifference ?? 0)],
               ].map(([label, value]) => (
                 <div key={label as string} className="rounded-2xl bg-slate-50 px-3 py-2">
                   <dt className="text-[11px] font-semibold uppercase text-muted">{label as string}</dt>
@@ -122,11 +122,11 @@ export function HistoryView() {
         <EmptyState
           icon={History}
           title="No hay análisis guardados todavía"
-          description="Los análisis completados aparecerán aquí para abrirlos, exportarlos o eliminarlos sin conservar PDFs ni archivos originales."
+          description="Los análisis completados aparecerán aquí para abrirlos, exportarlos o eliminarlos sin conservar recibos ni archivos originales."
           action={
             <span className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-4 py-2 text-sm font-semibold text-primary">
               <FileText className="size-4" aria-hidden="true" />
-              Analiza PDFs para crear el primer registro
+              Analiza recibos para crear el primer análisis
             </span>
           }
         />

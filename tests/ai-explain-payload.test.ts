@@ -106,6 +106,7 @@ describe("AI explain payload builders", () => {
     const serialized = JSON.stringify(payload);
 
     expect(serialized).not.toContain("Persona Privada");
+    expect(serialized).not.toMatch(/justified|adjusted|grossStatus|adjustedStatus|Importe justificado|Dif\. ajustada|Estado ajustado/i);
     expect(payload.employeeNumber).toBe("10048");
     expect(payload.workplace).toBe("Bilbao");
     expect(payload.position).toBe("Administracion");

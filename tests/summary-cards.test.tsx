@@ -17,6 +17,14 @@ describe("dashboard summary cards", () => {
       totalSalaryComplementDifference: 0,
       totalExtraSalaryDifference: 0,
       totalGlobalDifference: 0,
+      peopleWithGrossDifferences: 2,
+      peopleWithAdjustedDifferences: 1,
+      matchedGrossTotalDifference: 416.1,
+      matchedJustifiedTotalAmount: 416,
+      matchedAdjustedTotalDifference: 0.1,
+      peopleOkAdjusted: 1,
+      conceptsJustifiedActive: 1,
+      conceptsJustifiedApplied: 2,
       conceptsUnmapped: 0,
       conceptsNotIncluded: 37,
       conceptsIgnored: 35,
@@ -52,16 +60,22 @@ describe("dashboard summary cards", () => {
     expect(screen.queryByText("PDFs analizados")).toBeNull();
     expect(screen.queryByText("Conceptos sin mapear")).toBeNull();
     expect(screen.getByText("Conceptos pendientes de revisión")).toBeTruthy();
-    expect(screen.getByText("Conceptos ignorados")).toBeTruthy();
+    expect(screen.getByText("Personas analizadas")).toBeTruthy();
+    expect(screen.getByText("Personas con diferencia")).toBeTruthy();
+    expect(screen.getByText("Diferencia total matched")).toBeTruthy();
+    expect(screen.getByText("Conceptos desactivados")).toBeTruthy();
+    expect(screen.getByText("Reg. Retrib. sin Recibo")).toBeTruthy();
+    expect(screen.queryByText(/justificad/i)).toBeNull();
+    expect(screen.queryByText(/ajustad/i)).toBeNull();
     expect(screen.queryByText("Conceptos no incluidos")).toBeNull();
     expect(screen.getByText("Conceptos sin mapear reales")).toBeTruthy();
     expect(screen.getByText("Importe pendiente de decisión")).toBeTruthy();
-    expect(screen.getByText("Importe PDF pendiente de decisión, no incluido en el cálculo principal")).toBeTruthy();
+    expect(screen.getByText("Importe Recibo pendiente de decisión, no incluido en el cálculo principal")).toBeTruthy();
     expect(screen.getByText(/requieren decisión/i)).toBeTruthy();
-    expect(screen.getByText(/excluidos correctamente/i)).toBeTruthy();
+    expect(screen.getByText(/Reglas configuradas fuera del análisis/i)).toBeTruthy();
     expect(screen.getByText(/problema real de mapeo/i)).toBeTruthy();
     expect(screen.getByText("Cuadre interno Excel")).toBeTruthy();
     expect(screen.getByText("70 / 70 OK")).toBeTruthy();
-    expect(screen.getByText(/No compara contra PDFs/i)).toBeTruthy();
+    expect(screen.getByText(/No compara contra recibos/i)).toBeTruthy();
   });
 });

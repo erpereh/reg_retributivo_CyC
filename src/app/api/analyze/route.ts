@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getGeminiModel, isGeminiEnabled } from "@/lib/ai/geminiClient";
+import { getGeminiModel } from "@/lib/ai/geminiClient";
 import { compareAnalysis } from "@/lib/compare/comparePeople";
 import { buildDefaultConceptMap, mergeConceptMap, validateConceptMapForCodes } from "@/lib/compare/conceptMapping";
 import { DEFAULT_INCIDENT_THRESHOLD, DEFAULT_REVIEW_THRESHOLD } from "@/lib/compare/salaryDiff";
@@ -9,6 +9,7 @@ import { parseRegistroRetributivo } from "@/lib/parsers/registroRetributivoParse
 import type { AnalysisError, AnalysisResult, PayrollRecord } from "@/lib/types";
 import type { ConceptMappingRule } from "@/lib/types";
 import { validationError } from "@/lib/utils/fileValidation";
+import { normalizeEmployeeId } from "@/lib/utils/normalize";
 
 export const runtime = "nodejs";
 
@@ -33,6 +34,21 @@ function parseConceptMap(value: FormDataEntryValue | null): ConceptMappingRule[]
   }
 }
 
+function parseExcludedEmployeeIds(value: FormDataEntryValue | null): string[] {
+  if (typeof value !== "string" || !value.trim()) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return [...new Set(parsed.map(normalizeEmployeeId).filter(Boolean))];
+  } catch {
+    return [];
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
@@ -41,9 +57,9 @@ export async function POST(request: Request) {
     const tolerance = finiteNumber(formData.get("tolerance"), 1);
     const reviewThreshold = finiteNumber(formData.get("reviewThreshold"), DEFAULT_REVIEW_THRESHOLD);
     const incidentThreshold = finiteNumber(formData.get("incidentThreshold"), DEFAULT_INCIDENT_THRESHOLD);
-    const requestedAI = formData.get("enableAI") !== "false";
     const aiModel = getGeminiModel();
-    const enableAI = requestedAI && isGeminiEnabled();
+    const enableAI = false;
+    const excludedEmployeeIds = parseExcludedEmployeeIds(formData.get("excludedEmployeeIds"));
     const errors: AnalysisError[] = [];
 
     if (!(registro instanceof File)) {
@@ -92,6 +108,7 @@ export async function POST(request: Request) {
       incidentThreshold,
       conceptMap,
       internalExcelChecks: registroParsed.internalChecks,
+      excludedEmployeeIds,
     });
     const enrichedGroupings = enrichRegistroGroupingsWithPdf(
       groupingResult.rows,

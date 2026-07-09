@@ -21,13 +21,15 @@ function formatDate(value?: string): string {
 }
 
 export function DashboardView() {
-  const { activeAnalysis, result } = useAppState();
+  const { activeAnalysis, result, aiStatus } = useAppState();
+  const aiBadge = aiStatus?.configured && aiStatus.enabled ? "IA disponible" : "IA no configurada";
+  const excludedCount = result?.excludedEmployeeIdsApplied?.length ?? 0;
 
   return (
     <div className="space-y-6">
       <SectionHeader
-        title="Comparativa Nóminas vs Registro Retributivo"
-        subtitle="Resumen del análisis retributivo: diferencias matched, conceptos pendientes, PDF sin Registro y estado general del cuadre."
+        title="Comparativa Recibos vs Registro Retributivo"
+        subtitle="Resumen del análisis retributivo: diferencias matched, conceptos pendientes, Recibo sin Reg. Retrib. y estado general del cuadre."
         actions={
           activeAnalysis ? (
             <Card className="flex items-center gap-3 rounded-full px-4 py-3">
@@ -38,12 +40,17 @@ export function DashboardView() {
                 <p className="text-xs font-semibold uppercase text-muted">Análisis activo</p>
                 <p className="text-sm font-semibold text-ink">{formatDate(activeAnalysis.createdAt)}</p>
               </div>
-              <Badge value={activeAnalysis.config.enableAI ? "IA activa" : "IA desactivada"} />
+              <Badge value={aiBadge} />
             </Card>
           ) : null
         }
       />
       <UploadPanel />
+      {excludedCount ? (
+        <p className="inline-flex rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-muted">
+          Exclusiones aplicadas: {excludedCount} matrículas
+        </p>
+      ) : null}
       <SummaryCards summary={result?.summary} internalExcelChecks={result?.internalExcelChecks} />
       <ChartsPanel result={result} />
     </div>

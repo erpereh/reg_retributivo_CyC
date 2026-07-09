@@ -1,7 +1,7 @@
 "use client";
 
-import { BrainCircuit, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BrainCircuit, Copy, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAppState } from "@/components/app/AppState";
 import {
   clearAiExplanationCache,
@@ -43,12 +43,11 @@ function SectionList({ title, items }: Readonly<{ title: string; items: readonly
 }
 
 export function AiExplanationPanel({ type, payload }: AiExplanationPanelProps) {
-  const { activeAnalysis, aiStatus, settings } = useAppState();
+  const { activeAnalysis, aiStatus } = useAppState();
   const [explanation, setExplanation] = useState<AiExplanation | undefined>();
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | undefined>();
   const [cacheHit, setCacheHit] = useState(false);
-  const autoRequestedKey = useRef<string | undefined>(undefined);
   const analysisId = activeAnalysis?.id;
   const disabledReason = !aiStatus?.configured || !aiStatus.enabled ? AI_NOT_CONFIGURED_MESSAGE : undefined;
   const cacheKey = useMemo(() => createAiExplanationCacheKey(type, payload, analysisId), [analysisId, payload, type]);
@@ -86,7 +85,7 @@ export function AiExplanationPanel({ type, payload }: AiExplanationPanelProps) {
         const normalized = normalizeAiExplanation(body.explanation);
         writeCachedAiExplanation(type, payload, normalized, analysisId);
         setExplanation(normalized);
-        setCacheHit(false);
+        setCacheHit(true);
       } catch (error) {
         if (process.env.NODE_ENV !== "production") {
           console.warn("[ai-explain] Explanation request failed", error);
@@ -100,19 +99,27 @@ export function AiExplanationPanel({ type, payload }: AiExplanationPanelProps) {
   );
 
   useEffect(() => {
-    setExplanation(undefined);
+    const cached = readCachedAiExplanation(type, payload, analysisId);
+    setExplanation(cached);
     setErrorMessage(undefined);
-    setCacheHit(false);
-  }, [cacheKey]);
+    setCacheHit(Boolean(cached));
+  }, [analysisId, cacheKey, payload, type]);
 
-  useEffect(() => {
-    if (!settings.autoExplainOnOpen || disabledReason || autoRequestedKey.current === cacheKey) {
+  const copyExplanation = useCallback(() => {
+    if (!explanation) {
       return;
     }
 
-    autoRequestedKey.current = cacheKey;
-    void requestExplanation(false);
-  }, [cacheKey, disabledReason, requestExplanation, settings.autoExplainOnOpen]);
+    const text = [
+      `Resumen: ${explanation.summary}`,
+      `Causas probables: ${explanation.probableCauses.join("; ")}`,
+      `Revisar en Reg. Retrib.: ${explanation.registroReview.join("; ")}`,
+      `Revisar en Recibo: ${explanation.pdfReview.join("; ")}`,
+      `Acciones recomendadas: ${explanation.recommendedActions.join("; ")}`,
+      `Confianza: ${explanation.confidence}`,
+    ].join("\n");
+    void navigator.clipboard?.writeText(text);
+  }, [explanation]);
 
   return (
     <section className="mt-6 rounded-3xl border border-blue-100 bg-blue-50/60 p-4 sm:p-5" aria-label="Explicación IA">
@@ -124,22 +131,30 @@ export function AiExplanationPanel({ type, payload }: AiExplanationPanelProps) {
           <div>
             <h3 className="text-base font-semibold text-ink">Explicación IA</h3>
             <p className="mt-1 text-sm leading-6 text-muted">
-              Bajo demanda, sobre datos estructurados ya calculados. No recalcula ni modifica resultados.
+              Bajo demanda, sobre datos estructurados ya calculados. No recalcula ni modifica resultados. No se envían nombres, NIF, IBAN, bancos ni documentos completos.
             </p>
             {disabledReason ? <p className="mt-2 text-sm font-semibold text-orange-700">{disabledReason}</p> : null}
-            {cacheHit ? <p className="mt-2 text-xs font-semibold uppercase text-primary">Respuesta recuperada de caché local</p> : null}
+            {cacheHit ? <p className="mt-2 text-xs font-semibold uppercase text-primary">Explicación IA guardada para este análisis.</p> : null}
           </div>
         </div>
-        <button
-          type="button"
-          className={cn(explanation ? "btn-secondary" : "btn-primary", "shrink-0")}
-          disabled={Boolean(disabledReason) || loading}
-          title={disabledReason}
-          onClick={() => void requestExplanation(Boolean(explanation))}
-        >
-          {explanation ? <RefreshCw className="size-4" aria-hidden="true" /> : <BrainCircuit className="size-4" aria-hidden="true" />}
-          {loading ? "Analizando..." : explanation ? "Regenerar" : "Analizar con IA"}
-        </button>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <button
+            type="button"
+            className={cn(explanation ? "btn-secondary" : "btn-primary")}
+            disabled={Boolean(disabledReason) || loading}
+            title={disabledReason}
+            onClick={() => void requestExplanation(Boolean(explanation))}
+          >
+            {explanation ? <RefreshCw className="size-4" aria-hidden="true" /> : <BrainCircuit className="size-4" aria-hidden="true" />}
+            {loading ? "Analizando..." : explanation ? "Regenerar IA" : "Analizar con IA"}
+          </button>
+          {explanation ? (
+            <button type="button" className="btn-secondary" onClick={copyExplanation}>
+              <Copy className="size-4" aria-hidden="true" />
+              Copiar explicación
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {errorMessage ? (
@@ -161,8 +176,8 @@ export function AiExplanationPanel({ type, payload }: AiExplanationPanelProps) {
             <p className="mt-2 text-sm leading-6 text-muted">{explanation.summary}</p>
           </div>
           <SectionList title="Causas probables" items={explanation.probableCauses} />
-          <SectionList title="Qué revisar en Registro" items={explanation.registroReview} />
-          <SectionList title="Qué revisar en PDF/Nómina" items={explanation.pdfReview} />
+          <SectionList title="Qué revisar en Reg. Retrib." items={explanation.registroReview} />
+          <SectionList title="Qué revisar en Recibo" items={explanation.pdfReview} />
           <SectionList title="Acciones recomendadas" items={explanation.recommendedActions} />
           <div className="rounded-2xl bg-white p-4 lg:col-span-2">
             <p className="text-sm font-semibold text-ink">Nivel de confianza</p>

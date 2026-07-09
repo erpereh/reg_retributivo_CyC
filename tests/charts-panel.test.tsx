@@ -120,15 +120,17 @@ describe("ChartsPanel", () => {
 
     expect(screen.getAllByTestId("professional-chart-card")).toHaveLength(4);
     expect(screen.queryByText(/Conceptos no incluidos por tipo/i)).toBeNull();
-    expect(screen.queryByText(/PDF sin Registro por importe/i)).toBeNull();
+    expect(screen.queryByText(/Recibo sin Reg\. Retrib\. por importe/i)).toBeNull();
   });
 
-  test("keeps matched, pending and PDF without Registro visually separated", () => {
+  test("keeps matched, pending and receipt without Reg. Retrib. visually separated", () => {
     render(<ChartsPanel result={result} />);
 
-    expect(screen.getByText("Dif. matched")).toBeTruthy();
+    expect(screen.getByText("Diferencia total matched")).toBeTruthy();
     expect(screen.getByText("Pendiente decisión")).toBeTruthy();
-    expect(screen.getByText("PDF sin Registro")).toBeTruthy();
+    expect(screen.getByText("Recibo sin Reg. Retrib.")).toBeTruthy();
+    expect(screen.queryByText(/justificad/i)).toBeNull();
+    expect(screen.queryByText(/ajustad/i)).toBeNull();
     expect(screen.getAllByText(/No se suman/i).length).toBeGreaterThan(0);
   });
 });

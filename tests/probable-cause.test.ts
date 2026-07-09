@@ -84,7 +84,7 @@ describe("probable deterministic cause", () => {
   });
 
   test("labels no-registro, pending concept, tolerance and fallback cases", () => {
-    expect(describePersonCause(person({ status: "Sin Registro" }), 1).label).toBe("PDF sin Registro");
+    expect(describePersonCause(person({ status: "Sin Registro" }), 1).label).toBe("Recibo sin Reg. Retrib.");
     expect(describePersonCause(person({ unmappedConceptsCount: 2, totalDifference: 50 }), 1).label).toBe("Concepto pendiente");
     expect(describePersonCause(person({ totalDifference: 0.5 }), 1).label).toBe("Redondeo");
     expect(describePersonCause(person({ totalDifference: 50 }), 1).label).toBe("Sin causa clara");

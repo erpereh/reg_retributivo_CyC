@@ -90,7 +90,14 @@ export function buildConceptExplainPayload(row: ConceptComparisonRow, cause: Pro
     registroCode: row.registroCode,
     status: row.status,
     detail: clean(row.detail),
-    amounts: [{ label: "Concepto", registro: row.registroAmount, pdf: row.pdfAmount, difference: row.difference }],
+    amounts: [
+      {
+        label: "Concepto",
+        registro: row.registroAmount,
+        pdf: row.pdfAmount,
+        difference: row.difference,
+      },
+    ],
     deterministicCause: causeFrom(cause),
   };
 }

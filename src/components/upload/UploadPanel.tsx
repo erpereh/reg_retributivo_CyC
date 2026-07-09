@@ -5,7 +5,6 @@ import { motion, useReducedMotion } from "motion/react";
 import { useState, type DragEvent, type ReactNode } from "react";
 import { useAppState } from "@/components/app/AppState";
 import { Card } from "@/components/common/Card";
-import { Toggle } from "@/components/common/Toggle";
 import { cn } from "@/lib/utils/classNames";
 
 function fileSummary(files: readonly File[], empty: string): string {
@@ -17,7 +16,7 @@ function fileSummary(files: readonly File[], empty: string): string {
     return files[0].name;
   }
 
-  return `${files.length} PDFs seleccionados`;
+  return `${files.length} recibos seleccionados`;
 }
 
 function DropCard({
@@ -81,19 +80,17 @@ export function UploadPanel() {
     updateSettings,
     analyze,
     status,
-    aiStatus,
   } = useAppState();
   const reduceMotion = useReducedMotion();
   const disabled = analyzing;
   const canAnalyze = pdfFiles.length > 0 && Boolean(registroFile) && !analyzing;
-  const missingReason = !pdfFiles.length ? "Faltan PDFs de nomina." : !registroFile ? "Falta el Excel Registro." : "Listo para analizar.";
-  const aiLabel = aiStatus?.configured ? (settings.enableAIByDefault ? "IA activa" : "IA desactivada") : "IA sin API";
+  const missingReason = !pdfFiles.length ? "Faltan recibos." : !registroFile ? "Falta el Excel Reg. Retrib." : "Listo para analizar.";
 
   return (
     <Card className="p-5 sm:p-6">
       <div className="grid gap-5 xl:grid-cols-[1.1fr_1fr_340px]">
         <DropCard
-          title="Nóminas PDF"
+          title="Recibos"
           description="Arrastra los recibos o selecciona archivos/carpeta."
           icon={<FolderUp className="h-5 w-5" aria-hidden="true" />}
           active={pdfFiles.length > 0}
@@ -104,7 +101,7 @@ export function UploadPanel() {
         >
           <div className="flex flex-wrap gap-2">
             <label className="btn-secondary cursor-pointer">
-              Seleccionar PDFs
+              Seleccionar recibos
               <input
                 type="file"
                 multiple
@@ -133,12 +130,12 @@ export function UploadPanel() {
             animate={{ opacity: 1, y: 0 }}
             className="mt-4 truncate text-sm font-medium text-ink"
           >
-            {fileSummary(pdfFiles, "Ningún PDF seleccionado")}
+            {fileSummary(pdfFiles, "Ningún recibo seleccionado")}
           </motion.p>
         </DropCard>
 
         <DropCard
-          title="Excel Registro"
+          title="Excel Reg. Retrib."
           description="Sube el Registro Retributivo heredado o equivalente."
           icon={<FileSpreadsheet className="h-5 w-5" aria-hidden="true" />}
           active={Boolean(registroFile)}
@@ -193,23 +190,12 @@ export function UploadPanel() {
             />
           </label>
 
-          <div className="mt-5 rounded-2xl bg-white p-4 shadow-subtle">
-            <Toggle
-              checked={settings.enableAIByDefault}
-              onChange={(enableAIByDefault) => updateSettings({ enableAIByDefault })}
-              label="Usar IA en observaciones"
-              description="Gemini solo redacta observaciones si hay API key."
-              disabled={disabled}
-            />
-            <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-muted">{aiLabel}</p>
-          </div>
-
           <button type="button" onClick={analyze} disabled={!canAnalyze} className="btn-primary mt-5 w-full">
             {analyzing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <FileArchive className="h-4 w-4" aria-hidden="true" />}
             {analyzing ? "Analizando..." : "Analizar"}
           </button>
           <p className={cn("mt-3 text-sm leading-5 text-muted", analyzing && "animate-pulse")} aria-live="polite">
-            {analyzing ? "Analizando nóminas..." : canAnalyze ? status : missingReason}
+            {analyzing ? "Analizando recibos..." : canAnalyze ? status : missingReason}
           </p>
         </div>
       </div>

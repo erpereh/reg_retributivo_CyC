@@ -32,6 +32,7 @@ export interface AnalysisConfig {
   readonly aiModel: string;
   readonly thresholds: AnalysisThresholds;
   readonly conceptMap?: readonly ConceptMappingRule[];
+  readonly excludedEmployeeIds?: readonly string[];
 }
 
 export interface MoneyByBlock {
@@ -199,6 +200,13 @@ export interface ConceptComparisonRow {
   readonly difference: number;
   readonly status: AnalysisStatus;
   readonly detail: string;
+  readonly grossDifference?: number;
+  readonly justifiedAmount?: number;
+  readonly adjustedDifference?: number;
+  readonly grossStatus?: AnalysisStatus;
+  readonly adjustedStatus?: AnalysisStatus;
+  readonly isJustified?: boolean;
+  readonly justificationReason?: string;
 }
 
 export interface UnmappedConceptRow {
@@ -242,6 +250,22 @@ export interface PersonComparisonRow {
   readonly registroTotal: number;
   readonly pdfTotal: number;
   readonly totalDifference: number;
+  readonly grossSalaryDifference?: number;
+  readonly grossSalaryComplementDifference?: number;
+  readonly grossExtraSalaryDifference?: number;
+  readonly grossTotalDifference?: number;
+  readonly justifiedSalaryAmount?: number;
+  readonly justifiedSalaryComplementAmount?: number;
+  readonly justifiedExtraSalaryAmount?: number;
+  readonly justifiedTotalAmount?: number;
+  readonly adjustedSalaryDifference?: number;
+  readonly adjustedSalaryComplementDifference?: number;
+  readonly adjustedExtraSalaryDifference?: number;
+  readonly adjustedTotalDifference?: number;
+  readonly grossStatus?: AnalysisStatus;
+  readonly adjustedStatus?: AnalysisStatus;
+  readonly justifiedConceptsSummary?: string;
+  readonly justifiedConceptsCount?: number;
   readonly pdfControlTotalDevengado: number;
   readonly payrollCount: number;
   readonly unmappedConceptsCount: number;
@@ -307,6 +331,23 @@ export interface AnalysisSummary {
   readonly totalSalaryComplementDifference: number;
   readonly totalExtraSalaryDifference: number;
   readonly totalGlobalDifference: number;
+  readonly peopleWithGrossDifferences?: number;
+  readonly peopleWithAdjustedDifferences?: number;
+  readonly matchedGrossTotalDifference?: number;
+  readonly matchedGrossSalaryDifference?: number;
+  readonly matchedGrossSalaryComplementDifference?: number;
+  readonly matchedGrossExtraSalaryDifference?: number;
+  readonly matchedJustifiedTotalAmount?: number;
+  readonly matchedJustifiedSalaryAmount?: number;
+  readonly matchedJustifiedSalaryComplementAmount?: number;
+  readonly matchedJustifiedExtraSalaryAmount?: number;
+  readonly matchedAdjustedTotalDifference?: number;
+  readonly matchedAdjustedSalaryDifference?: number;
+  readonly matchedAdjustedSalaryComplementDifference?: number;
+  readonly matchedAdjustedExtraSalaryDifference?: number;
+  readonly peopleOkAdjusted?: number;
+  readonly conceptsJustifiedActive?: number;
+  readonly conceptsJustifiedApplied?: number;
   readonly matchedPeople?: number;
   readonly matchedTotalDifference?: number;
   readonly matchedSalaryDifference?: number;
@@ -385,6 +426,7 @@ export interface AnalysisResult {
   readonly groupings: readonly GroupingComparisonRow[];
   readonly internalExcelChecks: readonly InternalExcelCheckRow[];
   readonly conceptMap: readonly ConceptMappingRule[];
+  readonly excludedEmployeeIdsApplied: readonly string[];
   readonly errors: readonly AnalysisError[];
   readonly criteria: readonly string[];
 }

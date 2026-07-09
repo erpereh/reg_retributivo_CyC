@@ -20,7 +20,7 @@ import {
   STORAGE_SCHEMA_VERSION,
   type AppSettings,
 } from "@/lib/storage/analysisStorage";
-import { normalizeComparableText } from "@/lib/utils/normalize";
+import { normalizeComparableText, normalizeEmployeeId } from "@/lib/utils/normalize";
 
 export interface DashboardFilters {
   readonly query: string;
@@ -70,6 +70,7 @@ interface AppStateValue {
   readonly dismissToast: (id: string) => void;
   readonly analyze: () => Promise<void>;
   readonly saveConceptMapAndRefresh: (conceptMap: readonly ConceptMappingRule[]) => Promise<void>;
+  readonly saveExclusionsAndRefresh: (excludedEmployeeIds: readonly string[]) => Promise<void>;
   readonly exportActiveAnalysis: () => Promise<void>;
   readonly exportStoredAnalysis: (analysis: StoredAnalysis) => Promise<void>;
   readonly resetForNewAnalysis: () => void;
@@ -103,6 +104,9 @@ function normalizeSettingsPatch(current: AppSettings, patch: Partial<AppSettings
     reviewThreshold: Math.max(0, reviewThreshold),
     incidentThreshold: Math.max(Math.max(0, reviewThreshold), incidentThreshold),
     aiModel: next.aiModel || DEFAULT_SETTINGS.aiModel,
+    excludedEmployeeIds: Array.isArray(next.excludedEmployeeIds)
+      ? [...new Set(next.excludedEmployeeIds.map(normalizeEmployeeId).filter(Boolean))]
+      : DEFAULT_SETTINGS.excludedEmployeeIds,
     conceptMap: Array.isArray(next.conceptMap) ? next.conceptMap : DEFAULT_SETTINGS.conceptMap,
   };
 }
@@ -241,9 +245,9 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
     });
   }, []);
 
-  const runAnalysis = useCallback(async (settingsForAnalysis: AppSettings, options?: { readonly keepView?: boolean; readonly refreshedMap?: boolean }) => {
+  const runAnalysis = useCallback(async (settingsForAnalysis: AppSettings, options?: { readonly keepView?: boolean; readonly refreshedMap?: boolean; readonly replaceActive?: boolean }) => {
     if (!registroFile || !pdfFiles.length) {
-      const message = "Selecciona PDFs y Excel Registro antes de analizar.";
+      const message = "Selecciona recibos y Excel Reg. Retrib. antes de analizar.";
       setError(message);
       pushMessageToast("warning", "Faltan archivos", message);
       return;
@@ -258,6 +262,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
     formData.append("reviewThreshold", String(config.thresholds.reviewThreshold));
     formData.append("incidentThreshold", String(config.thresholds.incidentThreshold));
     formData.append("conceptMap", JSON.stringify(config.conceptMap ?? []));
+    formData.append("excludedEmployeeIds", JSON.stringify(config.excludedEmployeeIds ?? []));
     pdfFiles.forEach((file) => formData.append("pdfs", file));
 
     setAnalyzing(true);
@@ -273,10 +278,11 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       }
 
       const result = (await response.json()) as AnalysisResult;
+      const replaceActive = Boolean(options?.replaceActive && activeAnalysis);
       const record: StoredAnalysis = {
-        id: createId(),
+        id: replaceActive ? activeAnalysis!.id : createId(),
         schemaVersion: STORAGE_SCHEMA_VERSION,
-        createdAt: new Date().toISOString(),
+        createdAt: replaceActive ? activeAnalysis!.createdAt : new Date().toISOString(),
         registroFileName: registroFile.name,
         pdfCount: pdfFiles.length,
         result,
@@ -289,12 +295,16 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       await refreshHistory();
       setFilters(EMPTY_FILTERS);
       setStatus(`Análisis generado: ${result.summary.uniquePeople} personas`);
-      setSuccess(options?.refreshedMap ? "Mapa guardado y análisis actualizado." : "Análisis completado y guardado en el historial.");
-      pushMessageToast(
-        "success",
-        options?.refreshedMap ? "Mapa actualizado" : "Análisis completado",
-        options?.refreshedMap ? "Mapa guardado y análisis actualizado." : `${result.summary.uniquePeople} personas generadas y guardadas en historial.`,
-      );
+      setSuccess(replaceActive ? "Análisis actualizado." : options?.refreshedMap ? "Mapa guardado y análisis actualizado." : "Análisis completado y guardado en el historial.");
+      if (replaceActive) {
+        pushMessageToast("success", "Análisis actualizado.");
+      } else {
+        pushMessageToast(
+          "success",
+          options?.refreshedMap ? "Mapa actualizado" : "Análisis completado",
+          options?.refreshedMap ? "Mapa guardado y análisis actualizado." : `${result.summary.uniquePeople} personas generadas y guardadas en historial.`,
+        );
+      }
       setView(options?.keepView ? currentView : "dashboard");
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Error inesperado.";
@@ -304,7 +314,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
     } finally {
       setAnalyzing(false);
     }
-  }, [pdfFiles, pushMessageToast, refreshHistory, registroFile, view]);
+  }, [activeAnalysis, pdfFiles, pushMessageToast, refreshHistory, registroFile, view]);
 
   const analyze = useCallback(async () => {
     await runAnalysis(settings);
@@ -323,7 +333,25 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
         return;
       }
 
-      await runAnalysis(nextSettings, { keepView: true, refreshedMap: true });
+      await runAnalysis(nextSettings, { keepView: true, refreshedMap: true, replaceActive: true });
+    },
+    [pdfFiles.length, pushMessageToast, registroFile, runAnalysis, settings],
+  );
+
+  const saveExclusionsAndRefresh = useCallback(
+    async (excludedEmployeeIds: readonly string[]) => {
+      const nextSettings = normalizeSettingsPatch(settings, { excludedEmployeeIds });
+      setSettings(nextSettings);
+      saveSettings(nextSettings);
+
+      if (!registroFile || !pdfFiles.length) {
+        const message = "Exclusiones guardadas. Vuelve a seleccionar archivos para reanalizar.";
+        setSuccess(message);
+        pushMessageToast("info", "Exclusiones guardadas", message);
+        return;
+      }
+
+      await runAnalysis(nextSettings, { keepView: true, replaceActive: true });
     },
     [pdfFiles.length, pushMessageToast, registroFile, runAnalysis, settings],
   );
@@ -457,6 +485,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       dismissToast,
       analyze,
       saveConceptMapAndRefresh,
+      saveExclusionsAndRefresh,
       exportActiveAnalysis,
       exportStoredAnalysis: exportAnalysis,
       resetForNewAnalysis,
@@ -473,6 +502,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       aiTesting,
       analyze,
       saveConceptMapAndRefresh,
+      saveExclusionsAndRefresh,
       clearStoredHistory,
       dismissToast,
       error,

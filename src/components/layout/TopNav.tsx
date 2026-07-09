@@ -9,7 +9,6 @@ import { cn } from "@/lib/utils/classNames";
 const TABS: ReadonlyArray<{ id: AppView; label: string }> = [
   { id: "dashboard", label: "Dashboard" },
   { id: "personas", label: "Personas" },
-  { id: "conceptos", label: "Conceptos" },
   { id: "cuadre-excel", label: "Cuadre Excel" },
   { id: "agrupaciones", label: "Agrupaciones" },
   { id: "historial", label: "Historial" },

@@ -1,4 +1,5 @@
 import type { AnalysisConfig, ConceptMappingRule, StoredAnalysis } from "@/lib/types";
+import { normalizeEmployeeId } from "@/lib/utils/normalize";
 
 const DB_NAME = "retributivo-analysis-v1";
 const STORE_NAME = "analyses";
@@ -15,6 +16,7 @@ export interface AppSettings {
   readonly reviewThreshold: number;
   readonly incidentThreshold: number;
   readonly aiModel: string;
+  readonly excludedEmployeeIds: readonly string[];
   readonly conceptMap: readonly ConceptMappingRule[];
 }
 
@@ -25,15 +27,17 @@ export const DEFAULT_SETTINGS: AppSettings = {
   reviewThreshold: 1,
   incidentThreshold: 50,
   aiModel: "gemini-3.1-flash-lite",
+  excludedEmployeeIds: [],
   conceptMap: [],
 };
 
 export function configFromSettings(settings: AppSettings): AnalysisConfig {
   return {
     tolerance: settings.defaultTolerance,
-    enableAI: settings.enableAIByDefault,
+    enableAI: false,
     aiModel: settings.aiModel,
     conceptMap: settings.conceptMap,
+    excludedEmployeeIds: settings.excludedEmployeeIds,
     thresholds: {
       reviewThreshold: settings.reviewThreshold,
       incidentThreshold: settings.incidentThreshold,
@@ -54,6 +58,13 @@ function normalizeNumber(value: unknown, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function normalizeEmployeeIdList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return [...new Set(value.map(normalizeEmployeeId).filter(Boolean))];
+}
+
 function normalizeSettings(value: Partial<AppSettings> | undefined): AppSettings {
   return {
     defaultTolerance: normalizeNumber(value?.defaultTolerance, DEFAULT_SETTINGS.defaultTolerance),
@@ -62,6 +73,7 @@ function normalizeSettings(value: Partial<AppSettings> | undefined): AppSettings
     reviewThreshold: normalizeNumber(value?.reviewThreshold, DEFAULT_SETTINGS.reviewThreshold),
     incidentThreshold: normalizeNumber(value?.incidentThreshold, DEFAULT_SETTINGS.incidentThreshold),
     aiModel: value?.aiModel || DEFAULT_SETTINGS.aiModel,
+    excludedEmployeeIds: normalizeEmployeeIdList(value?.excludedEmployeeIds),
     conceptMap: Array.isArray(value?.conceptMap) ? value.conceptMap : DEFAULT_SETTINGS.conceptMap,
   };
 }
@@ -107,6 +119,10 @@ function normalizeStoredAnalysis(record: unknown): StoredAnalysis | undefined {
 
   return {
     ...record,
+    result: {
+      ...record.result,
+      excludedEmployeeIdsApplied: normalizeEmployeeIdList((record.result as unknown as Record<string, unknown>).excludedEmployeeIdsApplied),
+    },
     schemaVersion: STORAGE_SCHEMA_VERSION,
   };
 }

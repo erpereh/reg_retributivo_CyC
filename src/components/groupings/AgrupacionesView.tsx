@@ -37,7 +37,7 @@ const EMPTY_GROUPING_FILTERS: GroupingFilters = {
 
 const EXCEL_HEADERS = [
   "Hoja",
-  "Base Registro",
+  "Base Reg. Retrib.",
   "Agrupación",
   "Bloque",
   "Métrica",
@@ -53,18 +53,18 @@ const EXCEL_HEADERS = [
 
 const PDF_HEADERS = [
   "Hoja",
-  "Base Registro",
+  "Base Reg. Retrib.",
   "Agrupación",
   "Bloque",
   "Métrica",
   "Segmento",
-  "Registro periodo completo matched",
-  "PDF recalculado",
-  "Dif. PDF",
+  "Reg. Retrib. periodo completo matched",
+  "Recibo recalculado",
+  "Dif. Recibo",
   "Nº matched",
   "Mujeres matched",
   "Varones matched",
-  "Estado PDF",
+  "Estado Recibo",
 ] as const;
 
 function unique(values: readonly (string | undefined)[]): string[] {
@@ -172,12 +172,12 @@ function deterministicExplanation(row: GroupingComparisonRow): string {
     return "Revisar la hoja agrupada del Excel frente al cálculo desde Empleados.";
   }
   if (isPdfDifference(row)) {
-    return "La hoja agrupada cuadra internamente con Empleados, pero el PDF agrupado muestra diferencias frente al Registro periodo completo. Esta diferencia corresponde a la métrica agrupada seleccionada.";
+    return "La hoja agrupada cuadra internamente con Empleados, pero el Recibo agrupado muestra diferencias frente al Reg. Retrib. periodo completo. Esta diferencia corresponde a la métrica agrupada seleccionada.";
   }
   if (row.pdfStatus === "OK") {
-    return "La agrupación cuadra tanto internamente como contra PDF agrupado. Esta diferencia corresponde a la métrica agrupada seleccionada.";
+    return "La agrupación cuadra tanto internamente como contra Recibo agrupado. Esta diferencia corresponde a la métrica agrupada seleccionada.";
   }
-  return "La validación Excel cuadra; la comparación PDF no aplica para esta base Registro.";
+  return "La validación Excel cuadra; la comparación Recibo no aplica para esta base Reg. Retrib.";
 }
 
 function DetailModal({ row, onClose }: Readonly<{ row: GroupingComparisonRow; onClose: () => void }>) {
@@ -210,7 +210,7 @@ function DetailModal({ row, onClose }: Readonly<{ row: GroupingComparisonRow; on
 
         <div className="mt-6 grid gap-4 md:grid-cols-3">
           <ModalField label="Hoja validada" value={row.sourceSheet} />
-          <ModalField label="Base Registro" value={row.registroBase} />
+          <ModalField label="Base Reg. Retrib." value={row.registroBase} />
           <ModalField label="Agrupación comparada" value={row.groupName} />
           <ModalField label="ID agrupación" value={row.groupId} />
           <ModalField label="Bloque" value={row.block} />
@@ -236,16 +236,16 @@ function DetailModal({ row, onClose }: Readonly<{ row: GroupingComparisonRow; on
 
           <section className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
             <div className="flex items-center justify-between gap-3">
-              <h3 className="text-sm font-semibold text-blue-950">Comparación PDF</h3>
+              <h3 className="text-sm font-semibold text-blue-950">Comparación Recibo</h3>
               <Badge value={row.pdfStatus ?? "Sin datos"} />
             </div>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <ModalField label="Base PDF" value={row.pdfStatus === "No aplica" ? "No aplica" : PERIOD_COMPLETE_BASE} />
-              <ModalField label="Población matched PDF" value={`${row.matchedPeopleCount ?? 0} personas (${row.matchedWomenCount ?? 0} mujeres, ${row.matchedMenCount ?? 0} varones)`} />
-              <ModalField label="PDF sin Registro excluidos" value={row.excludedPdfWithoutRegistroCount ?? 0} />
-              <ModalField label="Registro periodo completo matched" value={formatPdfValue(row, row.pdfRegistroRecalculatedValue)} />
-              <ModalField label="PDF recalculado" value={formatPdfValue(row, row.pdfRecalculatedValue)} />
-              <ModalField label="Diferencia PDF" value={formatPdfValue(row, row.pdfDifference, "difference")} />
+              <ModalField label="Base Recibo" value={row.pdfStatus === "No aplica" ? "No aplica" : PERIOD_COMPLETE_BASE} />
+              <ModalField label="Población matched Recibo" value={`${row.matchedPeopleCount ?? 0} personas (${row.matchedWomenCount ?? 0} mujeres, ${row.matchedMenCount ?? 0} varones)`} />
+              <ModalField label="Recibo sin Reg. Retrib. excluidos" value={row.excludedPdfWithoutRegistroCount ?? 0} />
+              <ModalField label="Reg. Retrib. periodo completo matched" value={formatPdfValue(row, row.pdfRegistroRecalculatedValue)} />
+              <ModalField label="Recibo recalculado" value={formatPdfValue(row, row.pdfRecalculatedValue)} />
+              <ModalField label="Diferencia Recibo" value={formatPdfValue(row, row.pdfDifference, "difference")} />
               <ModalField label="Interpretación" value="Esta diferencia corresponde a la métrica agrupada seleccionada." />
             </div>
           </section>
@@ -339,7 +339,7 @@ export function AgrupacionesView() {
       <EmptyState
         icon={Table2}
         title="Pendiente de implementación / Sin datos calculados"
-        description="Esta fase valida que las hojas agrupadas del Registro cuadran con la hoja Empleados y añade la comparación PDF agrupado cuando hay datos matched."
+        description="Esta fase valida que las hojas agrupadas del Reg. Retrib. cuadran con la hoja Empleados y añade la comparación Recibo agrupado cuando hay datos matched."
       />
     );
   }
@@ -354,7 +354,7 @@ export function AgrupacionesView() {
             </span>
             <div>
               <h2 className="text-lg font-semibold text-ink">Validación Excel</h2>
-              <p className="mt-1 text-sm leading-6 text-muted">Compara cada hoja agrupada del Registro contra los datos recalculados desde Empleados para todas las bases Registro.</p>
+              <p className="mt-1 text-sm leading-6 text-muted">Compara cada hoja agrupada del Reg. Retrib. contra los datos recalculados desde Empleados para todas las bases Reg. Retrib.</p>
             </div>
           </div>
         </Card>
@@ -364,8 +364,8 @@ export function AgrupacionesView() {
               <Table2 className="size-4" aria-hidden="true" />
             </span>
             <div>
-              <h2 className="text-lg font-semibold text-ink">Comparación PDF</h2>
-              <p className="mt-1 text-sm leading-6 text-muted">La comparación PDF agrupado usa solo personas matched y excluye matrículas PDF sin Registro.</p>
+              <h2 className="text-lg font-semibold text-ink">Comparación Recibo</h2>
+              <p className="mt-1 text-sm leading-6 text-muted">La comparación Recibo agrupado usa solo personas matched y excluye matrículas Recibo sin Reg. Retrib.</p>
             </div>
           </div>
         </Card>
@@ -379,7 +379,7 @@ export function AgrupacionesView() {
       ) : null}
 
       <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-900 shadow-subtle">
-        La comparación PDF agrupado usa solo personas matched y excluye matrículas PDF sin Registro. Se excluyen {summary.pdfExcluded} matrículas presentes en PDF pero no en Registro porque no tienen datos maestros de agrupación.
+        La validación interna Excel se calcula sobre el Reg. Retrib. completo. Las exclusiones manuales se aplican a comparativas Recibo/matched y resultados de análisis.
       </div>
 
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
@@ -387,10 +387,10 @@ export function AgrupacionesView() {
           ["Hojas analizadas", summary.sheets],
           ["Agrupaciones calculadas", summary.groups],
           ["Filas Excel con diferencia", summary.excelDifferenceRows],
-          ["Filas PDF con diferencia", summary.pdfDifferenceRows],
-          ["PDF sin Registro excluidos", summary.pdfExcluded],
-          ["Mayor diferencia PDF", formatEuro(zeroNormalized(summary.maxPdfDifference, 0.005))],
-          ["Agrupaciones PDF afectadas", summary.pdfAffectedGroups],
+          ["Filas Recibo con diferencia", summary.pdfDifferenceRows],
+          ["Recibo sin Reg. Retrib. excluidos", summary.pdfExcluded],
+          ["Mayor diferencia Recibo", formatEuro(zeroNormalized(summary.maxPdfDifference, 0.005))],
+          ["Agrupaciones Recibo afectadas", summary.pdfAffectedGroups],
         ].map(([label, value]) => (
           <Card key={label} className="min-h-[92px] p-3">
             <p className="text-xs font-semibold leading-5 text-muted">{label}</p>
@@ -403,7 +403,7 @@ export function AgrupacionesView() {
         <div className="mb-5 flex flex-wrap gap-2">
           {[
             ["excel", "Validación Excel"],
-            ["pdf", "Comparación PDF"],
+            ["pdf", "Comparación Recibo"],
           ].map(([nextMode, label]) => (
             <button
               key={nextMode}
@@ -417,16 +417,16 @@ export function AgrupacionesView() {
         </div>
         {mode === "pdf" ? (
           <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold leading-6 text-amber-900">
-            Las diferencias PDF se muestran por métrica agrupada. Las medias y medianas no son importes aditivos, por lo que no deben interpretarse como diferencia salarial total.
+            Las diferencias Recibo se muestran por métrica agrupada. Las medias y medianas no son importes aditivos, por lo que no deben interpretarse como diferencia salarial total.
           </div>
         ) : null}
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-7">
           <FilterSelect label="Hoja" value={filters.sheet} options={options.sheets} onChange={(sheet) => setFilters((current) => ({ ...current, sheet }))} />
           {mode === "excel" ? (
-            <FilterSelect label="Base Registro" value={filters.base} options={options.bases} onChange={(base) => setFilters((current) => ({ ...current, base }))} />
+            <FilterSelect label="Base Reg. Retrib." value={filters.base} options={options.bases} onChange={(base) => setFilters((current) => ({ ...current, base }))} />
           ) : (
             <label className="text-sm font-semibold text-ink">
-              Base Registro
+              Base Reg. Retrib.
               <input value={PERIOD_COMPLETE_BASE} readOnly className="filter-control mt-2 bg-slate-100" />
             </label>
           )}
@@ -436,7 +436,7 @@ export function AgrupacionesView() {
           {mode === "excel" ? (
             <FilterSelect label="Estado Excel" value={filters.excelStatus} options={options.excelStatuses} onChange={(excelStatus) => setFilters((current) => ({ ...current, excelStatus }))} />
           ) : (
-            <FilterSelect label="Estado PDF" value={filters.pdfStatus} options={options.pdfStatuses.filter((status) => status !== "No aplica")} onChange={(pdfStatus) => setFilters((current) => ({ ...current, pdfStatus }))} />
+            <FilterSelect label="Estado Recibo" value={filters.pdfStatus} options={options.pdfStatuses.filter((status) => status !== "No aplica")} onChange={(pdfStatus) => setFilters((current) => ({ ...current, pdfStatus }))} />
           )}
         </div>
         <div className="mt-4 flex justify-end">
@@ -448,7 +448,7 @@ export function AgrupacionesView() {
 
       <Card className="overflow-hidden p-0">
         <div className="border-b border-line px-5 py-4">
-          <h2 className="text-lg font-semibold text-ink">{mode === "excel" ? "Detalle Validación Excel" : "Detalle Comparación PDF"}</h2>
+          <h2 className="text-lg font-semibold text-ink">{mode === "excel" ? "Detalle Validación Excel" : "Detalle Comparación Recibo"}</h2>
           <p className="mt-1 text-sm text-muted">
             {filteredRows.length} filas visibles de {mode === "pdf" ? rows.filter((row) => row.registroBase === PERIOD_COMPLETE_BASE).length : rows.length}
           </p>

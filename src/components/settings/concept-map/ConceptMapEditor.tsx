@@ -21,7 +21,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAppState } from "@/components/app/AppState";
 import { Card } from "@/components/common/Card";
 import { Toggle } from "@/components/common/Toggle";
-import { mergeConceptMap, normalizeConceptMappingRule, normalizePdfConcept } from "@/lib/compare/conceptMapping";
+import { isRuleEnabledForComparison, mergeConceptMap, normalizeConceptMappingRule, normalizePdfConcept } from "@/lib/compare/conceptMapping";
 import type {
   ConceptBlockKey,
   ConceptDedupePriority,
@@ -34,9 +34,10 @@ import type {
 import { cn } from "@/lib/utils/classNames";
 import { normalizeComparableText } from "@/lib/utils/normalize";
 
-type StatusFilter = "Todos" | MappingStatus | "Sin regla";
-type ActivationFilter = "Todas" | "Activadas" | "Desactivadas";
-type DetectedFilter = "Todos" | "Detectado en análisis" | "No detectado";
+type UsageLabel = "Activo" | "Desactivado" | "Sin configurar";
+type StatusFilter = "Todos" | "Sin configurar";
+type ActivationFilter = "Todos" | "Activos" | "Desactivados";
+type DetectedFilter = "Todos" | "Detectados" | "No detectados";
 
 interface RuleForm {
   readonly pdfConcept: string;
@@ -61,7 +62,7 @@ interface RuleMeta {
 interface RuleTableBaseRow {
   readonly id: string;
   readonly kind: "rule" | "unmapped";
-  readonly statusLabel: StatusFilter;
+  readonly statusLabel: UsageLabel;
   readonly concept: string;
   readonly code?: string;
   readonly block: RetributionBlock;
@@ -86,15 +87,13 @@ interface UnmappedRow extends RuleTableBaseRow {
 type ConceptMapRow = RuleRow | UnmappedRow;
 
 const STATUSES: readonly MappingStatus[] = ["Incluido", "Justificado", "Pendiente revisión", "Ignorado"];
-const STATUS_FILTERS: readonly StatusFilter[] = ["Todos", "Incluido", "Justificado", "Ignorado", "Pendiente revisión", "Sin regla"];
-const ACTIVATION_FILTERS: readonly ActivationFilter[] = ["Todas", "Activadas", "Desactivadas"];
-const DETECTED_FILTERS: readonly DetectedFilter[] = ["Todos", "Detectado en análisis", "No detectado"];
+const ACTIVATION_FILTERS: readonly ActivationFilter[] = ["Todos", "Activos", "Desactivados"];
+const DETECTED_FILTERS: readonly DetectedFilter[] = ["Todos", "Detectados", "No detectados"];
 const BLOCKS: readonly RetributionBlock[] = ["Salario", "C. Salarial", "Extrasalarial"];
 const SOURCE_TYPES: readonly ConceptMappingSourceType[] = ["devengo", "informativo", "deduccion", "retencion", "coste_empresa", "unknown"];
 const DEDUPE_PRIORITIES: readonly ConceptDedupePriority[] = ["devengo", "informativo"];
 
-const JUSTIFIED_HELP = "Visible y auditable, pero preparado para excluirse de la diferencia ajustada en una fase posterior.";
-const MAP_NOTE = "Las reglas justificadas siguen visibles y auditables. La diferencia ajustada se aplicará en una subfase posterior.";
+const MAP_NOTE = "Activo = se usa en el análisis. Desactivado = se ignora al actualizar datos.";
 const TOP_ACTION_CLASS = "min-h-11 whitespace-nowrap rounded-full px-4";
 
 const EMPTY_RULE_FORM: RuleForm = {
@@ -102,11 +101,11 @@ const EMPTY_RULE_FORM: RuleForm = {
   aliasesText: "",
   registroCode: "",
   block: "C. Salarial",
-  status: "Pendiente revisión",
+  status: "Incluido",
   sourceType: "devengo",
   allowInformative: false,
   dedupePriority: "devengo",
-  includedInComparison: false,
+  includedInComparison: true,
   includedInAdjustedComparison: true,
   active: true,
   reason: "",
@@ -152,7 +151,7 @@ function coerceRule(input: unknown): ConceptMappingRule {
   const item = (typeof input === "object" && input ? input : {}) as Partial<ConceptMappingRule>;
   const pdfConcept = String(item.pdfConcept ?? "").trim();
   if (!pdfConcept) {
-    throw new Error("Cada regla necesita Concepto PDF.");
+    throw new Error("Cada regla necesita Concepto Recibo.");
   }
   const block = isBlock(item.block) ? item.block : "C. Salarial";
   const status = isStatus(item.status) ? item.status : "Pendiente revisión";
@@ -168,7 +167,7 @@ function coerceRule(input: unknown): ConceptMappingRule {
     allowInformative: item.allowInformative ?? false,
     dedupePriority: isDedupePriority(item.dedupePriority) ? item.dedupePriority : "devengo",
     includedInComparison: item.includedInComparison ?? (status === "Incluido" || status === "Justificado"),
-    includedInAdjustedComparison: item.includedInAdjustedComparison ?? status !== "Justificado",
+    includedInAdjustedComparison: item.includedInAdjustedComparison ?? true,
     active: item.active ?? true,
     reason: item.reason,
   });
@@ -203,14 +202,14 @@ function ruleToForm(rule: ConceptMappingRule): RuleForm {
     allowInformative: normalized.allowInformative ?? false,
     dedupePriority: normalized.dedupePriority ?? "devengo",
     includedInComparison: normalized.includedInComparison ?? (normalized.status === "Incluido" || normalized.status === "Justificado"),
-    includedInAdjustedComparison: normalized.includedInAdjustedComparison ?? normalized.status !== "Justificado",
-    active: normalized.active ?? true,
+    includedInAdjustedComparison: normalized.includedInAdjustedComparison ?? true,
+    active: isRuleEnabledForComparison(normalized),
     reason: normalized.reason ?? "",
   };
 }
 
 function formToRule(form: RuleForm): ConceptMappingRule {
-  const status = form.status;
+  const status: MappingStatus = !form.registroCode.trim() ? "Pendiente revisión" : form.active ? "Incluido" : "Ignorado";
   return normalizeConceptMappingRule({
     pdfConcept: form.pdfConcept.trim(),
     normalizedPdfConcept: normalizePdfConcept(form.pdfConcept),
@@ -222,8 +221,8 @@ function formToRule(form: RuleForm): ConceptMappingRule {
     sourceType: form.sourceType,
     allowInformative: form.allowInformative,
     dedupePriority: form.dedupePriority,
-    includedInComparison: form.includedInComparison,
-    includedInAdjustedComparison: status === "Justificado" ? false : form.includedInAdjustedComparison,
+    includedInComparison: form.active,
+    includedInAdjustedComparison: true,
     active: form.active,
     reason: form.reason.trim() || undefined,
   });
@@ -261,14 +260,17 @@ function ruleMatchesConcept(rule: ConceptMappingRule, normalizedConcept: string)
 }
 
 function reasonForRule(rule: ConceptMappingRule): string | undefined {
-  if (rule.status !== "Justificado") return rule.reason;
-  return rule.reason?.includes("excluirse") ? rule.reason : JUSTIFIED_HELP;
+  if (!rule.reason) return undefined;
+  const normalized = normalizeComparableText(rule.reason);
+  if (normalized.includes("justific") || normalized.includes("diferencia ajustada") || normalized.includes("fase posterior") || normalized.includes("excluirse")) {
+    return isRuleEnabledForComparison(rule) ? "Concepto activo en el analisis." : "Concepto desactivado en el analisis.";
+  }
+  return rule.reason;
 }
 
 function sortRankForRule(rule: ConceptMappingRule, meta: RuleMeta): number {
-  if (rule.active === false) return 5;
-  if (meta.detected && rule.status !== "Justificado") return 1;
-  if (meta.detected && rule.status === "Justificado") return 2;
+  if (!isRuleEnabledForComparison(rule)) return 5;
+  if (meta.detected) return 1;
   if (rule.status === "Pendiente revisión") return 3;
   return 4;
 }
@@ -281,15 +283,16 @@ function buildRows(
 ): ConceptMapRow[] {
   const ruleRows: ConceptMapRow[] = rules.map((rule, index) => {
     const meta = ruleMeta(rule, detectedConcepts, availableCodes);
+    const enabled = isRuleEnabledForComparison(rule);
     return {
       kind: "rule",
       id: `rule-${normalizePdfConcept(rule.pdfConcept)}-${index}`,
-      statusLabel: rule.status,
+      statusLabel: enabled ? "Activo" : "Desactivado",
       concept: rule.pdfConcept,
       code: rule.registroCode,
       block: rule.block,
       detected: meta.detected,
-      active: rule.active !== false,
+      active: enabled,
       reason: reasonForRule(rule),
       aliases: rule.aliases ?? [],
       sortRank: sortRankForRule(rule, meta),
@@ -301,12 +304,12 @@ function buildRows(
   const unmappedRows: ConceptMapRow[] = unmapped
     .filter((row) => {
       const normalized = normalizePdfConcept(row.pdfConcept);
-      return !rules.some((rule) => rule.active !== false && ruleMatchesConcept(rule, normalized));
+      return !rules.some((rule) => isRuleEnabledForComparison(rule) && ruleMatchesConcept(rule, normalized));
     })
     .map((row, index) => ({
       kind: "unmapped",
       id: `unmapped-${normalizePdfConcept(row.pdfConcept)}-${index}`,
-      statusLabel: "Sin regla",
+      statusLabel: "Sin configurar",
       concept: row.pdfConcept,
       code: row.suggestedRegistroCode,
       block: row.suggestedBlock ?? "C. Salarial",
@@ -327,12 +330,10 @@ function rowMatches(row: ConceptMapRow, query: string): boolean {
   return values.some((value) => normalizeComparableText(value).includes(normalizedQuery));
 }
 
-function statusBadgeClass(status: StatusFilter): string {
-  if (status === "Incluido") return "bg-emerald-50 text-emerald-700";
-  if (status === "Justificado") return "bg-violet-50 text-violet-700";
-  if (status === "Ignorado") return "bg-slate-100 text-slate-600";
-  if (status === "Sin regla") return "bg-red-50 text-red-700";
-  if (status === "Pendiente revisión") return "bg-orange-50 text-orange-700";
+function statusBadgeClass(status: UsageLabel): string {
+  if (status === "Activo") return "bg-emerald-50 text-emerald-700";
+  if (status === "Desactivado") return "bg-slate-100 text-slate-600";
+  if (status === "Sin configurar") return "bg-orange-50 text-orange-700";
   return "bg-slate-100 text-slate-600";
 }
 
@@ -394,7 +395,7 @@ export function ConceptMapEditor() {
   const [query, setQuery] = useState("");
   const [blockFilter, setBlockFilter] = useState<"Todos" | RetributionBlock>("Todos");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("Todos");
-  const [activationFilter, setActivationFilter] = useState<ActivationFilter>("Todas");
+  const [activationFilter, setActivationFilter] = useState<ActivationFilter>("Todos");
   const [detectedFilter, setDetectedFilter] = useState<DetectedFilter>("Todos");
   const [editingIndex, setEditingIndex] = useState<number | "new" | undefined>();
   const [form, setForm] = useState<RuleForm>(EMPTY_RULE_FORM);
@@ -423,11 +424,11 @@ export function ConceptMapEditor() {
   const filteredRows = useMemo(() => {
     return rows.filter((row) => {
       if (blockFilter !== "Todos" && row.block !== blockFilter) return false;
-      if (statusFilter !== "Todos" && row.statusLabel !== statusFilter) return false;
-      if (activationFilter === "Activadas" && (row.kind !== "rule" || !row.active)) return false;
-      if (activationFilter === "Desactivadas" && (row.kind !== "rule" || row.active)) return false;
-      if (detectedFilter === "Detectado en análisis" && !row.detected) return false;
-      if (detectedFilter === "No detectado" && row.detected) return false;
+      if (statusFilter === "Sin configurar" && row.statusLabel !== "Sin configurar") return false;
+      if (activationFilter === "Activos" && row.statusLabel !== "Activo") return false;
+      if (activationFilter === "Desactivados" && row.statusLabel !== "Desactivado") return false;
+      if (detectedFilter === "Detectados" && !row.detected) return false;
+      if (detectedFilter === "No detectados" && row.detected) return false;
       return rowMatches(row, query);
     });
   }, [activationFilter, blockFilter, detectedFilter, query, rows, statusFilter]);
@@ -437,7 +438,7 @@ export function ConceptMapEditor() {
     setQuery("");
     setBlockFilter("Todos");
     setStatusFilter("Todos");
-    setActivationFilter("Todas");
+    setActivationFilter("Todos");
     setDetectedFilter("Todos");
   }
 
@@ -456,6 +457,8 @@ export function ConceptMapEditor() {
   }
 
   function ruleFromUnmapped(row: UnmappedConceptRow, status: MappingStatus = row.action): ConceptMappingRule {
+    const active = Boolean(row.suggestedRegistroCode) && status !== "Ignorado";
+    const nextStatus: MappingStatus = !row.suggestedRegistroCode ? "Pendiente revisión" : active ? "Incluido" : "Ignorado";
     return normalizeConceptMappingRule({
       pdfConcept: row.pdfConcept,
       normalizedPdfConcept: normalizePdfConcept(row.pdfConcept),
@@ -463,14 +466,14 @@ export function ConceptMapEditor() {
       block: row.suggestedBlock ?? "C. Salarial",
       blockKey: blockKeyFromBlock(row.suggestedBlock ?? "C. Salarial"),
       registroCode: row.suggestedRegistroCode,
-      status,
+      status: nextStatus,
       sourceType: "devengo",
       allowInformative: false,
       dedupePriority: "devengo",
-      includedInComparison: status === "Incluido" || status === "Justificado",
-      includedInAdjustedComparison: status !== "Justificado",
-      active: true,
-      reason: status === "Justificado" ? row.reason ?? JUSTIFIED_HELP : row.reason ?? row.recommendedAction,
+      includedInComparison: active,
+      includedInAdjustedComparison: true,
+      active,
+      reason: row.reason ?? row.recommendedAction,
     });
   }
 
@@ -484,10 +487,10 @@ export function ConceptMapEditor() {
 
   function saveForm(): void {
     if (!form.pdfConcept.trim()) {
-      setMessage("Concepto PDF obligatorio.");
+      setMessage("Concepto Recibo obligatorio.");
       return;
     }
-    if (codeWarning && !window.confirm("El código Registro no existe en el Excel cargado. ¿Guardar igualmente?")) {
+    if (codeWarning && !window.confirm("El código Reg. Retrib. no existe en el Excel cargado. ¿Guardar igualmente?")) {
       return;
     }
     const nextRule = formToRule(form);
@@ -501,7 +504,14 @@ export function ConceptMapEditor() {
   }
 
   function setRuleActive(index: number, active: boolean): void {
-    persistRules(rules.map((rule, itemIndex) => (itemIndex === index ? normalizeConceptMappingRule({ ...rule, active }) : rule)), active ? "Regla activada." : "Regla desactivada.");
+    persistRules(
+      rules.map((rule, itemIndex) =>
+        itemIndex === index
+          ? normalizeConceptMappingRule({ ...rule, active, includedInComparison: active, includedInAdjustedComparison: true })
+          : rule,
+      ),
+      active ? "Regla activada." : "Regla desactivada.",
+    );
   }
 
   function exportMap(): void {
@@ -554,42 +564,42 @@ export function ConceptMapEditor() {
   }
 
   const summaryCards = [
-    { label: "Reglas totales", value: counters.totalRules, action: resetFilters, active: false },
+    { label: "Conceptos totales", value: counters.totalRules, action: resetFilters, active: false },
     {
-      label: "Activadas",
+      label: "Activos",
       value: counters.activeRules,
       action: () => {
         resetFilters();
-        setActivationFilter("Activadas");
+        setActivationFilter("Activos");
       },
-      active: activationFilter === "Activadas",
+      active: activationFilter === "Activos",
     },
     {
-      label: "Desactivadas",
+      label: "Desactivados",
       value: counters.inactiveRules,
       action: () => {
         resetFilters();
-        setActivationFilter("Desactivadas");
+        setActivationFilter("Desactivados");
       },
-      active: activationFilter === "Desactivadas",
+      active: activationFilter === "Desactivados",
     },
     {
-      label: "Detectadas",
+      label: "Detectados",
       value: counters.detectedRules,
       action: () => {
         resetFilters();
-        setDetectedFilter("Detectado en análisis");
+        setDetectedFilter("Detectados");
       },
-      active: detectedFilter === "Detectado en análisis",
+      active: detectedFilter === "Detectados",
     },
     {
-      label: "Pendientes sin regla",
+      label: "Sin configurar",
       value: counters.unmappedPending,
       action: () => {
         resetFilters();
-        setStatusFilter("Sin regla");
+        setStatusFilter("Sin configurar");
       },
-      active: statusFilter === "Sin regla",
+      active: statusFilter === "Sin configurar",
     },
   ];
 
@@ -597,8 +607,8 @@ export function ConceptMapEditor() {
     <Card className="p-6">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="max-w-3xl">
-          <h2 className="text-xl font-semibold text-ink">Mapa de conceptos</h2>
-          <p className="mt-1 text-sm leading-6 text-muted">Gestiona reglas guardadas que pueden aplicarse ahora o en futuros análisis.</p>
+          <h2 className="text-xl font-semibold text-ink">Conceptos del análisis</h2>
+          <p className="mt-1 text-sm leading-6 text-muted">Activa o desactiva conceptos para decidir qué entra en la comparativa.</p>
           <p className="mt-1 text-xs font-medium leading-5 text-muted">{MAP_NOTE}</p>
         </div>
         <div className="relative flex flex-wrap items-center gap-2 xl:justify-end">
@@ -663,25 +673,19 @@ export function ConceptMapEditor() {
           <p className="text-sm leading-6 text-muted">Regla del mapa = configuración guardada. Concepto sin regla = concepto detectado en este análisis que requiere decisión.</p>
         </div>
 
-        <div className="mt-4 grid gap-3 xl:grid-cols-[1.4fr_180px_180px_220px_180px]">
+        <div className="mt-4 grid gap-3 xl:grid-cols-[1.4fr_180px_220px_220px_180px]">
           <label className="relative block text-sm font-semibold text-ink">
             Buscar
             <Search className="pointer-events-none absolute bottom-3 left-4 h-4 w-4 text-muted" aria-hidden="true" />
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Buscar por concepto, alias, código, bloque o motivo"
+              placeholder="Buscar por concepto, código, bloque o motivo"
               className="mt-2 h-12 w-full rounded-full border border-line bg-white pl-10 pr-4 text-sm font-medium text-ink shadow-subtle"
             />
           </label>
           <label className="block text-sm font-semibold text-ink">
-            Estado
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)} className="mt-2 h-12 w-full rounded-full border border-line bg-white px-4 text-sm font-medium">
-              {STATUS_FILTERS.map((item) => <option key={item}>{item}</option>)}
-            </select>
-          </label>
-          <label className="block text-sm font-semibold text-ink">
-            Activación
+            Uso
             <select value={activationFilter} onChange={(event) => setActivationFilter(event.target.value as ActivationFilter)} className="mt-2 h-12 w-full rounded-full border border-line bg-white px-4 text-sm font-medium">
               {ACTIVATION_FILTERS.map((item) => <option key={item}>{item}</option>)}
             </select>
@@ -702,15 +706,14 @@ export function ConceptMapEditor() {
         </div>
 
         <div data-testid="concept-map-unified-scroll" className="mt-4 max-h-[560px] overflow-y-auto rounded-2xl border border-line bg-white shadow-subtle">
-          <table className="min-w-[980px] w-full border-collapse text-left text-sm">
+          <table className="min-w-[860px] w-full border-collapse text-left text-sm">
             <thead className="sticky top-0 z-10 bg-slate-100 text-xs font-semibold uppercase text-muted">
               <tr>
-                <th className="px-4 py-3">Concepto PDF</th>
-                <th className="px-4 py-3">Código Registro</th>
+                <th className="px-4 py-3">Concepto Recibo</th>
+                <th className="px-4 py-3">Código Reg. Retrib.</th>
                 <th className="px-4 py-3">Bloque</th>
-                <th className="px-4 py-3">Estado</th>
-                <th className="px-4 py-3">Detectado en análisis</th>
-                <th className="px-4 py-3">Activada</th>
+                <th className="px-4 py-3">Detectado</th>
+                <th className="px-4 py-3">Uso</th>
                 <th className="px-4 py-3 text-right">Acciones</th>
               </tr>
             </thead>
@@ -731,17 +734,7 @@ export function ConceptMapEditor() {
                       <p className="font-semibold text-ink">{row.concept}</p>
                       {expanded ? (
                         <div className="mt-2 rounded-2xl bg-slate-50 p-3 text-xs leading-5 text-muted">
-                          <p>Alias: {row.aliases.length ? row.aliases.join(", ") : "Sin alias"}</p>
-                          <p>Motivo: {row.reason ?? (row.statusLabel === "Justificado" ? JUSTIFIED_HELP : "Sin motivo")}</p>
-                          {row.kind === "rule" ? (
-                            <>
-                              <p>Origen: {row.rule.sourceType ?? "devengo"}</p>
-                              <p>Permite informativos: {row.rule.allowInformative ? "Sí" : "No"}</p>
-                              <p>Prioridad: {row.rule.dedupePriority ?? "devengo"}</p>
-                              <p>includedInComparison: {row.rule.includedInComparison ? "true" : "false"}</p>
-                              <p>includedInAdjustedComparison: {row.rule.includedInAdjustedComparison ? "true" : "false"}</p>
-                            </>
-                          ) : null}
+                          <p>Motivo: {row.reason ?? "Sin motivo"}</p>
                         </div>
                       ) : row.reason ? (
                         <p className="mt-1 text-xs text-muted" title={row.reason}>{shortText(row.reason, "Sin motivo")}</p>
@@ -749,14 +742,13 @@ export function ConceptMapEditor() {
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-ink">
                       {row.code ?? "Sin código"}
-                      {!codeValid ? <p className="mt-1 text-[11px] font-semibold text-red-700">Código no existe en Registro cargado</p> : null}
+                      {!codeValid ? <p className="mt-1 text-[11px] font-semibold text-red-700">Código no existe en Reg. Retrib. cargado</p> : null}
                     </td>
                     <td className="px-4 py-3 text-muted">{row.block}</td>
+                    <td className="px-4 py-3 font-semibold text-muted">{row.detected ? "Sí" : "No"}</td>
                     <td className="px-4 py-3">
                       <span className={cn("inline-flex rounded-full px-2.5 py-1 text-xs font-semibold", statusBadgeClass(row.statusLabel))}>{row.statusLabel}</span>
                     </td>
-                    <td className="px-4 py-3 font-semibold text-muted">{row.detected ? "Sí" : "No"}</td>
-                    <td className="px-4 py-3 font-semibold text-muted">{row.active === undefined ? "No aplica" : row.active ? "Sí" : "No"}</td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
                         {row.kind === "rule" ? (
@@ -859,27 +851,23 @@ export function ConceptMapEditor() {
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h3 className="text-xl font-semibold text-ink">{editingIndex === "new" ? "Crear regla" : "Editar regla"}</h3>
-                  <p className="mt-1 text-sm text-muted">Define cómo se clasifica un concepto detectado en PDF.</p>
+                  <p className="mt-1 text-sm text-muted">Define cómo se clasifica un concepto detectado en Recibo.</p>
                 </div>
                 <button type="button" className="btn-secondary min-h-10 px-4" onClick={() => setEditingIndex(undefined)}>Cerrar</button>
               </div>
 
               <div className="mt-5 grid gap-4 md:grid-cols-2">
                 <label className="block text-sm font-semibold text-ink">
-                  Concepto PDF
+                  Concepto Recibo
                   <input value={form.pdfConcept} onChange={(event) => setForm({ ...form, pdfConcept: event.target.value })} className="mt-2 h-12 w-full rounded-full border border-line px-4 text-sm" />
                 </label>
                 <label className="block text-sm font-semibold text-ink">
-                  Alias separados por coma
-                  <input value={form.aliasesText} onChange={(event) => setForm({ ...form, aliasesText: event.target.value })} className="mt-2 h-12 w-full rounded-full border border-line px-4 text-sm" />
-                </label>
-                <label className="block text-sm font-semibold text-ink">
-                  Código Registro
+                  Código Reg. Retrib.
                   <input list="concept-map-codes" value={form.registroCode} onChange={(event) => setForm({ ...form, registroCode: event.target.value })} className="mt-2 h-12 w-full rounded-full border border-line px-4 font-mono text-sm" />
                   <datalist id="concept-map-codes">
                     {availableCodes.map((code) => <option key={code} value={code} />)}
                   </datalist>
-                  {codeWarning ? <span className="mt-2 block text-sm font-semibold text-orange-700">Este código no existe en el Registro cargado.</span> : null}
+                  {codeWarning ? <span className="mt-2 block text-sm font-semibold text-orange-700">Este código no existe en el Reg. Retrib. cargado.</span> : null}
                 </label>
                 <label className="block text-sm font-semibold text-ink">
                   Bloque
@@ -887,59 +875,26 @@ export function ConceptMapEditor() {
                     {BLOCKS.map((item) => <option key={item}>{item}</option>)}
                   </select>
                 </label>
-                <label className="block text-sm font-semibold text-ink">
-                  Estado
-                  <select
-                    value={form.status}
-                    onChange={(event) => {
-                      const status = event.target.value as MappingStatus;
-                      setForm({
-                        ...form,
-                        status,
-                        includedInComparison: status === "Incluido" || status === "Justificado",
-                        includedInAdjustedComparison: status !== "Justificado",
-                        reason: status === "Justificado" && !form.reason ? JUSTIFIED_HELP : form.reason,
-                      });
-                    }}
-                    className="mt-2 h-12 w-full rounded-full border border-line px-4 text-sm"
-                  >
-                    {STATUSES.map((item) => <option key={item}>{item}</option>)}
-                  </select>
-                  {form.status === "Justificado" ? <span className="mt-2 block text-sm font-semibold text-violet-700">{JUSTIFIED_HELP}</span> : null}
-                </label>
-                <Toggle checked={form.active} onChange={(active) => setForm({ ...form, active })} label="Activa" description="Las reglas inactivas no afectan al análisis." />
+                <Toggle
+                  checked={form.active}
+                  onChange={(active) =>
+                    setForm({
+                      ...form,
+                      active,
+                      includedInComparison: active,
+                      includedInAdjustedComparison: true,
+                      status: active ? "Incluido" : "Ignorado",
+                    })
+                  }
+                  label="Activo"
+                  description="Los conceptos desactivados se ignoran al actualizar datos."
+                />
               </div>
 
               <label className="mt-5 block text-sm font-semibold text-ink">
                 Motivo
                 <textarea value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} className="mt-2 min-h-28 w-full rounded-2xl border border-line p-4 text-sm" />
               </label>
-
-              <details className="mt-5 rounded-2xl bg-slate-50 p-4">
-                <summary className="cursor-pointer text-sm font-semibold text-ink">Opciones avanzadas</summary>
-                <div className="mt-4 grid gap-4 md:grid-cols-2">
-                  <label className="block text-sm font-semibold text-ink">
-                    Origen
-                    <select value={form.sourceType} onChange={(event) => setForm({ ...form, sourceType: event.target.value as ConceptMappingSourceType })} className="mt-2 h-12 w-full rounded-full border border-line px-4 text-sm">
-                      {SOURCE_TYPES.map((item) => <option key={item}>{item}</option>)}
-                    </select>
-                  </label>
-                  <label className="block text-sm font-semibold text-ink">
-                    Prioridad deduplicación
-                    <select value={form.dedupePriority} onChange={(event) => setForm({ ...form, dedupePriority: event.target.value as ConceptDedupePriority })} className="mt-2 h-12 w-full rounded-full border border-line px-4 text-sm">
-                      {DEDUPE_PRIORITIES.map((item) => <option key={item}>{item}</option>)}
-                    </select>
-                  </label>
-                  <Toggle checked={form.allowInformative} onChange={(allowInformative) => setForm({ ...form, allowInformative })} label="Permitir informativos" description="Permite usar conceptos informativos si la regla lo requiere." />
-                  <Toggle checked={form.includedInComparison} onChange={(includedInComparison) => setForm({ ...form, includedInComparison })} label="Incluido en diferencia bruta" description="No activa diferencia ajustada; solo mantiene el cálculo bruto actual." />
-                  <Toggle
-                    checked={form.status === "Justificado" ? false : form.includedInAdjustedComparison}
-                    onChange={(includedInAdjustedComparison) => setForm({ ...form, includedInAdjustedComparison: form.status === "Justificado" ? false : includedInAdjustedComparison })}
-                    label="Preparado para diferencia ajustada"
-                    description="Campo de mapa; la diferencia ajustada se aplicará en una subfase posterior."
-                  />
-                </div>
-              </details>
 
               <div className="mt-5 flex flex-wrap justify-end gap-2">
                 <button type="button" className="btn-secondary" onClick={() => setEditingIndex(undefined)}>Cancelar</button>
