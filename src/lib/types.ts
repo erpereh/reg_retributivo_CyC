@@ -321,6 +321,36 @@ export interface GroupingComparisonRow {
   readonly detail: string;
 }
 
+export type GroupedExcelCellKind = "text" | "number" | "percent" | "empty";
+export type GroupedExcelSheetStatus = "ready" | "missing" | "empty";
+
+export interface GroupedExcelColumn {
+  readonly key: string;
+  readonly label: string;
+  readonly sourceColumn: string;
+  readonly kind: GroupedExcelCellKind;
+}
+
+export interface GroupedExcelCell {
+  readonly value: string | number | boolean | null;
+  readonly display: string;
+  readonly kind: GroupedExcelCellKind;
+}
+
+export type GroupedExcelRow = Readonly<Record<string, GroupedExcelCell>>;
+
+export interface GroupedExcelSheet {
+  readonly sheetName: string;
+  readonly status: GroupedExcelSheetStatus;
+  readonly columns: readonly GroupedExcelColumn[];
+  readonly rows: readonly GroupedExcelRow[];
+  readonly visibleRowCount: number;
+  readonly visibleColumnCount: number;
+  readonly truncated?: boolean;
+  readonly originalRowCount?: number;
+  readonly savedRowCount?: number;
+}
+
 export interface AnalysisSummary {
   readonly generatedAt: string;
   readonly pdfsAnalyzed: number;
@@ -424,6 +454,7 @@ export interface AnalysisResult {
   readonly pdfWithoutRegistro?: readonly PersonComparisonRow[];
   readonly registroWithoutPdf?: readonly PersonComparisonRow[];
   readonly groupings: readonly GroupingComparisonRow[];
+  readonly groupedExcelSheets?: readonly GroupedExcelSheet[];
   readonly internalExcelChecks: readonly InternalExcelCheckRow[];
   readonly conceptMap: readonly ConceptMappingRule[];
   readonly excludedEmployeeIdsApplied: readonly string[];

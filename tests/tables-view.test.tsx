@@ -6,6 +6,75 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { TablesView } from "@/components/tables/TablesView";
 
+const groupedExcelSheetsFixture = [
+  {
+    sheetName: "Análisis por puesto",
+    status: "ready",
+    columns: [
+      { key: "c0", label: "Puesto", sourceColumn: "A", kind: "text" },
+      { key: "c1", label: "Total personas · Mujeres", sourceColumn: "B", kind: "number" },
+      { key: "c2", label: "Total personas · Varones", sourceColumn: "C", kind: "number" },
+    ],
+    rows: [
+      {
+        c0: { value: "Administrativo/a Técnico SACYC", display: "Administrativo/a Técnico SACYC", kind: "text" },
+        c1: { value: 1, display: "1", kind: "number" },
+        c2: { value: 0, display: "0", kind: "number" },
+      },
+      {
+        c0: { value: "Control de Calidad", display: "Control de Calidad", kind: "text" },
+        c1: { value: 2, display: "2", kind: "number" },
+        c2: { value: 1, display: "1", kind: "number" },
+      },
+    ],
+    visibleRowCount: 2,
+    visibleColumnCount: 3,
+  },
+  {
+    sheetName: "Análisis por valoración puesto",
+    status: "ready",
+    columns: [
+      { key: "c0", label: "Valoración Retributiva", sourceColumn: "A", kind: "text" },
+      { key: "c1", label: "Total personas · Mujeres", sourceColumn: "B", kind: "number" },
+    ],
+    rows: [
+      {
+        c0: { value: "[SIN DEFINIR]", display: "[SIN DEFINIR]", kind: "text" },
+        c1: { value: 30, display: "30", kind: "number" },
+      },
+    ],
+    visibleRowCount: 1,
+    visibleColumnCount: 2,
+  },
+  {
+    sheetName: "Análisis por categoría",
+    status: "missing",
+    columns: [],
+    rows: [],
+    visibleRowCount: 0,
+    visibleColumnCount: 0,
+  },
+  {
+    sheetName: "Análisis por familia de puesto",
+    status: "empty",
+    columns: [],
+    rows: [],
+    visibleRowCount: 0,
+    visibleColumnCount: 0,
+  },
+  {
+    sheetName: "Agrupación Categoría Personal",
+    status: "ready",
+    truncated: true,
+    originalRowCount: 2500,
+    savedRowCount: 2000,
+    columns: [{ key: "c0", label: "Agrup. Cat. Personal", sourceColumn: "A", kind: "text" }],
+    rows: [{ c0: { value: "Oficial de Primera", display: "Oficial de Primera", kind: "text" } }],
+    visibleRowCount: 1,
+    visibleColumnCount: 1,
+  },
+];
+
 const appState = {
   value: {
     result: {
@@ -298,6 +367,7 @@ const appState = {
         },
       ],
       groupings: [],
+      groupedExcelSheets: structuredClone(groupedExcelSheetsFixture),
     },
     filters: { query: "", center: "", group: "", status: "" },
     setFilters: vi.fn(),
@@ -323,6 +393,7 @@ describe("TablesView", () => {
     window.localStorage.clear();
     vi.restoreAllMocks();
     appState.value.result.groupings = [];
+    appState.value.result.groupedExcelSheets = structuredClone(groupedExcelSheetsFixture);
     appState.value.aiStatus = { configured: false, enabled: false, model: "gemini-3.1-flash-lite" };
     appState.value.settings = { autoExplainOnOpen: false };
   });
@@ -355,8 +426,7 @@ describe("TablesView", () => {
 
     rerender(<TablesView mode="agrupaciones" />);
     expect(screen.getByRole("heading", { name: "Agrupaciones" })).toBeTruthy();
-    expect(screen.getByText(/Comprueba que las hojas agrupadas del Reg\. Retrib\. cuadran con los datos recalculados desde la hoja Empleados/i)).toBeTruthy();
-    expect(screen.getByText(/Las agrupaciones usan importes matched del análisis\./i)).toBeTruthy();
+    expect(screen.getByText(/Consulta las hojas agrupadas incluidas en el Excel Reg\. Retrib\./i)).toBeTruthy();
     expect(screen.queryByText(/ajustad/i)).toBeNull();
   });
 
@@ -628,7 +698,59 @@ describe("TablesView", () => {
     expect(screen.getByText(/Suma diferencia visible/i)).toBeTruthy();
   });
 
-  test("separates Excel validation from grouped PDF comparison", () => {
+  test("renders Agrupaciones as a grouped Excel sheet viewer", () => {
+    render(<TablesView mode="agrupaciones" />);
+
+    expect(screen.getByRole("button", { name: "Análisis por puesto" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Análisis por valoración puesto" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Análisis por categoría" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Análisis por familia de puesto" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Agrupación Categoría Personal" })).toBeTruthy();
+    expect(screen.getByText("Hoja")).toBeTruthy();
+    expect(screen.getByText("Filas visibles")).toBeTruthy();
+    expect(screen.getByText("Columnas visibles")).toBeTruthy();
+    expect(screen.getByPlaceholderText("Buscar en esta hoja")).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Puesto" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Total personas · Mujeres" })).toBeTruthy();
+    expect(screen.getByText("Administrativo/a Técnico SACYC")).toBeTruthy();
+    expect(screen.getByText("Control de Calidad")).toBeTruthy();
+
+    expect(screen.queryByText("Validación Excel")).toBeNull();
+    expect(screen.queryByText("Comparación Recibo")).toBeNull();
+    expect(screen.queryByText("Dif. Excel")).toBeNull();
+    expect(screen.queryByText("Dif. Recibo")).toBeNull();
+    expect(screen.queryByText("Estado Excel")).toBeNull();
+    expect(screen.queryByText("Estado Recibo")).toBeNull();
+    expect(screen.queryByText(/recalculado/i)).toBeNull();
+    expect(screen.queryByText(/matched/i)).toBeNull();
+
+    fireEvent.change(screen.getByPlaceholderText("Buscar en esta hoja"), { target: { value: "calidad" } });
+    expect(screen.queryByText("Administrativo/a Técnico SACYC")).toBeNull();
+    expect(screen.getByText("Control de Calidad")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Análisis por valoración puesto" }));
+    expect(screen.getByRole("columnheader", { name: "Valoración Retributiva" })).toBeTruthy();
+    expect(screen.getByText("[SIN DEFINIR]")).toBeTruthy();
+  });
+
+  test("shows clean states for missing, empty, legacy and truncated grouped sheets", () => {
+    render(<TablesView mode="agrupaciones" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Análisis por categoría" }));
+    expect(screen.getByText("No se ha encontrado esta hoja en el Excel Reg. Retrib.")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Análisis por familia de puesto" }));
+    expect(screen.getByText("No hay datos visibles en esta hoja.")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Agrupación Categoría Personal" }));
+    expect(screen.getByText("Esta hoja se guardó parcialmente en Historial para mantener el rendimiento. Vuelve a analizar el Excel para ver todos los datos.")).toBeTruthy();
+
+    appState.value.result.groupedExcelSheets = undefined as never;
+    render(<TablesView mode="agrupaciones" />);
+    expect(screen.getByText("Este análisis no contiene datos de hojas agrupadas. Vuelve a analizar el Excel para visualizarlas.")).toBeTruthy();
+  });
+
+  test.skip("legacy grouped PDF comparison is removed", () => {
     appState.value.result.groupings = [
       {
         sourceSheet: "Análisis por puesto",
@@ -750,7 +872,7 @@ describe("TablesView", () => {
     expect(screen.getAllByText("Esta diferencia corresponde a la métrica agrupada seleccionada.").length).toBeGreaterThan(0);
   });
 
-  test("normalizes negative zero in grouped PDF display", () => {
+  test.skip("legacy grouped PDF negative-zero display is removed", () => {
     appState.value.result.groupings = [
       {
         sourceSheet: "Análisis por puesto",

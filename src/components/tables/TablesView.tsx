@@ -818,7 +818,7 @@ function viewSubtitle(mode: Extract<AppView, "personas" | "conceptos" | "agrupac
   if (mode === "conceptos") {
     return "Revisa el detalle concepto a concepto para localizar qué partidas cuadran, cuáles generan diferencias y cuáles requieren revisión.";
   }
-  return "Comprueba que las hojas agrupadas del Reg. Retrib. cuadran con los datos recalculados desde la hoja Empleados. Las agrupaciones usan importes matched del análisis.";
+  return "Consulta las hojas agrupadas incluidas en el Excel Reg. Retrib.";
 }
 
 export function TablesView({ mode }: Readonly<{ mode: Extract<AppView, "personas" | "conceptos" | "agrupaciones"> }>) {

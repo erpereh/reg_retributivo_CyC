@@ -3,7 +3,7 @@ import { getGeminiModel } from "@/lib/ai/geminiClient";
 import { compareAnalysis } from "@/lib/compare/comparePeople";
 import { buildDefaultConceptMap, mergeConceptMap, validateConceptMapForCodes } from "@/lib/compare/conceptMapping";
 import { DEFAULT_INCIDENT_THRESHOLD, DEFAULT_REVIEW_THRESHOLD } from "@/lib/compare/salaryDiff";
-import { buildRegistroGroupingComparisons, enrichRegistroGroupingsWithPdf } from "@/lib/groupings/registroGroupings";
+import { extractGroupedExcelSheets } from "@/lib/groupings/groupedExcelSheets";
 import { parsePayrollPdf } from "@/lib/parsers/payrollPdfParser";
 import { parseRegistroRetributivo } from "@/lib/parsers/registroRetributivoParser";
 import type { AnalysisError, AnalysisResult, PayrollRecord } from "@/lib/types";
@@ -72,12 +72,7 @@ export async function POST(request: Request) {
     const registroBuffer = await fileToBuffer(registro);
     const registroParsed = await parseRegistroRetributivo(registroBuffer);
     errors.push(...registroParsed.warnings.map((message) => validationError(registro.name, message)));
-    const groupingResult = buildRegistroGroupingComparisons(registroBuffer, registroParsed.records, {
-      tolerance,
-      reviewThreshold,
-      incidentThreshold,
-    });
-    errors.push(...groupingResult.warnings.map((message) => validationError(registro.name, message)));
+    const groupedExcelSheets = extractGroupedExcelSheets(registroBuffer);
     const userConceptMap = parseConceptMap(formData.get("conceptMap"));
     const conceptMap = validateConceptMapForCodes(
       mergeConceptMap([...buildDefaultConceptMap(registroParsed.conceptCodes), ...userConceptMap]),
@@ -110,32 +105,21 @@ export async function POST(request: Request) {
       internalExcelChecks: registroParsed.internalChecks,
       excludedEmployeeIds,
     });
-    const enrichedGroupings = enrichRegistroGroupingsWithPdf(
-      groupingResult.rows,
-      registroParsed.records,
-      result.people,
-      result.pdfWithoutRegistro,
-      {
-        tolerance,
-        reviewThreshold,
-        incidentThreshold,
-      },
-    );
     const response: AnalysisResult = {
       ...result,
       summary: {
         ...result.summary,
         pdfsFailed: errors.filter((error) => error.type === "pdf").length,
-        groupingDifferences: enrichedGroupings.filter((row) => row.status !== "OK").length,
+        groupingDifferences: 0,
       },
-      groupings: enrichedGroupings,
+      groupings: [],
+      groupedExcelSheets,
       errors: [...result.errors, ...errors],
       criteria: [
         ...result.criteria,
         `Hoja Registro detectada: ${registroParsed.sheetName}.`,
-        `Agrupaciones Registro detectadas: ${groupingResult.detectedSheets.length} hojas y ${groupingResult.groupCount} agrupaciones.`,
+        `Hojas agrupadas Registro leídas: ${groupedExcelSheets.filter((sheet) => sheet.status === "ready").length} hojas.`,
         ...registroParsed.warnings,
-        ...groupingResult.warnings,
       ],
     };
 

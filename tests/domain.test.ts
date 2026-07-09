@@ -1,10 +1,12 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import ExcelJS from "exceljs";
+import * as XLSX from "xlsx";
 import { describe, expect, test } from "vitest";
 import { compareAnalysis } from "@/lib/compare/comparePeople";
 import { buildDefaultConceptMap } from "@/lib/compare/conceptMapping";
 import { exportAnalysisToWorkbook } from "@/lib/export/exportExcel";
+import { extractGroupedExcelSheets } from "@/lib/groupings/groupedExcelSheets";
 import { buildRegistroGroupingComparisons, enrichRegistroGroupingsWithPdf, median, REGISTRO_GROUPING_BASES } from "@/lib/groupings/registroGroupings";
 import { parsePayrollPdf } from "@/lib/parsers/payrollPdfParser";
 import { parseRegistroRetributivo } from "@/lib/parsers/registroRetributivoParser";
@@ -147,6 +149,49 @@ describe("Registro grouped sheets", () => {
     expect(median([3, 1, 2])).toBe(2);
     expect(median([10, 1, 5, 7])).toBe(6);
     expect(median([undefined, Number.NaN, "x"])).toBe(0);
+  });
+
+  test("extracts grouped Excel sheets as original visible table data", () => {
+    const result = extractGroupedExcelSheets(readFileSync(registroFile));
+    const puesto = result.find((sheet) => sheet.sheetName === "Análisis por puesto");
+
+    expect(result.map((sheet) => sheet.sheetName)).toEqual([
+      "Análisis por puesto",
+      "Análisis por valoración puesto",
+      "Análisis por categoría",
+      "Análisis por familia de puesto",
+      "Agrupación Categoría Personal",
+    ]);
+    expect(puesto?.status).toBe("ready");
+    expect(puesto?.visibleRowCount).toBeGreaterThan(20);
+    expect(puesto?.visibleColumnCount).toBeGreaterThan(50);
+    expect(puesto?.columns.map((column) => column.label)).toContain("Puesto");
+    expect(puesto?.columns.map((column) => column.label)).toContain("Total personas · Mujeres");
+    expect(puesto?.columns.map((column) => column.label)).toContain("Total retribuciones normalizadas + variables · Salario · Media · Mujeres");
+    expect(JSON.stringify(puesto?.rows[0])).toContain("Administrativa/o Fuentes Públicas");
+    expect(JSON.stringify(puesto?.rows[0])).not.toContain("REGISTRO RETRIBUTIVO");
+  });
+
+  test("extracts grouped Excel sheets with a generic fallback when standard headers vary", () => {
+    const workbook = XLSX.utils.book_new();
+    const sheet = XLSX.utils.aoa_to_sheet([
+      ["REGISTRO RETRIBUTIVO (HEREDADO)"],
+      [],
+      ["PERÍODO DE CÁLCULO", "2025"],
+      [],
+      ["Código", "Nombre", "Importe"],
+      ["A1", "Grupo fallback", 123.45],
+    ]);
+    XLSX.utils.book_append_sheet(workbook, sheet, "Análisis por puesto");
+    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer;
+
+    const result = extractGroupedExcelSheets(buffer);
+    const puesto = result[0];
+
+    expect(puesto.status).toBe("ready");
+    expect(puesto.columns.map((column) => column.label)).toEqual(["Código", "Nombre", "Importe"]);
+    expect(puesto.rows[0]?.c1.display).toBe("Grupo fallback");
+    expect(puesto.rows[0]?.c2.value).toBe(123.45);
   });
 
   test("detects the five grouped sheets and recalculates the real Excel from Empleados", async () => {
@@ -1065,7 +1110,7 @@ describe("Excel export", () => {
     expect(workbook.getWorksheet("Conceptos_sin_mapear")).toBeUndefined();
     expect(workbook.getWorksheet("Dashboard")?.getCell("B2").value).toBe("Comparativa Recibos vs Registro Retributivo");
     expect(workbook.getWorksheet("Dashboard")?.getCell("E4").value).toBe("Reg. Retrib.: registro.xlsx");
-    expect(workbook.getWorksheet("Agrupaciones")?.getCell("A3").value).toBe("Pendiente de implementacion / Sin datos calculados");
+    expect(workbook.getWorksheet("Agrupaciones")?.getCell("A3").value).toBe("Este analisis no contiene datos de hojas agrupadas. Vuelve a analizar el Excel para visualizarlas.");
     workbook.worksheets.forEach((sheet) => {
       expect(sheet.views[0]?.state).toBe("frozen");
       expect(sheet.autoFilter).toBeTruthy();
@@ -1201,7 +1246,49 @@ describe("Excel export", () => {
     expect((exportedConcept?.getCell(1).fill as { fgColor?: { argb?: string } }).fgColor?.argb).toBeTruthy();
   });
 
-  test("exports Agrupaciones with real Registro, Empleados and PDF grouped columns", async () => {
+  test("exports Agrupaciones with original grouped Excel sheet sections", async () => {
+    const analysis = await compareAnalysis([], [], {
+      tolerance: 1,
+      conceptMap: [],
+      enableAI: false,
+    });
+    const workbook = await exportAnalysisToWorkbook({
+      ...analysis,
+      groupedExcelSheets: [
+        {
+          sheetName: "Análisis por puesto",
+          status: "ready",
+          columns: [
+            { key: "c0", label: "Puesto", sourceColumn: "A", kind: "text" },
+            { key: "c1", label: "Total personas · Mujeres", sourceColumn: "B", kind: "number" },
+          ],
+          rows: [
+            {
+              c0: { value: "Administrativo/a Técnico SACYC", display: "Administrativo/a Técnico SACYC", kind: "text" },
+              c1: { value: 1, display: "1", kind: "number" },
+            },
+          ],
+          visibleRowCount: 1,
+          visibleColumnCount: 2,
+        },
+      ],
+    });
+    const sheet = workbook.getWorksheet("Agrupaciones");
+    const serialized = JSON.stringify(sheet?.model);
+
+    expect(sheet?.getCell("A1").value).toBe("Agrupaciones");
+    expect(serialized).toContain("Análisis por puesto");
+    expect(serialized).toContain("Administrativo/a Técnico SACYC");
+    expect(serialized).toContain("Total personas · Mujeres");
+    expect(serialized).not.toContain("Dif. Excel");
+    expect(serialized).not.toContain("Dif. Recibo");
+    expect(serialized).not.toContain("Estado Excel");
+    expect(serialized).not.toContain("Estado Recibo");
+    expect(serialized).not.toContain("Recalculado Empleados");
+    expect(serialized).not.toContain("Recibo recalculado");
+  });
+
+  test.skip("legacy Agrupaciones export with calculated grouped differences is removed", async () => {
     const registro = await parseRegistroRetributivo(readFileSync(registroFile));
     const groupingResult = buildRegistroGroupingComparisons(readFileSync(registroFile), registro.records, {
       tolerance: 1,
@@ -1244,7 +1331,7 @@ describe("Excel export", () => {
     expect(normalizedRow?.getCell(pdfStatusColumn).value).toBe("No aplica");
   });
 
-  test("normalizes negative zero in Agrupaciones export", async () => {
+  test.skip("legacy Agrupaciones export negative-zero normalization is removed", async () => {
     const analysis = await compareAnalysis([], [], {
       tolerance: 1,
       conceptMap: [],

@@ -1,4 +1,4 @@
-import type { AnalysisConfig, ConceptMappingRule, StoredAnalysis } from "@/lib/types";
+import type { AnalysisConfig, ConceptMappingRule, GroupedExcelSheet, StoredAnalysis } from "@/lib/types";
 import { normalizeEmployeeId } from "@/lib/utils/normalize";
 
 const DB_NAME = "retributivo-analysis-v1";
@@ -8,6 +8,8 @@ const ACTIVE_ANALYSIS_KEY = "retributivo.activeAnalysisId.v1";
 const SETTINGS_KEY = "retributivo.settings.v1";
 
 export const STORAGE_SCHEMA_VERSION = 2;
+const MAX_GROUPED_EXCEL_CELLS = 100_000;
+const MAX_GROUPED_EXCEL_ROWS_PER_SHEET = 2_000;
 
 export interface AppSettings {
   readonly defaultTolerance: number;
@@ -127,6 +129,50 @@ function normalizeStoredAnalysis(record: unknown): StoredAnalysis | undefined {
   };
 }
 
+function groupedSheetCellCount(sheet: GroupedExcelSheet): number {
+  return sheet.rows.length * Math.max(sheet.columns.length, 1);
+}
+
+function truncateGroupedExcelSheets(sheets: readonly GroupedExcelSheet[] | undefined): readonly GroupedExcelSheet[] | undefined {
+  if (!sheets) {
+    return undefined;
+  }
+
+  let remainingCells = MAX_GROUPED_EXCEL_CELLS;
+  return sheets.map((sheet) => {
+    const originalRowCount = sheet.originalRowCount ?? sheet.rows.length;
+    const maxRowsByCells = Math.floor(remainingCells / Math.max(sheet.columns.length, 1));
+    const maxRows = Math.max(0, Math.min(MAX_GROUPED_EXCEL_ROWS_PER_SHEET, maxRowsByCells));
+    const rows = sheet.rows.slice(0, maxRows);
+    remainingCells = Math.max(0, remainingCells - groupedSheetCellCount({ ...sheet, rows }));
+    const truncated = Boolean(sheet.truncated) || rows.length < sheet.rows.length || rows.length < originalRowCount;
+
+    if (!truncated) {
+      return sheet;
+    }
+
+    return {
+      ...sheet,
+      rows,
+      visibleRowCount: rows.length,
+      truncated: true,
+      originalRowCount,
+      savedRowCount: rows.length,
+    };
+  });
+}
+
+function normalizeAnalysisForSave(record: StoredAnalysis): StoredAnalysis {
+  return {
+    ...record,
+    schemaVersion: STORAGE_SCHEMA_VERSION,
+    result: {
+      ...record.result,
+      groupedExcelSheets: truncateGroupedExcelSheets(record.result.groupedExcelSheets),
+    },
+  };
+}
+
 function filterCompatibleAnalyses(records: readonly unknown[]): StoredAnalysis[] {
   return records.map(normalizeStoredAnalysis).filter((item): item is StoredAnalysis => Boolean(item));
 }
@@ -235,7 +281,7 @@ function writeFallbackHistory(records: readonly StoredAnalysis[]): void {
 }
 
 export async function saveAnalysis(record: StoredAnalysis): Promise<void> {
-  const normalized = { ...record, schemaVersion: STORAGE_SCHEMA_VERSION };
+  const normalized = normalizeAnalysisForSave(record);
   if (hasIndexedDb()) {
     await withStore("readwrite", (store) => store.put(normalized));
     return;

@@ -27,7 +27,7 @@ export interface ExportWorkbookMetadata {
 
 const NOTE_MATCHED = "La diferencia matched no incluye Recibo sin Reg. Retrib. ni conceptos pendientes de decision.";
 const NOTE_PDF_WITHOUT_REGISTRO = "Recibo sin Reg. Retrib. se muestra separado porque no existe matricula equivalente en el Reg. Retrib.";
-const NOTE_GROUPINGS = "Las diferencias de agrupaciones Recibo son por metrica agrupada; medias y medianas no son importes aditivos.";
+const NOTE_GROUPED_SHEETS = "Datos originales leidos de las hojas agrupadas del Excel Reg. Retrib.";
 
 function configureColumns(sheet: ExcelJS.Worksheet, widths: readonly number[]): void {
   widths.forEach((width, index) => {
@@ -159,6 +159,14 @@ function maxGroupedPdfDifference(analysis: AnalysisResult): number {
   return values.length ? Math.max(...values) : 0;
 }
 
+function groupedReadySheetCount(analysis: AnalysisResult): number {
+  return analysis.groupedExcelSheets?.filter((sheet) => sheet.status === "ready").length ?? 0;
+}
+
+function groupedVisibleRowCount(analysis: AnalysisResult): number {
+  return analysis.groupedExcelSheets?.reduce((sum, sheet) => sum + sheet.rows.length, 0) ?? 0;
+}
+
 function internalExcelStatus(analysis: AnalysisResult): string {
   const total = analysis.internalExcelChecks.length;
   const ok = analysis.internalExcelChecks.filter((row) => row.status === "OK").length;
@@ -267,7 +275,7 @@ function addDashboard(workbook: ExcelJS.Workbook, analysis: AnalysisResult, meta
 
   addDashboardCard(sheet, 20, 2, "Conceptos ignorados", analysis.summary.conceptsIgnored ?? 0, "Excluidos por criterio", "gray");
   addDashboardCard(sheet, 20, 5, "Cuadre interno Excel", internalExcelStatus(analysis), `${analysis.summary.internalExcelDifferences} con diferencia`, analysis.summary.internalExcelDifferences ? "orange" : "green");
-  addDashboardCard(sheet, 20, 8, "Agrupaciones Recibo", groupingPdfAffectedCount(analysis), `${groupingPdfDifferenceCount(analysis)} filas con diferencia`, groupingPdfDifferenceCount(analysis) ? "orange" : "green");
+  addDashboardCard(sheet, 20, 8, "Hojas agrupadas", groupedReadySheetCount(analysis), `${groupedVisibleRowCount(analysis)} filas visibles`, groupedReadySheetCount(analysis) ? "blue" : "gray");
 
   addSectionHeader(sheet, 25, "Resumen separado de importes y estados", 2, 9);
   const header = sheet.getRow(26);
@@ -282,7 +290,7 @@ function addDashboard(workbook: ExcelJS.Workbook, analysis: AnalysisResult, meta
     ["Diferencia total matched", analysis.summary.matchedTotalDifference ?? analysis.summary.totalGlobalDifference, "Solo Reg. Retrib./Recibo encontrados", NOTE_MATCHED],
     ["Recibo sin Reg. Retrib.", analysis.summary.totalPdfWithoutRegistro ?? 0, `${analysis.summary.peopleInPdfWithoutRegistro ?? 0} personas`, NOTE_PDF_WITHOUT_REGISTRO],
     ["Importe pendiente de decision", analysis.summary.pendingDecisionPdfTotal ?? 0, `${analysis.summary.conceptsPendingReview ?? 0} conceptos pendientes`, "No incluido en la diferencia matched hasta decision manual."],
-    ["Agrupaciones Recibo", maxGroupedPdfDifference(analysis), `${groupingPdfDifferenceCount(analysis)} filas con diferencia`, NOTE_GROUPINGS],
+    ["Hojas agrupadas", groupedReadySheetCount(analysis), `${groupedVisibleRowCount(analysis)} filas visibles`, NOTE_GROUPED_SHEETS],
   ].forEach(([name, value, detail, note]) => {
     const row = sheet.addRow([]);
     sheet.mergeCells(row.number, 2, row.number, 3);
@@ -301,7 +309,7 @@ function addDashboard(workbook: ExcelJS.Workbook, analysis: AnalysisResult, meta
   sheet.autoFilter = { from: { row: 26, column: 2 }, to: { row: 32, column: 9 } };
 
   addSectionHeader(sheet, 35, "Notas de lectura", 2, 9);
-  [NOTE_MATCHED, NOTE_PDF_WITHOUT_REGISTRO, NOTE_GROUPINGS].forEach((note) => {
+  [NOTE_MATCHED, NOTE_PDF_WITHOUT_REGISTRO, NOTE_GROUPED_SHEETS].forEach((note) => {
     const row = sheet.addRow([undefined, note]);
     sheet.mergeCells(row.number, 2, row.number, 9);
     styleNoteRow(row, 2, 9);
@@ -334,9 +342,8 @@ function addResumen(workbook: ExcelJS.Workbook, analysis: AnalysisResult, metada
     ["Recibo / Reg. Retrib. sin pareja", "Recibo sin Reg. Retrib.", analysis.summary.peopleInPdfWithoutRegistro ?? 0, `${formatMoneyText(analysis.summary.totalPdfWithoutRegistro ?? 0)} EUR separado`],
     ["Recibo / Reg. Retrib. sin pareja", "Reg. Retrib. sin Recibo", analysis.summary.peopleInRegistroWithoutPdf ?? 0, ""],
     ["Cuadre interno Excel", "Cuadres internos con diferencias", analysis.summary.internalExcelDifferences, internalExcelStatus(analysis)],
-    ["Agrupaciones", "Agrupaciones Excel con diferencia", groupingExcelDifferenceCount(analysis), "Validacion hoja agrupada vs Empleados"],
-    ["Agrupaciones", "Agrupaciones Recibo con diferencia", groupingPdfDifferenceCount(analysis), NOTE_GROUPINGS],
-    ["Agrupaciones", "Mayor diferencia Recibo agrupada", zeroMoney(maxGroupedPdfDifference(analysis)) ?? 0, "No sumar diferencias agrupadas como total salarial"],
+    ["Agrupaciones", "Hojas agrupadas leidas", groupedReadySheetCount(analysis), NOTE_GROUPED_SHEETS],
+    ["Agrupaciones", "Filas visibles en hojas agrupadas", groupedVisibleRowCount(analysis), "Datos originales del Excel Reg. Retrib."],
     ["Criterios principales", "IA", analysis.summary.aiEnabled || metadata.aiEnabled ? "Activa" : "No activa", "Sin API key ni solicitudes/respuestas IA"],
   ].forEach((row) => sheet.addRow(row));
   finalizeTableSheet(sheet, {
@@ -576,7 +583,7 @@ function addNormalizado(workbook: ExcelJS.Workbook, analysis: AnalysisResult): v
 function addPersonasSinRegistro(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void {
   const sheet = workbook.addWorksheet("PDF_sin_Registro");
   sheet.mergeCells("A1:K1");
-  sheet.getCell("A1").value = "Estas matriculas se excluyen de la diferencia matched y de agrupaciones Recibo porque no tienen datos maestros en Reg. Retrib.";
+  sheet.getCell("A1").value = "Estas matriculas se excluyen de la diferencia matched porque no tienen datos maestros en Reg. Retrib.";
   styleNoteRow(sheet.getRow(1), 1, 11);
   const headers = ["Matricula", "Persona", "Centro", "Salario Recibo", "C. Salarial Recibo", "Extrasalarial Recibo", "Total Recibo", "N recibos", "Periodos", "Estado", "Observacion"];
   sheet.addRow(headers);
@@ -685,75 +692,71 @@ function addCuadreInterno(workbook: ExcelJS.Workbook, analysis: AnalysisResult):
 
 function addAgrupaciones(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void {
   const sheet = workbook.addWorksheet("Agrupaciones");
-  sheet.mergeCells("A1:S1");
-  sheet.getCell("A1").value =
-    "La validacion interna Excel se calcula sobre el Reg. Retrib. completo. Las exclusiones manuales se aplican a comparativas Recibo/matched y resultados de analisis. Medias y medianas no son importes aditivos.";
-  styleNoteRow(sheet.getRow(1), 1, 19);
-  const headers = [
-    "Hoja",
-    "Base Reg. Retrib.",
-    "Agrupacion",
-    "Bloque",
-    "Metrica",
-    "Segmento",
-    "Hoja agrupada",
-    "Recalculado Empleados",
-    "Dif. Excel",
-    "Estado Excel",
-    "Reg. Retrib. periodo completo matched",
-    "Recibo recalculado",
-    "Dif. Recibo",
-    "Estado Recibo",
-    "N personas",
-    "N matched",
-    "Mujeres",
-    "Varones",
-    "Detalle",
-  ];
-  sheet.addRow(headers);
-  styleHeaderRow(sheet.getRow(2));
-  if (!analysis.groupings.length) {
-    addEmptyState(sheet, "Pendiente de implementacion / Sin datos calculados", headers.length);
-  } else {
-    analysis.groupings.forEach((item) => {
-      const row = sheet.addRow([
-        item.sourceSheet,
-        item.registroBase,
-        item.groupName,
-        item.block,
-        item.metric,
-        item.segment,
-        zeroGroupingValue(item, item.registroSheetValue),
-        zeroGroupingValue(item, item.registroRecalculatedValue),
-        zeroGroupingValue(item, item.excelDifference),
-        item.status,
-        groupingPdfExportValue(item, item.pdfRegistroRecalculatedValue),
-        groupingPdfExportValue(item, item.pdfRecalculatedValue),
-        groupingPdfExportValue(item, item.pdfDifference),
-        item.pdfStatus ?? "Sin datos",
-        item.peopleCount,
-        item.matchedPeopleCount ?? 0,
-        item.womenCount,
-        item.menCount,
-        item.detail,
-      ]);
-      applyStatusStyle(row.getCell(10), item.status);
-      applyStatusStyle(row.getCell(14), item.pdfStatus ?? "Sin datos");
-      const numericColumns = [7, 8, 9, 11, 12, 13];
-      numericColumns.forEach((column) => {
-        if (typeof row.getCell(column).value === "number") {
-          row.getCell(column).numFmt = isPercentageGrouping(item) ? PERCENT_FORMAT : EURO_FORMAT;
+  sheet.getCell("A1").value = "Agrupaciones";
+  styleTitle(sheet.getCell("A1"));
+  sheet.addRow(["Consulta las hojas agrupadas incluidas en el Excel Reg. Retrib."]);
+  styleNoteRow(sheet.getRow(2), 1, 6);
+
+  const groupedSheets = analysis.groupedExcelSheets;
+  if (!groupedSheets?.length) {
+    addEmptyState(sheet, "Este analisis no contiene datos de hojas agrupadas. Vuelve a analizar el Excel para visualizarlas.", 6);
+    finalizeTableSheet(sheet, {
+      headerRow: 3,
+      headerRows: [1],
+      widths: [32, 24, 24, 24, 24, 24],
+      autoFilterToColumn: 6,
+    });
+    return;
+  }
+
+  let widestColumnCount = 6;
+  const headerRows = [1];
+  groupedSheets.forEach((groupedSheet) => {
+    sheet.addRow([]);
+    const sectionRow = sheet.addRow([groupedSheet.sheetName]);
+    const maxColumn = Math.max(groupedSheet.columns.length, 1);
+    widestColumnCount = Math.max(widestColumnCount, maxColumn);
+    sheet.mergeCells(sectionRow.number, 1, sectionRow.number, maxColumn);
+    styleSectionTitle(sectionRow.getCell(1));
+
+    const summaryRow = sheet.addRow([`Filas visibles: ${groupedSheet.rows.length}`, `Columnas visibles: ${groupedSheet.visibleColumnCount}`]);
+    styleNoteRow(summaryRow, 1, Math.min(maxColumn, 2));
+    if (groupedSheet.truncated) {
+      const warningRow = sheet.addRow(["Esta hoja se guardo parcialmente en Historial para mantener el rendimiento. Vuelve a analizar el Excel para ver todos los datos."]);
+      sheet.mergeCells(warningRow.number, 1, warningRow.number, maxColumn);
+      styleNoteRow(warningRow, 1, maxColumn);
+    }
+
+    if (groupedSheet.status === "missing") {
+      addEmptyState(sheet, "No se ha encontrado esta hoja en el Excel Reg. Retrib.", maxColumn);
+      return;
+    }
+    if (groupedSheet.status === "empty" || !groupedSheet.rows.length || !groupedSheet.columns.length) {
+      addEmptyState(sheet, "No hay datos visibles en esta hoja.", maxColumn);
+      return;
+    }
+
+    const header = sheet.addRow(groupedSheet.columns.map((column) => column.label));
+    headerRows.push(header.number);
+    styleHeaderRow(header);
+    groupedSheet.rows.forEach((sourceRow) => {
+      const row = sheet.addRow(groupedSheet.columns.map((column) => sourceRow[column.key]?.value ?? sourceRow[column.key]?.display ?? ""));
+      groupedSheet.columns.forEach((column, index) => {
+        const cell = row.getCell(index + 1);
+        const sourceCell = sourceRow[column.key];
+        if (sourceCell?.kind === "number") {
+          cell.numFmt = INTEGER_FORMAT;
+        }
+        if (sourceCell?.kind === "percent") {
+          cell.numFmt = PERCENT_FORMAT;
         }
       });
     });
-  }
-  finalizeTableSheet(sheet, {
-    headerRow: 2,
-    headerRows: [2],
-    widths: [32, 42, 34, 18, 16, 18, 22, 26, 18, 16, 30, 22, 18, 16, 14, 14, 12, 12, 86],
-    integerColumns: [15, 16, 17, 18],
-    centerColumns: [10, 14, 15, 16, 17, 18],
   });
+
+  configureColumns(sheet, Array.from({ length: widestColumnCount }, (_, index) => (index < 2 ? 34 : 18)));
+  sheet.views = [{ state: "frozen", ySplit: 3 }];
+  styleBodyRows(sheet, headerRows);
 }
 
 function addCriterios(workbook: ExcelJS.Workbook, analysis: AnalysisResult, metadata: ExportWorkbookMetadata = {}): void {

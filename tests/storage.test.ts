@@ -162,6 +162,43 @@ describe("analysisStorage", () => {
     expect((await getAnalysis("legacy-like"))?.result.excludedEmployeeIdsApplied).toEqual([]);
   });
 
+  test("truncates grouped Excel sheet rows before saving large history records", async () => {
+    const large = sampleAnalysis("large-grouped", "2026-07-03T10:00:00.000Z");
+    const rows = Array.from({ length: 2105 }, (_, index) => ({
+      c0: { value: `Grupo ${index}`, display: `Grupo ${index}`, kind: "text" as const },
+      c1: { value: index, display: String(index), kind: "number" as const },
+    }));
+
+    await saveAnalysis({
+      ...large,
+      result: {
+        ...large.result,
+        groupedExcelSheets: [
+          {
+            sheetName: "Análisis por puesto",
+            status: "ready",
+            columns: [
+              { key: "c0", label: "Grupo", sourceColumn: "A", kind: "text" },
+              { key: "c1", label: "Importe", sourceColumn: "B", kind: "number" },
+            ],
+            rows,
+            visibleRowCount: rows.length,
+            visibleColumnCount: 2,
+          },
+        ],
+      },
+    });
+
+    const saved = await getAnalysis("large-grouped");
+    const sheet = saved?.result.groupedExcelSheets?.[0];
+
+    expect(sheet?.rows).toHaveLength(2000);
+    expect(sheet?.truncated).toBe(true);
+    expect(sheet?.originalRowCount).toBe(2105);
+    expect(sheet?.savedRowCount).toBe(2000);
+    expect(sheet?.visibleRowCount).toBe(2000);
+  });
+
   test("saves, lists, opens, deletes and clears analysis history", async () => {
     const older = sampleAnalysis("older", "2026-07-01T10:00:00.000Z");
     const newer = sampleAnalysis("newer", "2026-07-02T10:00:00.000Z");
