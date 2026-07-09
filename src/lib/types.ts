@@ -161,6 +161,28 @@ export interface InternalExcelCheckRow {
   readonly detail: string;
 }
 
+export interface InternalExcelNormalizedVariablesCheckRow {
+  readonly employeeNumber: string;
+  readonly person?: string;
+  readonly workplace?: string;
+  readonly position?: string;
+  readonly category?: string;
+  readonly salaryPeriod: number;
+  readonly salaryNormalizedPlusVariables: number;
+  readonly salaryDifference: number;
+  readonly salaryComplementPeriod: number;
+  readonly salaryComplementNormalizedPlusVariables: number;
+  readonly salaryComplementDifference: number;
+  readonly extraSalaryPeriod: number;
+  readonly extraSalaryNormalizedPlusVariables: number;
+  readonly extraSalaryDifference: number;
+  readonly totalPeriod: number;
+  readonly totalNormalizedPlusVariables: number;
+  readonly totalDifference: number;
+  readonly status: AnalysisStatus;
+  readonly detail: string;
+}
+
 export interface RegistroParseResult {
   readonly sheetName: string;
   readonly headerRows: { readonly group: number; readonly subheader: number; readonly firstData: number };
@@ -467,6 +489,7 @@ export interface AnalysisResult {
   readonly groupings: readonly GroupingComparisonRow[];
   readonly groupedExcelSheets?: readonly GroupedExcelSheet[];
   readonly internalExcelChecks: readonly InternalExcelCheckRow[];
+  readonly internalExcelNormalizedVariablesChecks?: readonly InternalExcelNormalizedVariablesCheckRow[];
   readonly conceptMap: readonly ConceptMappingRule[];
   readonly excludedEmployeeIdsApplied: readonly string[];
   readonly errors: readonly AnalysisError[];

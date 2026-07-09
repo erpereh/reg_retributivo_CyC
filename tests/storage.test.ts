@@ -162,6 +162,47 @@ describe("analysisStorage", () => {
     expect((await getAnalysis("legacy-like"))?.result.excludedEmployeeIdsApplied).toEqual([]);
   });
 
+  test("preserves normalized variables internal Excel checks in history", async () => {
+    const analysis = sampleAnalysis("normalized-vars", "2026-07-03T10:00:00.000Z");
+    await saveAnalysis({
+      ...analysis,
+      result: {
+        ...analysis.result,
+        internalExcelNormalizedVariablesChecks: [
+          {
+            employeeNumber: "10048",
+            person: "Persona OK",
+            workplace: "Bilbao",
+            position: "Analista",
+            category: "Grupo A",
+            salaryPeriod: 1000,
+            salaryNormalizedPlusVariables: 990,
+            salaryDifference: 10,
+            salaryComplementPeriod: 500,
+            salaryComplementNormalizedPlusVariables: 500,
+            salaryComplementDifference: 0,
+            extraSalaryPeriod: 120,
+            extraSalaryNormalizedPlusVariables: 120,
+            extraSalaryDifference: 0,
+            totalPeriod: 1620,
+            totalNormalizedPlusVariables: 1610,
+            totalDifference: 10,
+            status: "Revisar",
+            detail: "Diferencia menor o igual a 50 EUR.",
+          },
+        ],
+      },
+    });
+
+    const saved = await getAnalysis("normalized-vars");
+
+    expect(saved?.result.internalExcelNormalizedVariablesChecks?.[0]).toMatchObject({
+      employeeNumber: "10048",
+      totalDifference: 10,
+      status: "Revisar",
+    });
+  });
+
   test("truncates grouped Excel sheet rows before saving large history records", async () => {
     const large = sampleAnalysis("large-grouped", "2026-07-03T10:00:00.000Z");
     const rows = Array.from({ length: 2105 }, (_, index) => ({

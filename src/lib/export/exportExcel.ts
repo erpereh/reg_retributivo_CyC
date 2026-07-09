@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs";
-import type { AnalysisResult, ConceptComparisonRow, GroupingComparisonRow, PersonComparisonRow, UnmappedConceptRow } from "@/lib/types";
+import type { AnalysisResult, ConceptComparisonRow, GroupingComparisonRow, InternalExcelNormalizedVariablesCheckRow, PersonComparisonRow, UnmappedConceptRow } from "@/lib/types";
 import {
   COLORS,
   EURO_FORMAT,
@@ -274,7 +274,7 @@ function addDashboard(workbook: ExcelJS.Workbook, analysis: AnalysisResult, meta
   addDashboardCard(sheet, 16, 8, "Conceptos sin configurar", analysis.summary.conceptsRealUnmapped ?? 0, "Sin codigo claro", "red");
 
   addDashboardCard(sheet, 20, 2, "Conceptos ignorados", analysis.summary.conceptsIgnored ?? 0, "Excluidos por criterio", "gray");
-  addDashboardCard(sheet, 20, 5, "Cuadre interno Excel", internalExcelStatus(analysis), `${analysis.summary.internalExcelDifferences} con diferencia`, analysis.summary.internalExcelDifferences ? "orange" : "green");
+  addDashboardCard(sheet, 20, 5, "Cuadre Reg.", internalExcelStatus(analysis), `${analysis.summary.internalExcelDifferences} con diferencia`, analysis.summary.internalExcelDifferences ? "orange" : "green");
   addDashboardCard(sheet, 20, 8, "Hojas agrupadas", groupedReadySheetCount(analysis), `${groupedVisibleRowCount(analysis)} filas visibles`, groupedReadySheetCount(analysis) ? "blue" : "gray");
 
   addSectionHeader(sheet, 25, "Resumen separado de importes y estados", 2, 9);
@@ -341,7 +341,7 @@ function addResumen(workbook: ExcelJS.Workbook, analysis: AnalysisResult, metada
     ["Conceptos", "Importe pendiente de decision", zeroMoney(analysis.summary.pendingDecisionPdfTotal ?? 0) ?? 0, "No incluido en diferencia matched"],
     ["Recibo / Reg. Retrib. sin pareja", "Recibo sin Reg. Retrib.", analysis.summary.peopleInPdfWithoutRegistro ?? 0, `${formatMoneyText(analysis.summary.totalPdfWithoutRegistro ?? 0)} EUR separado`],
     ["Recibo / Reg. Retrib. sin pareja", "Reg. Retrib. sin Recibo", analysis.summary.peopleInRegistroWithoutPdf ?? 0, ""],
-    ["Cuadre interno Excel", "Cuadres internos con diferencias", analysis.summary.internalExcelDifferences, internalExcelStatus(analysis)],
+    ["Cuadre Reg.", "Cuadres internos con diferencias", analysis.summary.internalExcelDifferences, internalExcelStatus(analysis)],
     ["Agrupaciones", "Hojas agrupadas leidas", groupedReadySheetCount(analysis), NOTE_GROUPED_SHEETS],
     ["Agrupaciones", "Filas visibles en hojas agrupadas", groupedVisibleRowCount(analysis), "Datos originales del Excel Reg. Retrib."],
     ["Criterios principales", "IA", analysis.summary.aiEnabled || metadata.aiEnabled ? "Activa" : "No activa", "Sin API key ni solicitudes/respuestas IA"],
@@ -643,10 +643,12 @@ function addRegistroSinPdf(workbook: ExcelJS.Workbook, analysis: AnalysisResult)
 
 function addCuadreInterno(workbook: ExcelJS.Workbook, analysis: AnalysisResult): void {
   const sheet = workbook.addWorksheet("Cuadre_Interno_Excel");
-  sheet.mergeCells("A1:K1");
-  sheet.getCell("A1").value = "Valida que el periodo completo cuadra con la suma de conceptos dentro del propio Excel.";
-  styleNoteRow(sheet.getRow(1), 1, 11);
-  const headers = [
+  const maxColumn = 19;
+  sheet.mergeCells(1, 1, 1, maxColumn);
+  sheet.getCell("A1").value = "Cuadre Reg. Valida cuadres internos del Excel Reg. Retrib. sin usar Recibos.";
+  styleNoteRow(sheet.getRow(1), 1, maxColumn);
+
+  const breakdownHeaders = [
     "Matricula",
     "Salario periodo completo",
     "Salario desglose",
@@ -659,10 +661,11 @@ function addCuadreInterno(workbook: ExcelJS.Workbook, analysis: AnalysisResult):
     "Dif. Extrasalarial",
     "Estado",
   ];
-  sheet.addRow(headers);
-  styleHeaderRow(sheet.getRow(2));
+  addSectionHeader(sheet, 2, "No norm. / Desglose", 1, maxColumn);
+  sheet.addRow(breakdownHeaders);
+  styleHeaderRow(sheet.getRow(3));
   if (!analysis.internalExcelChecks.length) {
-    addEmptyState(sheet, "No hay datos de cuadre interno del Excel.", headers.length);
+    addEmptyState(sheet, "No hay datos de Cuadre Reg. No norm. / Desglose.", breakdownHeaders.length);
   } else {
     analysis.internalExcelChecks.forEach((item) => {
       const row = sheet.addRow([
@@ -678,15 +681,75 @@ function addCuadreInterno(workbook: ExcelJS.Workbook, analysis: AnalysisResult):
         zeroMoney(item.extraSalaryDifference),
         item.status,
       ]);
-      applyStatusRowStyle(row, item.status, headers.length, 11);
+      applyStatusRowStyle(row, item.status, breakdownHeaders.length, 11);
     });
   }
+
+  sheet.addRow([]);
+  const normalizedSectionRow = sheet.rowCount + 1;
+  addSectionHeader(sheet, normalizedSectionRow, "No norm. / Norm. + variables", 1, maxColumn);
+  const normalizedHeaderRow = sheet.rowCount + 1;
+  const normalizedHeaders = [
+    "Matricula",
+    "Persona",
+    "Centro",
+    "Puesto",
+    "Categoria",
+    "Salario No norm.",
+    "Salario Norm. + variables",
+    "Dif. Salario",
+    "C. Salarial No norm.",
+    "C. Salarial Norm. + variables",
+    "Dif. C. Salarial",
+    "Extrasalarial No norm.",
+    "Extrasalarial Norm. + variables",
+    "Dif. Extrasalarial",
+    "Total No norm.",
+    "Total Norm. + variables",
+    "Dif. Total",
+    "Estado",
+    "Observacion",
+  ];
+  sheet.addRow(normalizedHeaders);
+  styleHeaderRow(sheet.getRow(normalizedHeaderRow));
+
+  const normalizedRows: readonly InternalExcelNormalizedVariablesCheckRow[] = analysis.internalExcelNormalizedVariablesChecks ?? [];
+  if (!normalizedRows.length) {
+    addEmptyState(sheet, "Este analisis no contiene el cuadre No norm. / Norm. + variables. Vuelve a analizar el Excel para generarlo.", maxColumn);
+  } else {
+    normalizedRows.forEach((item) => {
+      const row = sheet.addRow([
+        item.employeeNumber,
+        item.person,
+        item.workplace,
+        item.position,
+        item.category,
+        zeroMoney(item.salaryPeriod),
+        zeroMoney(item.salaryNormalizedPlusVariables),
+        zeroMoney(item.salaryDifference),
+        zeroMoney(item.salaryComplementPeriod),
+        zeroMoney(item.salaryComplementNormalizedPlusVariables),
+        zeroMoney(item.salaryComplementDifference),
+        zeroMoney(item.extraSalaryPeriod),
+        zeroMoney(item.extraSalaryNormalizedPlusVariables),
+        zeroMoney(item.extraSalaryDifference),
+        zeroMoney(item.totalPeriod),
+        zeroMoney(item.totalNormalizedPlusVariables),
+        zeroMoney(item.totalDifference),
+        item.status,
+        item.detail,
+      ]);
+      applyStatusRowStyle(row, item.status, maxColumn, 18);
+    });
+  }
+
   finalizeTableSheet(sheet, {
-    headerRow: 2,
-    headerRows: [2],
-    widths: [14, 26, 20, 16, 28, 22, 18, 30, 24, 20, 16],
-    moneyColumns: [2, 3, 4, 5, 6, 7, 8, 9, 10],
-    centerColumns: [11],
+    headerRow: 3,
+    headerRows: [3, normalizedHeaderRow],
+    widths: [14, 30, 22, 32, 28, 20, 24, 16, 22, 28, 18, 24, 30, 20, 20, 26, 16, 16, 68],
+    moneyColumns: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
+    centerColumns: [11, 18],
+    autoFilterToColumn: maxColumn,
   });
 }
 

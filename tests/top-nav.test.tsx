@@ -47,10 +47,10 @@ describe("TopNav", () => {
 
     const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
 
-    expect(tabs).toEqual(["Dashboard", "Personas", "Cuadre Excel", "Agrupaciones", "Historial", "Ajustes"]);
+    expect(tabs).toEqual(["Dashboard", "Personas", "Cuadre Reg.", "Agrupaciones", "Historial", "Ajustes"]);
     expect(screen.queryByRole("tab", { name: "Conceptos" })).toBeNull();
 
-    fireEvent.click(screen.getByRole("tab", { name: "Cuadre Excel" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Cuadre Reg." }));
 
     expect(appState.value.setView).toHaveBeenCalledWith("cuadre-excel");
   });

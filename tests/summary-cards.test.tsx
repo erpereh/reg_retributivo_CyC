@@ -74,7 +74,7 @@ describe("dashboard summary cards", () => {
     expect(screen.getByText(/requieren decisión/i)).toBeTruthy();
     expect(screen.getByText(/Reglas configuradas fuera del análisis/i)).toBeTruthy();
     expect(screen.getByText(/problema real de mapeo/i)).toBeTruthy();
-    expect(screen.getByText("Cuadre interno Excel")).toBeTruthy();
+    expect(screen.getByText("Cuadre Reg.")).toBeTruthy();
     expect(screen.getByText("70 / 70 OK")).toBeTruthy();
     expect(screen.getByText(/No compara contra recibos/i)).toBeTruthy();
   });

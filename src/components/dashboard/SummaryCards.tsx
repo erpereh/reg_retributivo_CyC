@@ -38,14 +38,14 @@ export function SummaryCards({ summary, internalExcelChecks = [] }: SummaryCards
       tooltip: "Recibos procesados desde los recibos cargados. Es volumen de análisis, no una diferencia económica.",
     },
     {
-      label: "Cuadre interno Excel",
+      label: "Cuadre Reg.",
       value: `${internalOk} / ${internalTotal} OK`,
       detail: "Periodo completo vs desglose de conceptos",
       icon: FileCheck2,
       accent: internalAccent,
       badge: internalAccent === "green" ? "OK" : internalAccent === "orange" ? "Revisión" : "Diferencia",
       tooltip:
-        "El cuadre interno compara las columnas de retribuciones del periodo completo contra la suma de conceptos de Salario, C. Salarial y Extrasalarial dentro del propio Excel. No compara contra recibos.",
+        "El Cuadre Reg. compara las columnas de retribuciones del periodo completo contra la suma de conceptos de Salario, C. Salarial y Extrasalarial dentro del propio Excel. No compara contra recibos.",
     },
     {
       label: "Personas analizadas",

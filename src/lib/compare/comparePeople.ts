@@ -5,6 +5,7 @@ import type {
   ConceptMappingRule,
   IgnoredConceptRow,
   InternalExcelCheckRow,
+  InternalExcelNormalizedVariablesCheckRow,
   MoneyByBlock,
   NormalizedVsRealRow,
   PayrollConcept,
@@ -61,6 +62,13 @@ function statusFromDifference(difference: number, options: CompareOptions): Anal
     reviewThreshold: options.reviewThreshold,
     incidentThreshold: options.incidentThreshold,
   });
+}
+
+function internalNormalizedVariablesStatus(difference: number, tolerance: number): AnalysisStatus {
+  const absoluteDifference = Math.abs(difference);
+  if (absoluteDifference <= tolerance) return "OK";
+  if (absoluteDifference > 50) return "Diferencia";
+  return "Revisar";
 }
 
 function worstStatus(statuses: readonly AnalysisStatus[]): AnalysisStatus {
@@ -573,6 +581,47 @@ function justifiedConceptSummary(rows: readonly ConceptComparisonRow[]): { summa
   };
 }
 
+function createInternalNormalizedVariablesChecks(
+  employees: readonly RegistroEmployee[],
+  options: CompareOptions,
+): InternalExcelNormalizedVariablesCheckRow[] {
+  return employees
+    .map((employee) => {
+      const salaryDifference = roundMoney(employee.periodComplete.salary - employee.normalizedPlusVariables.salary);
+      const salaryComplementDifference = roundMoney(employee.periodComplete.salaryComplement - employee.normalizedPlusVariables.salaryComplement);
+      const extraSalaryDifference = roundMoney(employee.periodComplete.extraSalary - employee.normalizedPlusVariables.extraSalary);
+      const totalDifference = roundMoney(employee.periodComplete.total - employee.normalizedPlusVariables.total);
+      const status = worstStatus(
+        [salaryDifference, salaryComplementDifference, extraSalaryDifference, totalDifference].map((difference) =>
+          internalNormalizedVariablesStatus(difference, options.tolerance),
+        ),
+      );
+
+      return {
+        employeeNumber: employee.employeeNumber,
+        person: employee.workerName,
+        workplace: employee.workplace,
+        position: employee.position,
+        category: employee.category,
+        salaryPeriod: employee.periodComplete.salary,
+        salaryNormalizedPlusVariables: employee.normalizedPlusVariables.salary,
+        salaryDifference,
+        salaryComplementPeriod: employee.periodComplete.salaryComplement,
+        salaryComplementNormalizedPlusVariables: employee.normalizedPlusVariables.salaryComplement,
+        salaryComplementDifference,
+        extraSalaryPeriod: employee.periodComplete.extraSalary,
+        extraSalaryNormalizedPlusVariables: employee.normalizedPlusVariables.extraSalary,
+        extraSalaryDifference,
+        totalPeriod: employee.periodComplete.total,
+        totalNormalizedPlusVariables: employee.normalizedPlusVariables.total,
+        totalDifference,
+        status,
+        detail: "Comparacion interna entre retribuciones del periodo completo y total normalizado mas variables del Excel Reg. Retrib.",
+      };
+    })
+    .sort((a, b) => a.employeeNumber.localeCompare(b.employeeNumber, "es"));
+}
+
 export async function compareAnalysis(
   payrollRecords: readonly PayrollRecord[],
   registroRecords: readonly RegistroEmployee[],
@@ -584,6 +633,7 @@ export async function compareAnalysis(
   const filteredPayrollRecords = payrollRecords.filter((record) => !isExcludedEmployee(record.employeeNumber, excludedSet));
   const filteredRegistroRecords = registroRecords.filter((record) => !isExcludedEmployee(record.employeeNumber, excludedSet));
   const filteredInternalExcelChecks = (options.internalExcelChecks ?? []).filter((row) => !isExcludedEmployee(row.employeeNumber, excludedSet));
+  const internalExcelNormalizedVariablesChecks = createInternalNormalizedVariablesChecks(filteredRegistroRecords, options);
   const payrollByEmployee = groupPayroll(filteredPayrollRecords);
   const registroByEmployee = new Map(filteredRegistroRecords.map((record) => [normalizeEmployeeNumber(record.employeeNumber), record]));
   const allEmployeeNumbers = new Set([...registroByEmployee.keys(), ...payrollByEmployee.keys()]);
@@ -799,6 +849,7 @@ export async function compareAnalysis(
     registroWithoutPdf,
     groupings: [],
     internalExcelChecks: filteredInternalExcelChecks,
+    internalExcelNormalizedVariablesChecks,
     conceptMap,
     excludedEmployeeIdsApplied,
     errors: [],

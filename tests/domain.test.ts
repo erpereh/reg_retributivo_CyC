@@ -635,6 +635,66 @@ describe("comparison engine", () => {
     expect(result.normalizedVsReal.find((row) => row.employeeNumber === "10048")?.realPdf).toBe(1200);
   });
 
+  test("builds internal Excel normalized variables checks from Registro employees", async () => {
+    const result = await compareAnalysis(
+      [],
+      [
+        emptyRegistroEmployee({
+          employeeNumber: "OK1",
+          workerName: "Persona OK",
+          workplace: "Bilbao",
+          position: "Analista",
+          category: "Grupo A",
+          normalizedPlusVariables: { salary: 1000, salaryComplement: 500, extraSalary: 120, total: 1620 },
+          periodComplete: { salary: 1000, salaryComplement: 500, extraSalary: 120, total: 1620 },
+        }),
+        emptyRegistroEmployee({
+          employeeNumber: "REV1",
+          workerName: "Persona Revisar",
+          workplace: "Madrid",
+          position: "Consultor",
+          category: "Grupo B",
+          normalizedPlusVariables: { salary: 990, salaryComplement: 500, extraSalary: 120, total: 1610 },
+          periodComplete: { salary: 1000, salaryComplement: 500, extraSalary: 120, total: 1620 },
+        }),
+        emptyRegistroEmployee({
+          employeeNumber: "DIF1",
+          workerName: "Persona Diferencia",
+          workplace: "Sevilla",
+          position: "Manager",
+          category: "Grupo C",
+          normalizedPlusVariables: { salary: 1000, salaryComplement: 500, extraSalary: 120, total: 1620 },
+          periodComplete: { salary: 1200, salaryComplement: 500, extraSalary: 120, total: 1820 },
+        }),
+      ],
+      {
+        tolerance: 1,
+        conceptMap: [],
+        enableAI: false,
+      },
+    );
+
+    const checks = result.internalExcelNormalizedVariablesChecks ?? [];
+    expect(checks.map((row) => row.employeeNumber)).toEqual(["DIF1", "OK1", "REV1"]);
+    expect(checks.find((row) => row.employeeNumber === "OK1")).toMatchObject({
+      person: "Persona OK",
+      totalPeriod: 1620,
+      totalNormalizedPlusVariables: 1620,
+      totalDifference: 0,
+      status: "OK",
+    });
+    expect(checks.find((row) => row.employeeNumber === "REV1")).toMatchObject({
+      salaryDifference: 10,
+      totalDifference: 10,
+      status: "Revisar",
+    });
+    expect(checks.find((row) => row.employeeNumber === "DIF1")).toMatchObject({
+      salaryDifference: 200,
+      totalDifference: 200,
+      status: "Diferencia",
+    });
+  });
+
   test("deduplicates informative health insurance when a real devengo exists in the same receipt only", async () => {
     const employee = emptyRegistroEmployee({
       employeeNumber: "10048",
@@ -1292,6 +1352,65 @@ describe("Excel export", () => {
     expect(serialized).not.toContain("Estado Recibo");
     expect(serialized).not.toContain("Recalculado Empleados");
     expect(serialized).not.toContain("Recibo recalculado");
+  });
+
+  test("exports Cuadre Reg. internal Excel sheet with both submenu sections", async () => {
+    const analysis = await compareAnalysis([], [], {
+      tolerance: 1,
+      conceptMap: [],
+      enableAI: false,
+    });
+    const workbook = await exportAnalysisToWorkbook({
+      ...analysis,
+      internalExcelChecks: [
+        {
+          employeeNumber: "10048",
+          salaryPeriod: 1000,
+          salaryBreakdown: 1000,
+          salaryDifference: 0,
+          salaryComplementPeriod: 500,
+          salaryComplementBreakdown: 500,
+          salaryComplementDifference: 0,
+          extraSalaryPeriod: 120,
+          extraSalaryBreakdown: 120,
+          extraSalaryDifference: 0,
+          status: "OK",
+          detail: "Cuadre correcto",
+        },
+      ],
+      internalExcelNormalizedVariablesChecks: [
+        {
+          employeeNumber: "10048",
+          person: "Persona OK",
+          workplace: "Bilbao",
+          position: "Analista",
+          category: "Grupo A",
+          salaryPeriod: 1000,
+          salaryNormalizedPlusVariables: 990,
+          salaryDifference: 10,
+          salaryComplementPeriod: 500,
+          salaryComplementNormalizedPlusVariables: 500,
+          salaryComplementDifference: 0,
+          extraSalaryPeriod: 120,
+          extraSalaryNormalizedPlusVariables: 120,
+          extraSalaryDifference: 0,
+          totalPeriod: 1620,
+          totalNormalizedPlusVariables: 1610,
+          totalDifference: 10,
+          status: "Revisar",
+          detail: "Diferencia menor o igual a 50 EUR.",
+        },
+      ],
+    });
+    const sheet = workbook.getWorksheet("Cuadre_Interno_Excel");
+    const serialized = JSON.stringify(sheet?.model);
+
+    expect(sheet?.name).toBe("Cuadre_Interno_Excel");
+    expect(serialized).toContain("Cuadre Reg.");
+    expect(serialized).toContain("No norm. / Desglose");
+    expect(serialized).toContain("No norm. / Norm. + variables");
+    expect(serialized).toContain("Norm. + variables");
+    expect(serialized).toContain("Persona OK");
   });
 
   test.skip("legacy Agrupaciones export with calculated grouped differences is removed", async () => {
