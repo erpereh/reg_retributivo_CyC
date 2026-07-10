@@ -149,6 +149,9 @@ describe("CuadreExcelView", () => {
       "Dif. Extrasalarial",
       "Estado",
     ].forEach((header) => expect(screen.getByRole("columnheader", { name: header })).toBeTruthy());
+    expect(screen.queryByRole("columnheader", { name: "Observación" })).toBeNull();
+    expect(screen.queryByText("Cuadre correcto")).toBeNull();
+    expect(screen.queryByText("Diferencia interna")).toBeNull();
 
     fireEvent.click(screen.getByText("10050"));
 
@@ -168,7 +171,11 @@ describe("CuadreExcelView", () => {
     expect(screen.getAllByRole("columnheader", { name: "No norm." }).length).toBeGreaterThanOrEqual(4);
     expect(screen.getAllByRole("columnheader", { name: "Norm. + variables" }).length).toBeGreaterThanOrEqual(4);
     expect(screen.getAllByRole("columnheader", { name: "Dif." }).length).toBeGreaterThanOrEqual(4);
-    expect(screen.getByRole("columnheader", { name: "Observación" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Estado" })).toBeTruthy();
+    expect(screen.queryByRole("columnheader", { name: "Observación" })).toBeNull();
+    expect(screen.queryByText("Periodo completo cuadra con normalizado mas variables.")).toBeNull();
+    expect(screen.queryByText("Diferencia menor o igual a 50 EUR.")).toBeNull();
+    expect(screen.queryByText("Diferencia mayor de 50 EUR.")).toBeNull();
 
     const metricCards = screen.getAllByText("Empleados analizados")[0].closest("section") as HTMLElement;
     expect(within(metricCards).getByText("3")).toBeTruthy();

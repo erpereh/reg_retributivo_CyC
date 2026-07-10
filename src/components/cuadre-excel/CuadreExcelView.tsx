@@ -366,9 +366,6 @@ function NormalizedVariablesTable({ rows }: Readonly<{ rows: readonly InternalEx
           <th rowSpan={2} className="border-b border-line px-4 py-3 text-xs font-semibold uppercase">
             Estado
           </th>
-          <th rowSpan={2} className="border-b border-line px-4 py-3 text-xs font-semibold uppercase">
-            Observación
-          </th>
         </tr>
         <tr>
           {NORMALIZED_BLOCKS.flatMap((block) => [
@@ -409,7 +406,6 @@ function NormalizedVariablesTable({ rows }: Readonly<{ rows: readonly InternalEx
             <td className="border-b border-line/70 px-4 py-3">
               <Badge value={row.status} />
             </td>
-            <td className="max-w-[360px] border-b border-line/70 px-4 py-3 text-muted">{displayText(row.detail) || "Sin observación"}</td>
           </tr>
         ))}
       </tbody>
