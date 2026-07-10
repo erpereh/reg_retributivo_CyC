@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs";
-import type { AnalysisResult, ConceptComparisonRow, GroupingComparisonRow, InternalExcelNormalizedVariablesCheckRow, PersonComparisonRow, UnmappedConceptRow } from "@/lib/types";
+import type { AnalysisResult, ConceptComparisonRow, GroupingComparisonRow, InternalExcelNormalizedVariablesCheckRow, NormalizedConcept, PersonComparisonRow, UnmappedConceptRow } from "@/lib/types";
 import {
   COLORS,
   EURO_FORMAT,
@@ -23,6 +23,8 @@ export interface ExportWorkbookMetadata {
   readonly aiEnabled?: boolean;
   readonly aiModel?: string;
   readonly schemaVersion?: number;
+  readonly normalizedConcepts?: readonly NormalizedConcept[];
+  readonly exportOrigin?: "active" | "history";
 }
 
 const NOTE_MATCHED = "La diferencia matched no incluye Recibo sin Reg. Retrib. ni conceptos pendientes de decision.";
@@ -881,11 +883,34 @@ function addCriterios(workbook: ExcelJS.Workbook, analysis: AnalysisResult, meta
   } else {
     sheet.addRow(["Sin conceptos desactivados"]);
   }
+  sheet.addRow([]);
+  const normalizedTitle = sheet.addRow(["Conceptos normalizados configurados"]);
+  sheet.mergeCells(normalizedTitle.number, 1, normalizedTitle.number, 5);
+  styleSectionTitle(normalizedTitle.getCell(1));
+  const normalizedNote = sheet.addRow(["Configuración informativa vigente al generar este Excel. No se ha aplicado a los cálculos del análisis."]);
+  sheet.mergeCells(normalizedNote.number, 1, normalizedNote.number, 5);
+  styleNoteRow(normalizedNote, 1, 5);
+  if (metadata.exportOrigin === "history") {
+    const historicalNote = sheet.addRow(["Esta configuración corresponde a los ajustes actuales, no necesariamente a los existentes cuando se creó el análisis histórico."]);
+    sheet.mergeCells(historicalNote.number, 1, historicalNote.number, 5);
+    styleNoteRow(historicalNote, 1, 5);
+  }
+  const normalizedHeader = sheet.addRow(["Año", "Concepto", "Valor (€)", "Comentarios", "Activo"]);
+  styleHeaderRow(normalizedHeader);
+  const normalizedConcepts = metadata.normalizedConcepts ?? [];
+  if (normalizedConcepts.length) {
+    normalizedConcepts.forEach((concept) => {
+      const row = sheet.addRow([concept.year, concept.name, concept.amount, concept.comments, concept.active ? "Sí" : "No"]);
+      row.getCell(3).numFmt = EURO_FORMAT;
+    });
+  } else {
+    sheet.addRow(["Sin conceptos normalizados configurados"]);
+  }
   finalizeTableSheet(sheet, {
     headerRow: 3,
-    headerRows: [1, 3, exclusionsHeader.number, disabledHeader.number],
-    widths: [32, 112, 42, 72],
-    autoFilterToColumn: 4,
+    headerRows: [1, 3, exclusionsHeader.number, disabledHeader.number, normalizedHeader.number],
+    widths: [32, 112, 42, 72, 18],
+    autoFilterToColumn: 5,
   });
 }
 

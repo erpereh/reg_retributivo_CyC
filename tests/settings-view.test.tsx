@@ -108,6 +108,7 @@ const appState = vi.hoisted(() => ({
       aiModel: "gemini-3.1-flash-lite",
       excludedEmployeeIds: [],
       conceptMap: [],
+      normalizedConcepts: [],
     },
     updateSettings: vi.fn(),
     aiStatus: { configured: false, enabled: false, model: "gemini-3.1-flash-lite" },
@@ -176,6 +177,7 @@ describe("SettingsView", () => {
     appState.value.saveExclusionsAndRefresh.mockClear();
     appState.value.pushToast.mockClear();
     appState.value.settings.conceptMap = [];
+    appState.value.settings.normalizedConcepts = [];
     appState.value.settings.excludedEmployeeIds = [];
     appState.value.activeAnalysis.result.conceptMap = cloneDefaultConceptMap();
   });
@@ -227,6 +229,21 @@ describe("SettingsView", () => {
     expect(screen.getByRole("button", { name: /Validar JSON/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Aplicar JSON/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Copiar JSON/i })).toBeTruthy();
+  });
+
+  test("shows No Norm. by default and switches to the normalized concepts view", () => {
+    render(<SettingsView />);
+
+    expect(screen.getByRole("button", { name: "No Norm." }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Normalizado" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("heading", { name: "Conceptos del análisis" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Conceptos normalizados" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Normalizado" }));
+
+    expect(screen.getByRole("button", { name: "Normalizado" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("heading", { name: "Conceptos normalizados" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Conceptos del análisis" })).toBeNull();
   });
 
   test("shows default rules even when a stored map is old and partial", () => {

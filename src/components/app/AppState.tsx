@@ -108,6 +108,7 @@ function normalizeSettingsPatch(current: AppSettings, patch: Partial<AppSettings
       ? [...new Set(next.excludedEmployeeIds.map(normalizeEmployeeId).filter(Boolean))]
       : DEFAULT_SETTINGS.excludedEmployeeIds,
     conceptMap: Array.isArray(next.conceptMap) ? next.conceptMap : DEFAULT_SETTINGS.conceptMap,
+    normalizedConcepts: Array.isArray(next.normalizedConcepts) ? next.normalizedConcepts : DEFAULT_SETTINGS.normalizedConcepts,
   };
 }
 
@@ -124,7 +125,7 @@ function buildConfig(settings: AppSettings): AnalysisConfig {
   return configFromSettings(settings);
 }
 
-function buildExportMetadata(analysis: StoredAnalysis): ExportWorkbookMetadata {
+function buildExportMetadata(analysis: StoredAnalysis, settings: AppSettings, exportOrigin: "active" | "history"): ExportWorkbookMetadata {
   return {
     registroFileName: analysis.registroFileName,
     pdfFileCount: analysis.pdfCount,
@@ -132,22 +133,9 @@ function buildExportMetadata(analysis: StoredAnalysis): ExportWorkbookMetadata {
     aiEnabled: analysis.config.enableAI,
     aiModel: analysis.config.aiModel,
     schemaVersion: analysis.schemaVersion,
+    normalizedConcepts: settings.normalizedConcepts,
+    exportOrigin,
   };
-}
-
-async function fetchExport(analysis: StoredAnalysis): Promise<Blob> {
-  const response = await fetch("/api/export", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ analysis: analysis.result, metadata: buildExportMetadata(analysis) }),
-  });
-
-  if (!response.ok) {
-    const payload = (await response.json()) as { error?: string };
-    throw new Error(payload.error ?? "No se pudo exportar.");
-  }
-
-  return response.blob();
 }
 
 export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>) {
@@ -356,13 +344,22 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
     [pdfFiles.length, pushMessageToast, registroFile, runAnalysis, settings],
   );
 
-  const exportAnalysis = useCallback(async (analysis: StoredAnalysis) => {
+  const exportAnalysis = useCallback(async (analysis: StoredAnalysis, exportOrigin: "active" | "history") => {
     setExporting(true);
     setError(undefined);
     setSuccess(undefined);
 
     try {
-      const blob = await fetchExport(analysis);
+      const response = await fetch("/api/export", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ analysis: analysis.result, metadata: buildExportMetadata(analysis, settings, exportOrigin) }),
+      });
+      if (!response.ok) {
+        const payload = (await response.json()) as { error?: string };
+        throw new Error(payload.error ?? "No se pudo exportar.");
+      }
+      const blob = await response.blob();
       const date = analysis.createdAt.slice(0, 10);
       downloadBlob(blob, `comparativa_reg_retributivo_${date}.xlsx`);
       setSuccess("Excel exportado correctamente.");
@@ -374,13 +371,17 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
     } finally {
       setExporting(false);
     }
-  }, [pushMessageToast]);
+  }, [pushMessageToast, settings]);
 
   const exportActiveAnalysis = useCallback(async () => {
     if (activeAnalysis) {
-      await exportAnalysis(activeAnalysis);
+      await exportAnalysis(activeAnalysis, "active");
     }
   }, [activeAnalysis, exportAnalysis]);
+
+  const exportStoredAnalysis = useCallback(async (analysis: StoredAnalysis) => {
+    await exportAnalysis(analysis, "history");
+  }, [exportAnalysis]);
 
   const resetForNewAnalysis = useCallback(() => {
     setPdfFiles([]);
@@ -487,7 +488,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       saveConceptMapAndRefresh,
       saveExclusionsAndRefresh,
       exportActiveAnalysis,
-      exportStoredAnalysis: exportAnalysis,
+      exportStoredAnalysis,
       resetForNewAnalysis,
       openStoredAnalysis,
       removeStoredAnalysis,
@@ -508,6 +509,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       error,
       exportActiveAnalysis,
       exportAnalysis,
+      exportStoredAnalysis,
       exporting,
       filters,
       history,

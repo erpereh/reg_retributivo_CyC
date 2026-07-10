@@ -1253,6 +1253,40 @@ describe("Excel export", () => {
     expect(serialized).not.toContain("payload");
   });
 
+  test("adds current normalized concepts only to Criterios with neutral and historical notes", async () => {
+    const analysis = await compareAnalysis([], [], { tolerance: 1, conceptMap: [], enableAI: false });
+    const exportedAt = "2026-07-10T12:00:00.000Z";
+    const normalizedConcepts = [
+      {
+        id: "normalized-1",
+        year: 2026,
+        name: "Dietas",
+        amount: 10.5,
+        comments: "Configuración actual",
+        active: true,
+        createdAt: "2026-07-01T10:00:00.000Z",
+        updatedAt: "2026-07-10T12:00:00.000Z",
+      },
+    ];
+    const baseline = await exportAnalysisToWorkbook(analysis, { exportedAt });
+    const neutral = await exportAnalysisToWorkbook(analysis, { exportedAt, normalizedConcepts, exportOrigin: "active" });
+    const historical = await exportAnalysisToWorkbook(analysis, { exportedAt, normalizedConcepts, exportOrigin: "history" });
+    const neutralCriteria = JSON.stringify(neutral.getWorksheet("Criterios")?.model);
+    const historicalCriteria = JSON.stringify(historical.getWorksheet("Criterios")?.model);
+
+    expect(neutralCriteria).toContain("Conceptos normalizados configurados");
+    expect(neutralCriteria).toContain("Configuración informativa vigente al generar este Excel. No se ha aplicado a los cálculos del análisis.");
+    expect(neutralCriteria).toContain("Valor (€)");
+    expect(neutralCriteria).toContain("Dietas");
+    expect(neutralCriteria).toContain("Configuración actual");
+    expect(neutralCriteria).not.toContain("no necesariamente a los existentes cuando se creó el análisis histórico");
+    expect(historicalCriteria).toContain("Esta configuración corresponde a los ajustes actuales, no necesariamente a los existentes cuando se creó el análisis histórico.");
+
+    ["Personas", "Conceptos", "Normalizado_vs_Real", "Cuadre_Interno_Excel", "Agrupaciones"].forEach((sheetName) => {
+      expect(neutral.getWorksheet(sheetName)?.model).toEqual(baseline.getWorksheet(sheetName)?.model);
+    });
+  });
+
   test("exports Personas and Conceptos values without changing analysis amounts", async () => {
     const employee = emptyRegistroEmployee({
       employeeNumber: "E1",

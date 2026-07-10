@@ -1,4 +1,4 @@
-import type { AnalysisConfig, ConceptMappingRule, GroupedExcelSheet, StoredAnalysis } from "@/lib/types";
+import type { AnalysisConfig, ConceptMappingRule, GroupedExcelSheet, NormalizedConcept, StoredAnalysis } from "@/lib/types";
 import { normalizeEmployeeId } from "@/lib/utils/normalize";
 
 const DB_NAME = "retributivo-analysis-v1";
@@ -20,6 +20,7 @@ export interface AppSettings {
   readonly aiModel: string;
   readonly excludedEmployeeIds: readonly string[];
   readonly conceptMap: readonly ConceptMappingRule[];
+  readonly normalizedConcepts: readonly NormalizedConcept[];
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -31,6 +32,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   aiModel: "gemini-3.1-flash-lite",
   excludedEmployeeIds: [],
   conceptMap: [],
+  normalizedConcepts: [],
 };
 
 export function configFromSettings(settings: AppSettings): AnalysisConfig {
@@ -77,6 +79,7 @@ function normalizeSettings(value: Partial<AppSettings> | undefined): AppSettings
     aiModel: value?.aiModel || DEFAULT_SETTINGS.aiModel,
     excludedEmployeeIds: normalizeEmployeeIdList(value?.excludedEmployeeIds),
     conceptMap: Array.isArray(value?.conceptMap) ? value.conceptMap : DEFAULT_SETTINGS.conceptMap,
+    normalizedConcepts: Array.isArray(value?.normalizedConcepts) ? value.normalizedConcepts : DEFAULT_SETTINGS.normalizedConcepts,
   };
 }
 

@@ -13,6 +13,17 @@ export type ConceptBlockKey = "salary" | "salaryComplement" | "extraSalary";
 export type MappingStatus = "Incluido" | "Justificado" | "Ignorado" | "Pendiente revisión";
 export type ConceptMappingSourceType = "devengo" | "informativo" | "deduccion" | "retencion" | "coste_empresa" | "unknown";
 export type ConceptDedupePriority = "devengo" | "informativo";
+
+export type NormalizedConcept = {
+  id: string;
+  year: number;
+  name: string;
+  amount: number;
+  comments: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
 export type NonIncludedDecisionType = "Pendiente revision" | "Sin mapear real" | "Ignorado" | "Justificado";
 export type AnalysisStatus = "OK" | "Revisar" | "Diferencia" | "Sin mapear" | "Sin PDF" | "Sin Registro" | "Sin datos";
 export type SalaryStatus = AnalysisStatus;

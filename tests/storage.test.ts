@@ -3,6 +3,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
   clearAnalyses,
+  configFromSettings,
   deleteAnalysis,
   getAnalysis,
   listAnalyses,
@@ -32,6 +33,18 @@ const settings: AppSettings = {
       blockKey: "salary",
       registroCode: "SSP_SAL_BASE",
       status: "Incluido",
+    },
+  ],
+  normalizedConcepts: [
+    {
+      id: "normalized-1",
+      year: 2026,
+      name: "Dietas",
+      amount: 10.5,
+      comments: "Configuracion informativa",
+      active: true,
+      createdAt: "2026-07-10T10:00:00.000Z",
+      updatedAt: "2026-07-10T10:00:00.000Z",
     },
   ],
 };
@@ -149,6 +162,7 @@ describe("analysisStorage", () => {
     );
 
     expect(loadSettings().excludedEmployeeIds).toEqual([]);
+    expect(loadSettings().normalizedConcepts).toEqual([]);
 
     const legacyLike = sampleAnalysis("legacy-like", "2026-07-03T10:00:00.000Z");
     await saveAnalysis({
@@ -160,6 +174,10 @@ describe("analysisStorage", () => {
     });
 
     expect((await getAnalysis("legacy-like"))?.result.excludedEmployeeIdsApplied).toEqual([]);
+  });
+
+  test("keeps normalized concepts out of the analysis config", () => {
+    expect(configFromSettings(settings)).not.toHaveProperty("normalizedConcepts");
   });
 
   test("preserves normalized variables internal Excel checks in history", async () => {

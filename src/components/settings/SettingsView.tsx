@@ -8,7 +8,9 @@ import { Card } from "@/components/common/Card";
 import { SectionHeader } from "@/components/common/SectionHeader";
 import { EmployeeExclusionsCard } from "@/components/settings/EmployeeExclusionsCard";
 import { ConceptMapEditor } from "@/components/settings/concept-map/ConceptMapEditor";
+import { NormalizedConceptsManager } from "@/components/settings/normalized-concepts/NormalizedConceptsManager";
 import { clearAiExplanationCache } from "@/lib/ai/explainCache";
+import { cn } from "@/lib/utils/classNames";
 
 function NumberSetting({
   id,
@@ -45,6 +47,7 @@ export function SettingsView() {
     testAiConnection,
   } = useAppState();
   const [aiCacheMessage, setAiCacheMessage] = useState<string | undefined>();
+  const [conceptView, setConceptView] = useState<"non-normalized" | "normalized">("non-normalized");
 
   useEffect(() => {
     void refreshAiStatus();
@@ -147,7 +150,32 @@ export function SettingsView() {
 
       <EmployeeExclusionsCard />
 
-      <ConceptMapEditor />
+      <div className="overflow-x-auto pb-1">
+        <div className="flex min-w-max gap-2" aria-label="Vistas de conceptos">
+          {[
+            ["non-normalized", "No Norm."],
+            ["normalized", "Normalizado"],
+          ].map(([id, label]) => {
+            const active = conceptView === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setConceptView(id as typeof conceptView)}
+                className={cn(
+                  "rounded-full px-3 py-2 text-sm font-semibold transition",
+                  active ? "bg-primary text-white shadow-subtle" : "bg-slate-100 text-slate-700 hover:bg-slate-200",
+                )}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {conceptView === "non-normalized" ? <ConceptMapEditor /> : <NormalizedConceptsManager />}
 
       <Card className="p-6">
         <div className="flex items-center gap-3">
