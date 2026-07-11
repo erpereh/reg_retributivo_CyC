@@ -128,11 +128,11 @@ describe("CuadreExcelView", () => {
     render(<CuadreExcelView />);
 
     expect(screen.getByRole("heading", { name: "Cuadre Reg." })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "No norm. / Desglose" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: "No norm. / Norm. + variables" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("tab", { name: "No norm. / Desglose" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: "No norm. / Norm. + variables" }).getAttribute("aria-selected")).toBe("false");
     expect(screen.getByText("Compara las retribuciones del periodo completo frente a la suma de conceptos desglosados.")).toBeTruthy();
 
-    const metricCards = screen.getAllByText("Empleados analizados")[0].closest("section") as HTMLElement;
+    const metricCards = screen.getByLabelText("Resumen de Cuadre Reg.");
     ["Empleados analizados", "OK", "Con diferencia", "Mayor diferencia", "Diferencia total visible"].forEach((label) => expect(within(metricCards).getByText(label)).toBeTruthy());
     expect(within(metricCards).getByText("100,00 EUR")).toBeTruthy();
 
@@ -163,9 +163,9 @@ describe("CuadreExcelView", () => {
   test("switches to No norm. / Norm. + variables with independent KPIs, search and status filter", () => {
     render(<CuadreExcelView />);
 
-    fireEvent.click(screen.getByRole("button", { name: "No norm. / Norm. + variables" }));
+    fireEvent.click(screen.getByRole("tab", { name: "No norm. / Norm. + variables" }));
 
-    expect(screen.getByRole("button", { name: "No norm. / Norm. + variables" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("tab", { name: "No norm. / Norm. + variables" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByText("Compara las retribuciones del periodo completo frente al total normalizado más variables del Excel Reg. Retrib.")).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: "Persona" })).toBeTruthy();
     expect(screen.getAllByRole("columnheader", { name: "No norm." }).length).toBeGreaterThanOrEqual(4);
@@ -177,7 +177,7 @@ describe("CuadreExcelView", () => {
     expect(screen.queryByText("Diferencia menor o igual a 50 EUR.")).toBeNull();
     expect(screen.queryByText("Diferencia mayor de 50 EUR.")).toBeNull();
 
-    const metricCards = screen.getAllByText("Empleados analizados")[0].closest("section") as HTMLElement;
+    const metricCards = screen.getByLabelText("Resumen de Cuadre Reg.");
     expect(within(metricCards).getByText("3")).toBeTruthy();
     expect(within(metricCards).getByText("200,00 EUR")).toBeTruthy();
     expect(within(metricCards).getByText("210,00 EUR")).toBeTruthy();
@@ -204,7 +204,7 @@ describe("CuadreExcelView", () => {
     } as never;
 
     render(<CuadreExcelView />);
-    fireEvent.click(screen.getByRole("button", { name: "No norm. / Norm. + variables" }));
+    fireEvent.click(screen.getByRole("tab", { name: "No norm. / Norm. + variables" }));
 
     expect(screen.getByText("Este análisis no contiene el cuadre No norm. / Norm. + variables. Vuelve a analizar el Excel para generarlo.")).toBeTruthy();
   });

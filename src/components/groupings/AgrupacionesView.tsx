@@ -4,6 +4,7 @@ import { Search, Table2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useAppState } from "@/components/app/AppState";
 import { Card } from "@/components/common/Card";
+import { DataTableShell } from "@/components/common/DataTableShell";
 import type { GroupedExcelCell, GroupedExcelHeaderCell, GroupedExcelSheet } from "@/lib/types";
 import { cn } from "@/lib/utils/classNames";
 import { normalizeComparableText } from "@/lib/utils/normalize";
@@ -254,64 +255,54 @@ export function AgrupacionesView() {
   }
 
   return (
-    <div className="space-y-5">
-      <div className="overflow-x-auto pb-1">
-        <div className="flex min-w-max gap-2">
-          {GROUPED_SHEETS.map(({ fullName, shortLabel }) => (
-            <button
-              key={fullName}
-              type="button"
-              title={fullName}
-              onClick={() => setActiveSheetName(fullName)}
-              className={cn(
-                "whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-semibold transition",
-                activeSheetName === fullName ? "bg-primary text-white shadow-subtle" : "bg-slate-100 text-slate-700 hover:bg-slate-200",
-              )}
-            >
-              {shortLabel}
-            </button>
-          ))}
-        </div>
-      </div>
+    <div>
 
-      <section className="grid gap-3 md:grid-cols-3">
-        {[
-          ["Hoja", activeSheet.sheetName],
-          ["Filas visibles", visibleRows.length],
-          ["Columnas visibles", activeSheet.visibleColumnCount],
-        ].map(([label, value]) => (
-          <Card key={label} className="min-h-[84px] p-4">
-            <p className="text-xs font-semibold uppercase text-muted">{label}</p>
-            <p className="mt-2 text-lg font-semibold text-ink tabular-nums">{value}</p>
-          </Card>
-        ))}
-      </section>
-
-      {activeSheet.truncated ? (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold leading-6 text-amber-900">{TRUNCATED_HISTORY_MESSAGE}</div>
-      ) : null}
-
-      <Card className="p-5">
-        <label className="text-sm font-semibold text-ink">
-          Buscar en esta hoja
-          <span className="relative mt-2 block">
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden="true" />
-            <input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Buscar en esta hoja"
-              className="filter-control pl-11"
-            />
-          </span>
-        </label>
-      </Card>
-
-      <Card className="overflow-hidden p-0">
+      <DataTableShell
+        toolbar={
+          <div className="flex flex-col gap-4">
+            <div className="no-scrollbar max-w-full overflow-x-auto pb-1">
+              <div className="flex min-w-max gap-1 rounded-2xl bg-slate-100 p-1">
+                {GROUPED_SHEETS.map(({ fullName, shortLabel }) => (
+                  <button
+                    key={fullName}
+                    type="button"
+                    title={fullName}
+                    onClick={() => setActiveSheetName(fullName)}
+                    className={cn(
+                      "min-h-10 whitespace-nowrap rounded-xl px-3 text-sm font-semibold transition-colors",
+                      activeSheetName === fullName ? "bg-white text-ink shadow-subtle" : "text-muted hover:text-ink",
+                    )}
+                  >
+                    {shortLabel}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(280px,420px)] lg:items-end">
+              <div>
+                <p
+                  className="text-sm font-semibold text-ink"
+                  aria-label={`${activeSheet.sheetName} · ${visibleRows.length} filas · ${activeSheet.visibleColumnCount} columnas`}
+                >
+                  {activeSheet.sheetName} · <span className="tabular-nums">{visibleRows.length} filas</span> · <span className="tabular-nums">{activeSheet.visibleColumnCount} columnas</span>
+                </p>
+                {activeSheet.truncated ? <p className="mt-2 text-sm font-semibold leading-6 text-amber-800">{TRUNCATED_HISTORY_MESSAGE}</p> : null}
+              </div>
+              <label className="text-sm font-semibold text-ink">
+                Buscar en esta hoja
+                <span className="relative mt-2 block">
+                  <Search className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden="true" />
+                  <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar en esta hoja" className="filter-control pl-11" />
+                </span>
+              </label>
+            </div>
+          </div>
+        }
+        empty={!sheetMessage(activeSheet) && !visibleRows.length ? <p className="p-6 text-sm text-muted">No hay filas con la búsqueda actual.</p> : null}
+      >
         {sheetMessage(activeSheet) ? (
           <p className="p-6 text-sm font-semibold text-muted">{sheetMessage(activeSheet)}</p>
         ) : (
-          <div className="max-h-[70dvh] overflow-auto">
             <table className="w-full min-w-[1100px] border-separate border-spacing-0 text-left text-sm">
               <thead className="text-muted shadow-subtle">
                 {activeGroupedHeaders.map((headerRow, rowIndex) => (
@@ -358,10 +349,8 @@ export function AgrupacionesView() {
                 ))}
               </tbody>
             </table>
-            {!visibleRows.length ? <p className="p-6 text-sm text-muted">No hay filas con la búsqueda actual.</p> : null}
-          </div>
         )}
-      </Card>
+      </DataTableShell>
     </div>
   );
 }

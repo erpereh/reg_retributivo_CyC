@@ -581,7 +581,7 @@ describe("TablesView", () => {
     let content = conceptSection.textContent ?? "";
     expect(content.indexOf("Bolsa de Vacaciones")).toBeLessThan(content.indexOf("Abono teletrabajo"));
 
-    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.keyDown(screen.getByRole("dialog", { name: /Detalle persona/i }), { key: "Escape" });
     fireEvent.click(screen.getByText("10123"));
     conceptSection = screen.getByRole("region", { name: /Conceptos de la persona/i });
     content = conceptSection.textContent ?? "";
@@ -679,7 +679,7 @@ describe("TablesView", () => {
     expect(screen.getByRole("button", { name: /Regenerar IA/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Copiar explicación/i })).toBeTruthy();
 
-    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.keyDown(screen.getByRole("dialog", { name: /Detalle persona/i }), { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog", { name: /Detalle persona/i })).toBeNull());
     fireEvent.click(screen.getByText("10048"));
 
@@ -742,10 +742,7 @@ describe("TablesView", () => {
     expect(screen.getByRole("button", { name: "Familia" }).getAttribute("title")).toBe("Análisis por familia de puesto");
     expect(screen.getByRole("button", { name: "Cat. personal" }).getAttribute("title")).toBe("Agrupación Categoría Personal");
     expect(screen.queryByRole("button", { name: "Análisis por puesto" })).toBeNull();
-    expect(screen.getByText("Hoja")).toBeTruthy();
-    expect(screen.getByText("Análisis por puesto")).toBeTruthy();
-    expect(screen.getByText("Filas visibles")).toBeTruthy();
-    expect(screen.getByText("Columnas visibles")).toBeTruthy();
+    expect(screen.getByLabelText(/Análisis por puesto · \d+ filas · \d+ columnas/)).toBeTruthy();
     expect(screen.getByPlaceholderText("Buscar en esta hoja")).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: "Puesto" })).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: "ID Puesto" })).toBeTruthy();

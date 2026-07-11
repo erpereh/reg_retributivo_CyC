@@ -53,10 +53,10 @@ function DropCard({
         backgroundColor: isActive ? "rgba(239,246,255,1)" : "rgba(248,250,252,0.85)",
       }}
       transition={{ duration: 0.2 }}
-      className="min-w-0 rounded-[24px] border border-dashed p-5"
+      className="min-w-0 rounded-[18px] border border-dashed p-4"
     >
       <div className="flex items-start gap-4">
-        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white text-primary shadow-subtle">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-white text-primary shadow-subtle">
           {icon}
         </span>
         <div className="min-w-0">
@@ -64,7 +64,7 @@ function DropCard({
           <p className="mt-1 text-sm leading-6 text-muted">{description}</p>
         </div>
       </div>
-      <div className="mt-5">{children}</div>
+      <div className="mt-4">{children}</div>
     </motion.div>
   );
 }
@@ -87,8 +87,8 @@ export function UploadPanel() {
   const missingReason = !pdfFiles.length ? "Faltan recibos." : !registroFile ? "Falta el Excel Reg. Retrib." : "Listo para analizar.";
 
   return (
-    <Card className="p-5 sm:p-6">
-      <div className="grid gap-5 xl:grid-cols-[1.1fr_1fr_340px]">
+    <Card className="p-4 sm:p-5">
+      <div className="grid gap-4 xl:grid-cols-[1.1fr_1fr_320px]">
         <DropCard
           title="Recibos"
           description="Arrastra los recibos o selecciona archivos/carpeta."
@@ -165,9 +165,9 @@ export function UploadPanel() {
           </motion.p>
         </DropCard>
 
-        <div className="min-w-0 rounded-[24px] border border-line bg-slate-50/80 p-5">
+        <div className="min-w-0 rounded-[18px] border border-line bg-slate-50/80 p-4">
           <div className="flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-primary shadow-subtle">
+            <span className="flex size-9 items-center justify-center rounded-xl bg-white text-primary shadow-subtle">
               <Sparkles className="h-4 w-4" aria-hidden="true" />
             </span>
             <div>
@@ -176,7 +176,7 @@ export function UploadPanel() {
             </div>
           </div>
 
-          <label className="mt-5 block text-sm font-semibold text-ink" htmlFor="tolerance">
+          <label className="mt-4 block text-sm font-semibold text-ink" htmlFor="tolerance">
             Tolerancia EUR
             <input
               id="tolerance"
@@ -186,11 +186,11 @@ export function UploadPanel() {
               value={settings.defaultTolerance}
               disabled={disabled}
               onChange={(event) => updateSettings({ defaultTolerance: Number(event.target.value) })}
-              className="mt-2 h-12 w-full rounded-full border border-line bg-white px-4 text-sm font-medium text-ink shadow-subtle"
+              className="filter-control mt-2"
             />
           </label>
 
-          <button type="button" onClick={analyze} disabled={!canAnalyze} className="btn-primary mt-5 w-full">
+          <button type="button" onClick={analyze} disabled={!canAnalyze} className="btn-primary mt-4 w-full">
             {analyzing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <FileArchive className="h-4 w-4" aria-hidden="true" />}
             {analyzing ? "Analizando..." : "Analizar"}
           </button>

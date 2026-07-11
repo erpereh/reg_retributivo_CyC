@@ -1,7 +1,9 @@
 "use client";
 
 import { AlertCircle, BadgeEuro, FileCheck2, FileText, Sigma, Users, UserX } from "lucide-react";
-import { StatCard } from "@/components/common/StatCard";
+import { Card } from "@/components/common/Card";
+import { CompactMetric } from "@/components/common/CompactMetric";
+import { MetricCard } from "@/components/common/MetricCard";
 import type { AnalysisSummary, InternalExcelCheckRow } from "@/lib/types";
 import { formatEuro } from "@/lib/utils/money";
 
@@ -10,60 +12,29 @@ interface SummaryCardsProps {
   readonly internalExcelChecks?: readonly InternalExcelCheckRow[];
 }
 
-function getInternalExcelAccent(rows: readonly InternalExcelCheckRow[]): "green" | "orange" | "red" {
-  if (rows.some((row) => row.status === "Diferencia")) {
-    return "red";
-  }
-
-  if (rows.some((row) => row.status === "Revisar")) {
-    return "orange";
-  }
-
+function internalTone(rows: readonly InternalExcelCheckRow[]): "green" | "orange" | "red" {
+  if (rows.some((row) => row.status === "Diferencia")) return "red";
+  if (rows.some((row) => row.status === "Revisar")) return "orange";
   return "green";
 }
 
 export function SummaryCards({ summary, internalExcelChecks = [] }: SummaryCardsProps) {
   const internalOk = internalExcelChecks.filter((row) => row.status === "OK").length;
-  const internalTotal = internalExcelChecks.length;
-  const internalAccent = getInternalExcelAccent(internalExcelChecks);
-
-  const cards = [
-    {
-      label: "Recibos procesados",
-      value: summary?.pdfsAnalyzed ?? 0,
-      detail: summary?.pdfsFailed ? `${summary.pdfsFailed} con error` : "Páginas de recibos procesadas",
-      icon: FileText,
-      highlight: true,
-      badge: "Proceso",
-      tooltip: "Recibos procesados desde los recibos cargados. Es volumen de análisis, no una diferencia económica.",
-    },
-    {
-      label: "Cuadre Reg.",
-      value: `${internalOk} / ${internalTotal} OK`,
-      detail: "Periodo completo vs desglose de conceptos",
-      icon: FileCheck2,
-      accent: internalAccent,
-      badge: internalAccent === "green" ? "OK" : internalAccent === "orange" ? "Revisión" : "Diferencia",
-      tooltip:
-        "El Cuadre Reg. compara las columnas de retribuciones del periodo completo contra la suma de conceptos de Salario, C. Salarial y Extrasalarial dentro del propio Excel. No compara contra recibos.",
-    },
+  const primary = [
     {
       label: "Personas analizadas",
       value: summary?.uniquePeople ?? 0,
       detail: `${summary?.matchedPeople ?? 0} con Reg. Retrib. y Recibo`,
       icon: Users,
-      accent: "green" as const,
-      badge: "Personas",
-      tooltip: "Personas evaluadas en el análisis activo, incluyendo matched y casos separados.",
+      highlight: true,
+      accent: "blue" as const,
     },
     {
       label: "Personas con diferencia",
       value: summary?.peopleWithDifferences ?? 0,
-      detail: "Matched con diferencia fuera de tolerancia",
+      detail: "Matched fuera de tolerancia",
       icon: Users,
       accent: "red" as const,
-      badge: "Diferencia",
-      tooltip: "Personas matched que tienen diferencia entre Reg. Retrib. y Recibo según la tolerancia configurada.",
     },
     {
       label: "Diferencia total matched",
@@ -71,70 +42,94 @@ export function SummaryCards({ summary, internalExcelChecks = [] }: SummaryCards
       detail: "Solo personas con Reg. Retrib. y Recibo",
       icon: BadgeEuro,
       accent: "green" as const,
-      badge: "Matched",
-      tooltip: "Diferencia total calculada solo entre personas encontradas tanto en Reg. Retrib. como en Recibo.",
-    },
-    {
-      label: "Conceptos pendientes de revisión",
-      value: summary?.conceptsPendingReview ?? 0,
-      detail: "Importe Recibo pendiente de decisión, no incluido en el cálculo principal",
-      icon: AlertCircle,
-      accent: "orange" as const,
-      badge: "Decisión",
-      tooltip: "Requieren decisión manual; no son errores automáticos. No entran en el cálculo principal hasta que se active una decisión desde Ajustes.",
-    },
-    {
-      label: "Importe pendiente de decisión",
-      value: formatEuro(summary?.pendingDecisionPdfTotal ?? 0),
-      detail: "No incluido en la diferencia matched",
-      icon: AlertCircle,
-      accent: "orange" as const,
-      badge: "Separado",
-      tooltip: "Importe detectado en recibos que requiere revisión manual. No afecta al cálculo principal hasta que se decida incluirlo.",
-    },
-    {
-      label: "Conceptos desactivados",
-      value: summary?.conceptsIgnored ?? 0,
-      detail: "Reglas configuradas fuera del análisis",
-      icon: UserX,
-      accent: "gray" as const,
-      badge: "Desactivado",
-      tooltip: "Conceptos configurados para no entrar en la comparativa.",
-    },
-    {
-      label: "Conceptos sin mapear reales",
-      value: summary?.conceptsRealUnmapped ?? 0,
-      detail: "Problema real de mapeo: sin código Reg. Retrib. claro",
-      icon: AlertCircle,
-      accent: "red" as const,
-      badge: "Mapeo",
-      tooltip: "Conceptos detectados en recibos que no tienen un código Reg. Retrib. claro. Estos sí requieren revisar el mapeo.",
     },
     {
       label: "Recibo sin Reg. Retrib.",
       value: summary?.peopleInPdfWithoutRegistro ?? 0,
-      detail: `Recibo sin Reg. Retrib.: ${formatEuro(summary?.totalPdfWithoutRegistro ?? 0)}`,
+      detail: formatEuro(summary?.totalPdfWithoutRegistro ?? 0),
       icon: Sigma,
       accent: "violet" as const,
-      badge: "Separado",
-      tooltip: "Importes detectados en recibos cuya matrícula no existe en la hoja Empleados del Reg. Retrib. Se muestran separados del matched.",
-    },
-    {
-      label: "Reg. Retrib. sin Recibo",
-      value: summary?.peopleInRegistroWithoutPdf ?? 0,
-      detail: "Personas del Excel sin recibo asociado",
-      icon: UserX,
-      accent: "gray" as const,
-      badge: "Separado",
-      tooltip: "Personas presentes en Reg. Retrib. para las que no se ha detectado recibo.",
     },
   ];
 
   return (
-    <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-      {cards.map((card, index) => (
-        <StatCard key={card.label} {...card} index={index} />
-      ))}
-    </section>
+    <div className="flex flex-col gap-4">
+      <section data-testid="primary-kpis" aria-label="Indicadores principales" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {primary.map((metric) => (
+          <div key={metric.label} data-testid="primary-kpi">
+            <MetricCard {...metric} />
+          </div>
+        ))}
+      </section>
+
+      <section className="grid items-start gap-4 xl:grid-cols-2">
+        <Card role="region" aria-label="Estado del análisis" className="p-4 sm:p-5">
+          <div className="mb-3">
+            <h2 className="text-base font-semibold text-ink">Estado del análisis</h2>
+            <p className="mt-1 text-sm text-muted">Cobertura y consistencia de los datos procesados.</p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <CompactMetric
+              label="Cuadre Reg."
+              value={`${internalOk} / ${internalExcelChecks.length} OK`}
+              detail="Periodo completo vs desglose. No compara contra recibos."
+              icon={FileCheck2}
+              tone={internalTone(internalExcelChecks)}
+            />
+            <CompactMetric
+              label="Recibos procesados"
+              value={summary?.pdfsAnalyzed ?? 0}
+              detail={summary?.pdfsFailed ? `${summary.pdfsFailed} con error` : "Páginas de recibos procesadas"}
+              icon={FileText}
+              tone="blue"
+            />
+            <CompactMetric
+              label="Reg. Retrib. sin Recibo"
+              value={summary?.peopleInRegistroWithoutPdf ?? 0}
+              detail="Personas del Excel sin recibo asociado"
+              icon={UserX}
+              tone="gray"
+            />
+          </div>
+        </Card>
+
+        <Card role="region" aria-label="Revisión pendiente" className="p-4 sm:p-5">
+          <div className="mb-3">
+            <h2 className="text-base font-semibold text-ink">Revisión pendiente</h2>
+            <p className="mt-1 text-sm text-muted">Decisiones y configuración que requieren atención.</p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <CompactMetric
+              label="Conceptos pendientes de revisión"
+              value={summary?.conceptsPendingReview ?? 0}
+              detail="Requieren decisión; no se incluyen en el cálculo principal."
+              icon={AlertCircle}
+              tone="orange"
+            />
+            <CompactMetric
+              label="Importe pendiente de decisión"
+              value={formatEuro(summary?.pendingDecisionPdfTotal ?? 0)}
+              detail="Importe Recibo pendiente de decisión, no incluido en el cálculo principal"
+              icon={BadgeEuro}
+              tone="orange"
+            />
+            <CompactMetric
+              label="Conceptos desactivados"
+              value={summary?.conceptsIgnored ?? 0}
+              detail="Reglas configuradas fuera del análisis"
+              icon={UserX}
+              tone="gray"
+            />
+            <CompactMetric
+              label="Conceptos sin mapear reales"
+              value={summary?.conceptsRealUnmapped ?? 0}
+              detail="Problema real de mapeo: sin código Reg. Retrib. claro"
+              icon={AlertCircle}
+              tone="red"
+            />
+          </div>
+        </Card>
+      </section>
+    </div>
   );
 }

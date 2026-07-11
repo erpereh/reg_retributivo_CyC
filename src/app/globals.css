@@ -19,11 +19,11 @@
   --color-info-bg: #dbeafe;
   --font-sans: var(--font-body), "Segoe UI", sans-serif;
   --font-mono: var(--font-mono), "Cascadia Code", monospace;
-  --shadow-subtle: 0 8px 20px rgba(15, 23, 42, 0.06);
-  --shadow-soft: 0 18px 45px rgba(15, 23, 42, 0.08);
-  --shadow-lift: 0 24px 60px rgba(15, 23, 42, 0.12);
-  --shadow-nav: 0 20px 60px rgba(15, 23, 42, 0.10);
-  --shadow-blue: 0 14px 28px rgba(37, 99, 235, 0.24);
+  --shadow-subtle: 0 4px 14px rgba(15, 23, 42, 0.05);
+  --shadow-soft: 0 10px 30px rgba(15, 23, 42, 0.06);
+  --shadow-lift: 0 20px 50px rgba(15, 23, 42, 0.14);
+  --shadow-nav: 0 18px 55px rgba(15, 23, 42, 0.08);
+  --shadow-blue: 0 10px 24px rgba(37, 99, 235, 0.20);
 }
 
 * {
@@ -32,12 +32,14 @@
 
 html {
   background: #eef2f7;
+  scroll-padding-top: 96px;
 }
 
 body {
   margin: 0;
   color: #0f172a;
   background: #eef2f7;
+  overflow-x: hidden;
 }
 
 button,
@@ -66,23 +68,23 @@ a:focus-visible {
 
 @layer components {
   .btn-primary {
-    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-primary px-5 text-sm font-semibold text-white shadow-blue transition duration-200 hover:bg-primary-dark hover:-translate-y-0.5 disabled:translate-y-0 disabled:opacity-45;
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-white shadow-blue transition-colors duration-150 hover:bg-primary-dark disabled:opacity-45;
   }
 
   .btn-secondary {
-    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-line bg-white px-5 text-sm font-semibold text-ink shadow-subtle transition duration-200 hover:-translate-y-0.5 hover:bg-blue-50 disabled:translate-y-0 disabled:opacity-45;
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-line bg-white px-4 text-sm font-semibold text-ink shadow-subtle transition-colors duration-150 hover:border-blue-200 hover:bg-blue-50 disabled:opacity-45;
   }
 
   .btn-ghost {
-    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-slate-100 px-5 text-sm font-semibold text-ink transition duration-200 hover:bg-slate-200 disabled:opacity-45;
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-slate-100 px-4 text-sm font-semibold text-ink transition-colors duration-150 hover:bg-slate-200 disabled:opacity-45;
   }
 
   .btn-danger {
-    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-red-200 bg-white px-5 text-sm font-semibold text-danger shadow-subtle transition duration-200 hover:-translate-y-0.5 hover:bg-red-50 disabled:translate-y-0 disabled:opacity-45;
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-red-200 bg-white px-4 text-sm font-semibold text-danger shadow-subtle transition-colors duration-150 hover:bg-red-50 disabled:opacity-45;
   }
 
   .filter-control {
-    @apply h-12 w-full rounded-full border border-line bg-white px-4 text-sm font-medium text-ink shadow-subtle transition duration-200 placeholder:text-muted/70 hover:border-blue-200;
+    @apply h-11 w-full rounded-xl border border-line bg-white px-4 text-sm font-medium text-ink shadow-subtle transition-colors duration-150 placeholder:text-muted/70 hover:border-blue-200;
   }
 
   .line-clamp-2,
@@ -98,6 +100,14 @@ a:focus-visible {
 
   .line-clamp-3 {
     -webkit-line-clamp: 3;
+  }
+
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
   }
 }
 

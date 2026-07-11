@@ -1,9 +1,8 @@
 "use client";
 
 import { CalendarDays, Download, FileText, History, RotateCcw, Trash2 } from "lucide-react";
-import { motion } from "motion/react";
 import { useAppState } from "@/components/app/AppState";
-import { Badge } from "@/components/common/Badge";
+import { StatusBadge } from "@/components/common/StatusBadge";
 import { Card } from "@/components/common/Card";
 import { EmptyState } from "@/components/common/EmptyState";
 import { SectionHeader } from "@/components/common/SectionHeader";
@@ -26,7 +25,6 @@ function HistoryCard({
   onOpen,
   onDelete,
   onExport,
-  index,
 }: Readonly<{
   analysis: StoredAnalysis;
   active: boolean;
@@ -34,13 +32,12 @@ function HistoryCard({
   onOpen: () => void;
   onDelete: () => void;
   onExport: () => void;
-  index: number;
 }>) {
   const summary = analysis.result?.summary;
 
   return (
-    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.18, delay: Math.min(index * 0.03, 0.16), ease: "easeOut" }}>
-      <Card interactive className={cn("p-4", active && "ring-2 ring-primary/70")}>
+    <div>
+      <Card interactive className={cn("p-4", active && "border-blue-300 bg-blue-50/40 ring-1 ring-primary/30")}>
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
@@ -51,8 +48,8 @@ function HistoryCard({
                 <p className="text-sm font-semibold text-ink">{formatDate(analysis.createdAt)}</p>
                 <p className="max-w-[420px] truncate text-sm text-muted">{displayText(analysis.registroFileName)}</p>
               </div>
-              {active ? <Badge value="Análisis activo" /> : null}
-              <Badge value="IA bajo demanda" />
+              {active ? <StatusBadge value="Análisis activo" tone="success" /> : null}
+              <StatusBadge value="IA bajo demanda" tone="info" />
             </div>
 
             <dl className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
@@ -88,7 +85,7 @@ function HistoryCard({
           </div>
         </div>
       </Card>
-    </motion.div>
+    </div>
   );
 }
 
@@ -132,7 +129,7 @@ export function HistoryView() {
         />
       ) : (
         <section className="space-y-4">
-          {history.map((analysis, index) => (
+          {history.map((analysis) => (
             <HistoryCard
               key={analysis.id}
               analysis={analysis}
@@ -145,7 +142,6 @@ export function HistoryView() {
                   void removeStoredAnalysis(analysis.id);
                 }
               }}
-              index={index}
             />
           ))}
         </section>

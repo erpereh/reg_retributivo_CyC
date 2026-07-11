@@ -4,6 +4,7 @@ import { Pencil, Plus, Power, PowerOff, Search, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useAppState } from "@/components/app/AppState";
 import { Card } from "@/components/common/Card";
+import { ModalShell } from "@/components/common/ModalShell";
 import { Toggle } from "@/components/common/Toggle";
 import type { NormalizedConcept } from "@/lib/types";
 import { cn } from "@/lib/utils/classNames";
@@ -316,15 +317,18 @@ export function NormalizedConceptsManager() {
       )}
 
       {editingId ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" onMouseDown={() => setEditingId(undefined)}>
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label={editingId === "new" ? "Crear concepto" : "Editar concepto"}
-            className="max-h-[90dvh] w-full max-w-xl overflow-y-auto rounded-[28px] bg-white p-6 shadow-lift"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <h3 className="text-xl font-semibold text-ink">{editingId === "new" ? "Crear concepto" : "Editar concepto"}</h3>
+        <ModalShell
+          title={editingId === "new" ? "Crear concepto" : "Editar concepto"}
+          eyebrow="Conceptos normalizados"
+          maxWidth="xl"
+          onClose={() => setEditingId(undefined)}
+          footer={(
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-secondary" onClick={() => setEditingId(undefined)}>Cancelar</button>
+              <button type="button" className="btn-primary" onClick={saveForm}>Guardar concepto</button>
+            </div>
+          )}
+        >
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <label className="text-sm font-semibold text-ink" htmlFor="normalized-year">
                 Año
@@ -351,12 +355,7 @@ export function NormalizedConceptsManager() {
               <Toggle checked={form.active} onChange={(active) => setForm({ ...form, active })} label="Activo" description="Disponible como parametrización informativa." />
             </div>
             {errors.duplicate ? <p className="mt-4 text-sm font-semibold text-danger">{errors.duplicate}</p> : null}
-            <div className="mt-5 flex justify-end gap-2">
-              <button type="button" className="btn-secondary" onClick={() => setEditingId(undefined)}>Cancelar</button>
-              <button type="button" className="btn-primary" onClick={saveForm}>Guardar concepto</button>
-            </div>
-          </div>
-        </div>
+        </ModalShell>
       ) : null}
     </Card>
   );

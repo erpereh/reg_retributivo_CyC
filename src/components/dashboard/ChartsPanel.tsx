@@ -1,6 +1,6 @@
 "use client";
 
-import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { BarChart3 } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { Card } from "@/components/common/Card";
@@ -91,35 +91,49 @@ function CountTooltip({ active, payload, label }: Readonly<{ active?: boolean; p
   );
 }
 
-function StatusDonut({ rows, animate }: Readonly<{ rows: Array<{ name: string; value: number; color: string }>; animate: boolean }>) {
+function StatusStackedBar({ rows }: Readonly<{ rows: Array<{ name: string; value: number; color: string }> }>) {
   const total = rows.reduce((sum, row) => sum + row.value, 0);
 
   return (
-    <div className="grid items-center gap-4 md:grid-cols-[220px_1fr]">
-      <div className="relative h-56">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie data={rows} dataKey="value" nameKey="name" innerRadius={62} outerRadius={88} paddingAngle={3} isAnimationActive={animate} animationDuration={650}>
-              {rows.map((row) => (
-                <Cell key={row.name} fill={row.color} />
-              ))}
-            </Pie>
-            <Tooltip content={<CountTooltip />} />
-          </PieChart>
-        </ResponsiveContainer>
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-3xl font-semibold text-ink tabular-nums">{total}</span>
-          <span className="text-xs font-semibold uppercase text-muted">personas</span>
+    <div className="flex min-h-56 flex-col justify-center gap-5">
+      <div>
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <p className="text-3xl font-semibold text-ink tabular-nums">{total}</p>
+            <p className="mt-1 text-sm text-muted">{total} personas analizadas</p>
+          </div>
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted">Distribución</span>
+        </div>
+        <div
+          role="img"
+          aria-label={`Distribución de estados: ${total} personas analizadas. ${rows.map((row) => `${row.name}: ${row.value}`).join(". ")}`}
+          className="mt-4 flex h-12 w-full overflow-hidden rounded-2xl bg-slate-100"
+        >
+          {rows.map((row) => {
+            const percentage = total ? (row.value / total) * 100 : 0;
+            return (
+              <div
+                key={row.name}
+                title={`${row.name}: ${row.value} (${percentage.toFixed(1)}%)`}
+                className="flex min-w-0 items-center justify-center border-r border-white/80 text-xs font-semibold text-white last:border-r-0"
+                style={{ width: `${percentage}%`, backgroundColor: row.color }}
+              >
+                {percentage >= 15 ? `${Math.round(percentage)}%` : null}
+              </div>
+            );
+          })}
         </div>
       </div>
-      <div className="grid gap-2">
+      <div className="grid gap-2 sm:grid-cols-2">
         {rows.map((row) => (
-          <div key={row.name} className="flex items-center justify-between gap-4 rounded-2xl bg-slate-50 px-3 py-2">
+          <div key={row.name} className="flex items-center justify-between gap-4 rounded-xl border border-line/70 bg-slate-50 px-3 py-2">
             <span className="flex items-center gap-2 text-sm font-medium text-ink">
               <span className="size-2.5 rounded-full" style={{ backgroundColor: row.color }} />
               {row.name}
             </span>
-            <span className="font-mono text-sm font-semibold text-ink">{row.value}</span>
+            <span className="text-sm font-semibold text-ink tabular-nums">
+              {row.value} <span className="text-xs font-medium text-muted">· {total ? Math.round((row.value / total) * 100) : 0}%</span>
+            </span>
           </div>
         ))}
       </div>
@@ -184,7 +198,7 @@ export function ChartsPanel({ result }: Readonly<{ result?: AnalysisResult }>) {
   return (
     <section className="grid gap-4 xl:grid-cols-2">
       <ProfessionalChartCard title="Estado de personas" subtitle="Vista compacta del estado operativo de las filas de personas." badge="Estado">
-        {statusRows.length ? <StatusDonut rows={statusRows} animate={animate} /> : <EmptyChart />}
+        {statusRows.length ? <StatusStackedBar rows={statusRows} /> : <EmptyChart />}
       </ProfessionalChartCard>
 
       <ProfessionalChartCard title="Diferencias matched por bloque" subtitle="Solo personas encontradas en Reg. Retrib. y Recibo; positivos y negativos se mantienen visibles." badge="EUR">

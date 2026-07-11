@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, test } from "vitest";
 import { SummaryCards } from "@/components/dashboard/SummaryCards";
 import type { AnalysisSummary } from "@/lib/types";
@@ -77,5 +77,14 @@ describe("dashboard summary cards", () => {
     expect(screen.getByText("Cuadre Reg.")).toBeTruthy();
     expect(screen.getByText("70 / 70 OK")).toBeTruthy();
     expect(screen.getByText(/No compara contra recibos/i)).toBeTruthy();
+
+    const primaryKpis = screen.getByTestId("primary-kpis");
+    expect(within(primaryKpis).getAllByTestId("primary-kpi")).toHaveLength(4);
+    expect(within(primaryKpis).getByText("Personas analizadas")).toBeTruthy();
+    expect(within(primaryKpis).getByText("Personas con diferencia")).toBeTruthy();
+    expect(within(primaryKpis).getByText("Diferencia total matched")).toBeTruthy();
+    expect(within(primaryKpis).getByText("Recibo sin Reg. Retrib.")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Estado del análisis" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Revisión pendiente" })).toBeTruthy();
   });
 });

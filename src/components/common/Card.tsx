@@ -15,13 +15,13 @@ export function Card({ children, className, interactive = false, tone = "default
 
   return (
     <motion.div
-      whileHover={interactive && !reduceMotion ? { y: -3, scale: 1.01 } : undefined}
+      whileHover={interactive && !reduceMotion ? { y: -1 } : undefined}
       transition={{ duration: 0.18, ease: "easeOut" }}
       className={cn(
-        "min-w-0 rounded-[28px] border shadow-soft",
+        "min-w-0 rounded-[20px] border shadow-soft",
         tone === "blue"
-          ? "border-blue-400/30 bg-gradient-to-br from-primary via-[#2f7df7] to-[#6aa4ff] text-white"
-          : "border-white/80 bg-white text-ink",
+          ? "border-blue-400/30 bg-gradient-to-br from-primary to-[#4f8ff7] text-white"
+          : "border-line/80 bg-white text-ink",
         interactive && "transition-shadow hover:shadow-lift",
         className,
       )}

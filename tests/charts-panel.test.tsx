@@ -133,4 +133,15 @@ describe("ChartsPanel", () => {
     expect(screen.queryByText(/ajustad/i)).toBeNull();
     expect(screen.getAllByText(/No se suman/i).length).toBeGreaterThan(0);
   });
+
+  test("renders an accessible stacked status overview with visible counts", () => {
+    render(<ChartsPanel result={result} />);
+
+    expect(screen.getByRole("img", { name: /Distribución de estados/i })).toBeTruthy();
+    expect(screen.getByText(/2 personas analizadas/i)).toBeTruthy();
+    expect(screen.getByText("Diferencia")).toBeTruthy();
+    expect(screen.getByText("OK")).toBeTruthy();
+    expect(screen.getAllByText("1").length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByTestId("status-donut")).toBeNull();
+  });
 });

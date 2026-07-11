@@ -15,11 +15,11 @@ import {
   Search,
   Trash2,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
 import type { MouseEvent, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useAppState } from "@/components/app/AppState";
 import { Card } from "@/components/common/Card";
+import { ModalShell } from "@/components/common/ModalShell";
 import { Toggle } from "@/components/common/Toggle";
 import { isRuleEnabledForComparison, mergeConceptMap, normalizeConceptMappingRule, normalizePdfConcept } from "@/lib/compare/conceptMapping";
 import type {
@@ -722,11 +722,8 @@ export function ConceptMapEditor() {
                 const expanded = expandedRow === row.id;
                 const codeValid = row.code ? codeExists(row.code, availableCodes) : true;
                 return (
-                  <motion.tr
+                  <tr
                     key={row.id}
-                    layout
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
                     className="cursor-pointer border-t border-line/70 align-top transition hover:bg-blue-50/50"
                     onClick={() => setExpandedRow((current) => (current === row.id ? undefined : row.id))}
                   >
@@ -789,7 +786,7 @@ export function ConceptMapEditor() {
                         )}
                       </div>
                     </td>
-                  </motion.tr>
+                  </tr>
                 );
               })}
             </tbody>
@@ -834,28 +831,20 @@ export function ConceptMapEditor() {
         ) : null}
       </section>
 
-      <AnimatePresence>
-        {editingIndex !== undefined ? (
-          <motion.div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={() => setEditingIndex(undefined)}>
-            <motion.div
-              role="dialog"
-              aria-modal="true"
-              aria-label={editingIndex === "new" ? "Crear regla" : "Editar regla"}
-              className="max-h-[90dvh] w-full max-w-3xl overflow-y-auto rounded-[28px] bg-white p-6 shadow-lift"
-              initial={{ opacity: 0, y: 18, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 10, scale: 0.98 }}
-              transition={{ duration: 0.18 }}
-              onMouseDown={(event) => event.stopPropagation()}
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h3 className="text-xl font-semibold text-ink">{editingIndex === "new" ? "Crear regla" : "Editar regla"}</h3>
-                  <p className="mt-1 text-sm text-muted">Define cómo se clasifica un concepto detectado en Recibo.</p>
-                </div>
-                <button type="button" className="btn-secondary min-h-10 px-4" onClick={() => setEditingIndex(undefined)}>Cerrar</button>
-              </div>
-
+      {editingIndex !== undefined ? (
+        <ModalShell
+          title={editingIndex === "new" ? "Crear regla" : "Editar regla"}
+          eyebrow="Conceptos del análisis"
+          maxWidth="3xl"
+          onClose={() => setEditingIndex(undefined)}
+          footer={(
+            <div className="flex flex-wrap justify-end gap-2">
+              <button type="button" className="btn-secondary" onClick={() => setEditingIndex(undefined)}>Cancelar</button>
+              <button type="button" className="btn-primary" onClick={saveForm}>Guardar regla</button>
+            </div>
+          )}
+        >
+              <p className="text-sm text-muted">Define cómo se clasifica un concepto detectado en Recibo.</p>
               <div className="mt-5 grid gap-4 md:grid-cols-2">
                 <label className="block text-sm font-semibold text-ink">
                   Concepto Recibo
@@ -895,15 +884,8 @@ export function ConceptMapEditor() {
                 Motivo
                 <textarea value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} className="mt-2 min-h-28 w-full rounded-2xl border border-line p-4 text-sm" />
               </label>
-
-              <div className="mt-5 flex flex-wrap justify-end gap-2">
-                <button type="button" className="btn-secondary" onClick={() => setEditingIndex(undefined)}>Cancelar</button>
-                <button type="button" className="btn-primary" onClick={saveForm}>Guardar regla</button>
-              </div>
-            </motion.div>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+        </ModalShell>
+      ) : null}
     </Card>
   );
 }

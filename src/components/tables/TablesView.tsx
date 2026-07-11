@@ -1,14 +1,16 @@
 "use client";
 
-import { Copy, Search, Table2, X } from "lucide-react";
-import { motion } from "motion/react";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Copy, Search, Table2 } from "lucide-react";
+import { Fragment, useMemo, useState } from "react";
 import { AiExplanationPanel } from "@/components/ai/AiExplanationPanel";
 import { useAppState, type DashboardFilters, EMPTY_FILTERS, matchesQuery } from "@/components/app/AppState";
 import { Badge } from "@/components/common/Badge";
 import { Card } from "@/components/common/Card";
+import { DataTableShell } from "@/components/common/DataTableShell";
 import { EmptyState } from "@/components/common/EmptyState";
+import { ModalShell } from "@/components/common/ModalShell";
 import { SectionHeader } from "@/components/common/SectionHeader";
+import { TruncatedText } from "@/components/common/TruncatedText";
 import { AgrupacionesView } from "@/components/groupings/AgrupacionesView";
 import { buildConceptExplainPayload, buildNotIncludedConceptExplainPayload, buildPersonExplainPayload } from "@/lib/ai/explainPayload";
 import type { AppView, ConceptComparisonRow, PersonComparisonRow, UnmappedConceptRow } from "@/lib/types";
@@ -202,7 +204,7 @@ function TableSummary({
   extra,
 }: Readonly<{ visible: number; total: number; difference: number; extra?: string }>) {
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-white px-4 py-3 text-sm shadow-subtle">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
       <span className="font-semibold text-ink">
         {visible} filas visibles de {total}
       </span>
@@ -479,14 +481,6 @@ function DetailModal({
   unmappedConcepts,
   onClose,
 }: Readonly<{ state: DetailModalState; tolerance: number; concepts: readonly ConceptComparisonRow[]; unmappedConcepts: readonly UnmappedConceptRow[]; onClose: () => void }>) {
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
-
   const title = state.kind === "person" ? "Detalle persona" : state.kind === "concept" ? "Detalle concepto" : "Detalle concepto no incluido";
   const cause =
     state.kind === "person"
@@ -508,29 +502,20 @@ function DetailModal({
         : buildNotIncludedConceptExplainPayload(state.row, cause);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" onMouseDown={onClose}>
-      <motion.div
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        initial={{ opacity: 0, scale: 0.97, y: 12 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.98, y: 8 }}
-        transition={{ duration: 0.18, ease: "easeOut" }}
-        className="max-h-[90dvh] w-full max-w-5xl overflow-y-auto rounded-[28px] bg-white p-5 shadow-lift sm:p-6"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold uppercase text-muted">Detalle determinista</p>
-            <h2 className="mt-1 text-2xl font-semibold text-ink">{title}</h2>
-          </div>
-          <button type="button" onClick={onClose} className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200">
-            <X className="h-5 w-5" aria-hidden="true" />
+    <ModalShell
+      title={title}
+      onClose={onClose}
+      maxWidth="5xl"
+      footer={
+        <div className="flex flex-wrap justify-end gap-2">
+          <button type="button" className="btn-secondary" onClick={() => void navigator.clipboard?.writeText(copySummary)}>
+            <Copy aria-hidden="true" />
+            Copiar resumen
           </button>
         </div>
-
-        <div className="mt-6 grid gap-4 md:grid-cols-4">
+      }
+    >
+        <div className="grid gap-4 md:grid-cols-4">
           {state.kind === "person" ? (
             <>
               <ModalField label="Matrícula" value={state.row.employeeNumber} />
@@ -601,14 +586,7 @@ function DetailModal({
 
         <AiExplanationPanel type={aiType} payload={aiPayload} />
 
-        <div className="mt-6 flex flex-wrap justify-end gap-2">
-          <button type="button" className="btn-secondary" onClick={() => void navigator.clipboard?.writeText(copySummary)}>
-            <Copy className="h-4 w-4" aria-hidden="true" />
-            Copiar resumen
-          </button>
-        </div>
-      </motion.div>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -630,10 +608,11 @@ function PersonasTable({ density, onOpen }: Readonly<{ density: TableDensity; on
   const pdfWithoutRegistro = rows.filter((row) => row.status === "Sin Registro").reduce((sum, row) => sum + row.pdfTotal, 0);
 
   return (
-    <div className="space-y-3">
-      <TableSummary visible={rows.length} total={allRows.length} difference={totalDifference} extra={`Recibo sin Reg. Retrib. visible: ${formatEuro(pdfWithoutRegistro)}`} />
-      <Card className="overflow-hidden p-0">
-        <div className="max-h-[70dvh] overflow-auto">
+    <div>
+      <DataTableShell
+        summary={<TableSummary visible={rows.length} total={allRows.length} difference={totalDifference} extra={`Recibo sin Reg. Retrib. visible: ${formatEuro(pdfWithoutRegistro)}`} />}
+        empty={!rows.length ? <p className="p-6 text-sm text-muted">Sin personas con los filtros actuales.</p> : null}
+      >
           <table className="w-full min-w-[1320px] border-separate border-spacing-0 text-left text-sm">
             <thead className="sticky top-0 z-20 bg-slate-100 text-muted shadow-subtle">
               <tr>
@@ -651,39 +630,38 @@ function PersonasTable({ density, onOpen }: Readonly<{ density: TableDensity; on
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, index) => {
+              {rows.map((row) => {
                 const cause = describePersonCause(row, result?.summary?.tolerance ?? 1);
                 return (
-                  <motion.tr
+                  <tr
                     key={row.employeeNumber}
                     tabIndex={0}
+                    aria-label={`Abrir detalle de ${displayText(row.person) || row.employeeNumber}`}
                     onClick={() => onOpen({ kind: "person", row })}
                     onKeyDown={(event) => {
-                      if (event.key === "Enter") onOpen({ kind: "person", row });
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        onOpen({ kind: "person", row });
+                      }
                     }}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.16, delay: Math.min(index * 0.01, 0.16) }}
                     className={cn("cursor-pointer transition", rowTone(row.status))}
                   >
                     <td className={cn(stickyFirstColumn(density), "border-b border-line/70 font-mono")}>{displayText(row.employeeNumber)}</td>
-                    <td className={cn("min-w-[220px] border-b border-line/70 font-semibold", cellPadding(density))}>{displayText(row.person)}</td>
+                    <td className={cn("min-w-[220px] max-w-[260px] border-b border-line/70 font-semibold", cellPadding(density))}><TruncatedText>{displayText(row.person)}</TruncatedText></td>
                     <td className={cn("border-b border-line/70", cellPadding(density))}><CauseBadge cause={cause} /></td>
                     <td className={cn("border-b border-line/70", cellPadding(density))}>{displayText(row.workplace)}</td>
-                    <td className={cn("border-b border-line/70", cellPadding(density))}>{displayText(row.position)}</td>
-                    <td className={cn("border-b border-line/70", cellPadding(density))}>{displayText(row.category)}</td>
+                    <td className={cn("max-w-[220px] border-b border-line/70", cellPadding(density))}><TruncatedText>{displayText(row.position)}</TruncatedText></td>
+                    <td className={cn("max-w-[220px] border-b border-line/70", cellPadding(density))}><TruncatedText>{displayText(row.category)}</TruncatedText></td>
                     <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density))}>{formatEuro(row.registroTotal)}</td>
                     <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density))}>{formatEuro(row.pdfTotal)}</td>
                     <td className={cn("border-b border-line/70 text-right font-mono", cellPadding(density), diffClass(row.totalDifference))}>{formatEuro(row.totalDifference)}</td>
                     <td className={cn("border-b border-line/70", cellPadding(density))}><Badge value={row.status} /></td>
-                  </motion.tr>
+                  </tr>
                 );
               })}
             </tbody>
           </table>
-          {!rows.length ? <p className="p-6 text-sm text-muted">Sin personas con los filtros actuales.</p> : null}
-        </div>
-      </Card>
+      </DataTableShell>
     </div>
   );
 }

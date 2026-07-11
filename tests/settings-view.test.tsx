@@ -169,6 +169,10 @@ vi.mock("@/components/app/AppState", () => ({
   useAppState: () => appState.value,
 }));
 
+function openSettingsTab(name: "General" | "Exclusiones" | "Conceptos" | "Privacidad") {
+  fireEvent.click(screen.getByRole("tab", { name }));
+}
+
 describe("SettingsView", () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -180,6 +184,26 @@ describe("SettingsView", () => {
     appState.value.settings.normalizedConcepts = [];
     appState.value.settings.excludedEmployeeIds = [];
     appState.value.activeAnalysis.result.conceptMap = cloneDefaultConceptMap();
+  });
+
+  test("opens General by default and keeps visited settings panels mounted but hidden", () => {
+    render(<SettingsView />);
+
+    const generalTab = screen.getByRole("tab", { name: "General" });
+    const conceptsTab = screen.getByRole("tab", { name: "Conceptos" });
+    expect(generalTab.getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tabpanel", { name: "General" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Conceptos del análisis" })).toBeNull();
+
+    fireEvent.click(conceptsTab);
+    expect(screen.getByRole("heading", { name: "Conceptos del análisis" })).toBeTruthy();
+
+    fireEvent.click(generalTab);
+    const hiddenConceptPanel = document.querySelector('[role="tabpanel"][aria-label="Conceptos"]');
+    expect(hiddenConceptPanel).toBeTruthy();
+    expect((hiddenConceptPanel as HTMLElement).hidden).toBe(true);
+    expect(hiddenConceptPanel?.getAttribute("aria-hidden")).toBe("true");
+    expect(screen.queryByRole("heading", { name: "Conceptos del análisis" })).toBeNull();
   });
 
   test("renders AI configuration without global toggles and clears only AI explanation cache", () => {
@@ -202,6 +226,7 @@ describe("SettingsView", () => {
 
   test("renders the concept analysis editor with only active/desactivated usage controls", () => {
     render(<SettingsView />);
+    openSettingsTab("Conceptos");
 
     expect(screen.getByRole("heading", { name: "Conceptos del análisis" })).toBeTruthy();
     expect(screen.queryByText(/Esta fase solo clasifica reglas/i)).toBeNull();
@@ -233,15 +258,16 @@ describe("SettingsView", () => {
 
   test("shows No Norm. by default and switches to the normalized concepts view", () => {
     render(<SettingsView />);
+    openSettingsTab("Conceptos");
 
-    expect(screen.getByRole("button", { name: "No Norm." }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: "Normalizado" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("tab", { name: "No Norm." }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: "Normalizado" }).getAttribute("aria-selected")).toBe("false");
     expect(screen.getByRole("heading", { name: "Conceptos del análisis" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Conceptos normalizados" })).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Normalizado" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Normalizado" }));
 
-    expect(screen.getByRole("button", { name: "Normalizado" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("tab", { name: "Normalizado" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("heading", { name: "Conceptos normalizados" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Conceptos del análisis" })).toBeNull();
   });
@@ -262,6 +288,7 @@ describe("SettingsView", () => {
     ] as never;
 
     render(<SettingsView />);
+    openSettingsTab("Conceptos");
 
     ["Salario Base", "Paga Extra Junio", "Antiguedad", "Complemento Puesto de trabajo", "Seguro Medico", "Kilometraje con Retencion", "Plan de Pensiones Mensual"].forEach(
       (concept) => {
@@ -272,6 +299,7 @@ describe("SettingsView", () => {
 
   test("renders one scrollable table with the corrected counters and telework visible", () => {
     render(<SettingsView />);
+    openSettingsTab("Conceptos");
 
     expect(screen.queryByRole("heading", { name: "Reglas del mapa" })).toBeNull();
     expect(screen.queryByRole("heading", { name: /Conceptos detectados en este análisis/i })).toBeNull();
@@ -303,6 +331,7 @@ describe("SettingsView", () => {
   test("manages employee exclusion chips without duplicates", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<SettingsView />);
+    openSettingsTab("Exclusiones");
 
     expect(screen.getByRole("heading", { name: /Exclusiones por matr/i })).toBeTruthy();
     expect(screen.getByText(/0 matr/i)).toBeTruthy();
@@ -340,6 +369,7 @@ describe("SettingsView", () => {
 
   test("filters by usage, detected flag and block", () => {
     render(<SettingsView />);
+    openSettingsTab("Conceptos");
 
     expect(screen.queryByLabelText("Estado")).toBeNull();
     fireEvent.change(screen.getByLabelText("Uso"), { target: { value: "Desactivados" } });
@@ -360,6 +390,7 @@ describe("SettingsView", () => {
 
   test("searches aliases and toggles a rule from compact actions", () => {
     render(<SettingsView />);
+    openSettingsTab("Conceptos");
 
     fireEvent.change(screen.getByPlaceholderText(/Buscar por concepto/i), { target: { value: "Teletrabajo" } });
     expect(screen.getByText("Abono teletrabajo")).toBeTruthy();
@@ -373,6 +404,7 @@ describe("SettingsView", () => {
 
   test("unmapped rows use the same three action slots without a justify shortcut", () => {
     render(<SettingsView />);
+    openSettingsTab("Conceptos");
 
     const pendingRow = screen.getByText("Concepto pendiente").closest("tr");
     expect(pendingRow).toBeTruthy();
@@ -399,6 +431,7 @@ describe("SettingsView", () => {
     ] as never;
 
     render(<SettingsView />);
+    openSettingsTab("Conceptos");
 
     fireEvent.click(screen.getByRole("button", { name: /Restaurar defecto/i }));
 
@@ -411,6 +444,7 @@ describe("SettingsView", () => {
   test("creates a rule from an unmapped concept and refreshes data without files", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<SettingsView />);
+    openSettingsTab("Conceptos");
 
     fireEvent.click(screen.getByRole("button", { name: /Crear regla Concepto pendiente/i }));
     fireEvent.change(screen.getByLabelText(/Código Reg\. Retrib\./i), { target: { value: "CODIGO_INEXISTENTE" } });
