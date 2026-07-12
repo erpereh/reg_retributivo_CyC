@@ -36,10 +36,17 @@ describe("TopNav", () => {
   test("renders accessible tabs and changes active view without reload", () => {
     render(<TopNav />);
 
-    expect(screen.getByRole("tab", { name: "Dashboard" }).getAttribute("aria-selected")).toBe("true");
+    const dashboardTab = screen.getByRole("tab", { name: "Dashboard" });
+    const peopleTab = screen.getByRole("tab", { name: "Personas" });
+    expect(dashboardTab.getAttribute("aria-selected")).toBe("true");
     fireEvent.click(screen.getByRole("tab", { name: "Personas" }));
 
     expect(appState.value.setView).toHaveBeenCalledWith("personas");
+
+    dashboardTab.focus();
+    fireEvent.keyDown(dashboardTab, { key: "ArrowRight" });
+    expect(appState.value.setView).toHaveBeenCalledWith("personas");
+    expect(document.activeElement).toBe(peopleTab);
   });
 
   test("keeps Conceptos hidden from the main navigation", () => {
@@ -61,7 +68,11 @@ describe("TopNav", () => {
     expect(screen.queryByText("Retributivo")).toBeNull();
     expect(screen.queryByText(/Análisis activo/i)).toBeNull();
     expect(screen.queryByText(/IA activa/i)).toBeNull();
-    expect(screen.getByRole("navigation", { name: /Navegación principal/i })).toBeTruthy();
+    const navigation = screen.getByRole("navigation", { name: /Navegación principal/i });
+    const header = navigation.closest("header");
+    expect(header?.getAttribute("data-surface")).toBe("floating-header");
+    expect(header?.className).not.toContain("border-b");
+    expect(screen.getByRole("tablist", { name: "Vistas" }).getAttribute("data-layout")).toBe("fit-content");
   });
 
   test("uses icon-only export and reset buttons with accessible names", () => {
@@ -73,6 +84,7 @@ describe("TopNav", () => {
     expect(exportButton.textContent).toBe("");
     expect(resetButton.textContent).toBe("");
     expect(exportButton.hasAttribute("disabled")).toBe(true);
+    expect(exportButton.parentElement?.getAttribute("data-surface")).toBe("nav-actions");
 
     fireEvent.click(resetButton);
     expect(appState.value.resetForNewAnalysis).toHaveBeenCalledTimes(1);

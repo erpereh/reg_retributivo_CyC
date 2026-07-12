@@ -42,6 +42,10 @@ describe("NormalizedConceptsManager", () => {
     render(<NormalizedConceptsManager />);
 
     expect(screen.getByRole("heading", { name: "Conceptos normalizados" })).toBeTruthy();
+    const normalizedLayout = screen.getByRole("heading", { name: "Conceptos normalizados" }).closest('[data-slot="card"]');
+    expect(normalizedLayout?.getAttribute("data-surface")).toBe("normalized-concepts-layout");
+    expect(normalizedLayout?.querySelectorAll('[data-slot="card"]')).toHaveLength(0);
+    expect(normalizedLayout?.querySelector('[data-surface="normalized-concepts-table"]')).toBeTruthy();
     expect(screen.getByText("Gestiona los conceptos y valores configurados para cada año.")).toBeTruthy();
     expect(screen.getByText("Estos conceptos se guardan como parametrización. Todavía no se aplican a los cálculos del análisis.")).toBeTruthy();
     expect(screen.getByText("No hay conceptos normalizados creados.")).toBeTruthy();

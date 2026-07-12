@@ -68,8 +68,9 @@ export function SummaryCards({ summary, internalExcelChecks = [] }: SummaryCards
             <h2 className="text-base font-semibold text-ink">Estado del análisis</h2>
             <p className="mt-1 text-sm text-muted">Cobertura y consistencia de los datos procesados.</p>
           </div>
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div className="flex flex-col">
             <CompactMetric
+              variant="row"
               label="Cuadre Reg."
               value={`${internalOk} / ${internalExcelChecks.length} OK`}
               detail="Periodo completo vs desglose. No compara contra recibos."
@@ -77,6 +78,7 @@ export function SummaryCards({ summary, internalExcelChecks = [] }: SummaryCards
               tone={internalTone(internalExcelChecks)}
             />
             <CompactMetric
+              variant="row"
               label="Recibos procesados"
               value={summary?.pdfsAnalyzed ?? 0}
               detail={summary?.pdfsFailed ? `${summary.pdfsFailed} con error` : "Páginas de recibos procesadas"}
@@ -84,6 +86,7 @@ export function SummaryCards({ summary, internalExcelChecks = [] }: SummaryCards
               tone="blue"
             />
             <CompactMetric
+              variant="row"
               label="Reg. Retrib. sin Recibo"
               value={summary?.peopleInRegistroWithoutPdf ?? 0}
               detail="Personas del Excel sin recibo asociado"
@@ -98,8 +101,9 @@ export function SummaryCards({ summary, internalExcelChecks = [] }: SummaryCards
             <h2 className="text-base font-semibold text-ink">Revisión pendiente</h2>
             <p className="mt-1 text-sm text-muted">Decisiones y configuración que requieren atención.</p>
           </div>
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="flex flex-col">
             <CompactMetric
+              variant="row"
               label="Conceptos pendientes de revisión"
               value={summary?.conceptsPendingReview ?? 0}
               detail="Requieren decisión; no se incluyen en el cálculo principal."
@@ -107,6 +111,7 @@ export function SummaryCards({ summary, internalExcelChecks = [] }: SummaryCards
               tone="orange"
             />
             <CompactMetric
+              variant="row"
               label="Importe pendiente de decisión"
               value={formatEuro(summary?.pendingDecisionPdfTotal ?? 0)}
               detail="Importe Recibo pendiente de decisión, no incluido en el cálculo principal"
@@ -114,6 +119,7 @@ export function SummaryCards({ summary, internalExcelChecks = [] }: SummaryCards
               tone="orange"
             />
             <CompactMetric
+              variant="row"
               label="Conceptos desactivados"
               value={summary?.conceptsIgnored ?? 0}
               detail="Reglas configuradas fuera del análisis"
@@ -121,6 +127,7 @@ export function SummaryCards({ summary, internalExcelChecks = [] }: SummaryCards
               tone="gray"
             />
             <CompactMetric
+              variant="row"
               label="Conceptos sin mapear reales"
               value={summary?.conceptsRealUnmapped ?? 0}
               detail="Problema real de mapeo: sin código Reg. Retrib. claro"

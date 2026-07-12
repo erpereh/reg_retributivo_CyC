@@ -133,6 +133,9 @@ describe("CuadreExcelView", () => {
     expect(screen.getByText("Compara las retribuciones del periodo completo frente a la suma de conceptos desglosados.")).toBeTruthy();
 
     const metricCards = screen.getByLabelText("Resumen de Cuadre Reg.");
+    expect(screen.getByRole("region", { name: "Resumen de Cuadre Reg." })).toBe(metricCards);
+    expect(metricCards.getAttribute("data-surface")).toBe("metric-grid");
+    expect(metricCards.querySelectorAll('[data-variant="card"]')).toHaveLength(5);
     ["Empleados analizados", "OK", "Con diferencia", "Mayor diferencia", "Diferencia total visible"].forEach((label) => expect(within(metricCards).getByText(label)).toBeTruthy());
     expect(within(metricCards).getByText("100,00 EUR")).toBeTruthy();
 

@@ -20,7 +20,7 @@
   --font-sans: var(--font-body), "Segoe UI", sans-serif;
   --font-mono: var(--font-mono), "Cascadia Code", monospace;
   --shadow-subtle: 0 4px 14px rgba(15, 23, 42, 0.05);
-  --shadow-soft: 0 10px 30px rgba(15, 23, 42, 0.06);
+  --shadow-soft: 0 8px 24px rgba(15, 23, 42, 0.055);
   --shadow-lift: 0 20px 50px rgba(15, 23, 42, 0.14);
   --shadow-nav: 0 18px 55px rgba(15, 23, 42, 0.08);
   --shadow-blue: 0 10px 24px rgba(37, 99, 235, 0.20);
@@ -40,6 +40,20 @@ body {
   color: #0f172a;
   background: #eef2f7;
   overflow-x: hidden;
+  font-family: var(--font-body), "Segoe UI", sans-serif;
+}
+
+[data-slot="table-viewport"] thead {
+  background-color: #f1f5f9;
+}
+
+[data-slot="table-viewport"] th {
+  font-weight: 600;
+}
+
+.tabular-nums,
+td[align="right"] {
+  font-variant-numeric: tabular-nums;
 }
 
 button,

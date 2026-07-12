@@ -5,7 +5,6 @@ import { Fragment, useMemo, useState } from "react";
 import { AiExplanationPanel } from "@/components/ai/AiExplanationPanel";
 import { useAppState } from "@/components/app/AppState";
 import { StatusBadge } from "@/components/common/StatusBadge";
-import { Card } from "@/components/common/Card";
 import { CompactMetric } from "@/components/common/CompactMetric";
 import { DataTableShell } from "@/components/common/DataTableShell";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -432,12 +431,12 @@ export function CuadreExcelView() {
       <div id="cuadre-view-panel" role="tabpanel" aria-labelledby={`cuadre-${activeMode}-tab`} className="space-y-6">
       <p className="text-sm leading-6 text-muted">{activeDescription}</p>
 
-      <Card aria-label="Resumen de Cuadre Reg." className="grid gap-2 p-3 sm:grid-cols-2 xl:grid-cols-5">
+      <section data-surface="metric-grid" aria-label="Resumen de Cuadre Reg." className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {metrics.map((metric) => {
           const Icon = metric.tone === "green" ? CheckCircle2 : metric.tone === "blue" ? Table2 : Sigma;
-          return <CompactMetric key={metric.label} label={metric.label} value={metric.value} icon={Icon} tone={metric.tone} />;
+          return <CompactMetric key={metric.label} variant="card" label={metric.label} value={metric.value} icon={Icon} tone={metric.tone} />;
         })}
-      </Card>
+      </section>
 
       {activeMode === "breakdown" && result.internalExcelChecks.length > 0 && result.internalExcelChecks.every((row) => row.status === "OK") ? (
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800 shadow-subtle">

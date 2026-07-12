@@ -84,7 +84,13 @@ describe("dashboard summary cards", () => {
     expect(within(primaryKpis).getByText("Personas con diferencia")).toBeTruthy();
     expect(within(primaryKpis).getByText("Diferencia total matched")).toBeTruthy();
     expect(within(primaryKpis).getByText("Recibo sin Reg. Retrib.")).toBeTruthy();
-    expect(screen.getByRole("region", { name: "Estado del análisis" })).toBeTruthy();
-    expect(screen.getByRole("region", { name: "Revisión pendiente" })).toBeTruthy();
+    const analysisStatus = screen.getByRole("region", { name: "Estado del análisis" });
+    const pendingReview = screen.getByRole("region", { name: "Revisión pendiente" });
+    expect(analysisStatus.getAttribute("data-slot")).toBe("card");
+    expect(pendingReview.getAttribute("data-slot")).toBe("card");
+    expect(analysisStatus.querySelectorAll('[data-variant="row"]')).toHaveLength(3);
+    expect(pendingReview.querySelectorAll('[data-variant="row"]')).toHaveLength(4);
+    expect(analysisStatus.querySelectorAll('[data-slot="card"]')).toHaveLength(0);
+    expect(pendingReview.querySelectorAll('[data-slot="card"]')).toHaveLength(0);
   });
 });

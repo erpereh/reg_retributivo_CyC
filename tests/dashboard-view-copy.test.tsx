@@ -57,6 +57,12 @@ describe("DashboardView copy", () => {
     expect(screen.queryByText(/Usar IA en observaciones/i)).toBeNull();
     expect(screen.queryByText(/Gemini solo redacta observaciones si hay API key/i)).toBeNull();
     expect(screen.queryByText(/IA DESACTIVADA/i)).toBeNull();
+
+    const uploadPanel = screen.getByRole("heading", { name: "Recibos" }).closest('[data-slot="card"]');
+    expect(uploadPanel?.getAttribute("data-surface")).toBe("upload-panel");
+    expect(uploadPanel?.querySelectorAll('[data-surface="drop-zone"]')).toHaveLength(2);
+    expect(uploadPanel?.querySelector('[data-surface="quick-config"]')).toBeTruthy();
+    expect(uploadPanel?.querySelectorAll('[data-slot="card"]')).toHaveLength(0);
   });
 
   test("shows the dashboard AI badge as availability, not as a global toggle state", () => {

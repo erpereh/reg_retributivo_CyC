@@ -39,7 +39,7 @@ export function SectionTabs<T extends string>({ label, value, items, onValueChan
 
   return (
     <div className={cn("no-scrollbar max-w-full overflow-x-auto pb-1", className)}>
-      <div role="tablist" aria-label={label} className="flex min-w-max items-center gap-1 rounded-2xl bg-slate-100 p-1">
+      <div data-layout="fit-content" role="tablist" aria-label={label} className="inline-flex w-max min-w-max items-center gap-1 rounded-2xl bg-white p-1 shadow-subtle ring-1 ring-line/80">
         {items.map((item, index) => {
           const selected = item.value === value;
           return (

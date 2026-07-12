@@ -77,7 +77,7 @@ function ActionButton({
       aria-label={label}
       title={title}
       onClick={onClick}
-      className={cn("inline-flex h-9 w-9 items-center justify-center rounded-full border transition hover:-translate-y-0.5", toneClass)}
+      className={cn("inline-flex h-9 w-9 items-center justify-center rounded-full border transition-colors", toneClass)}
     >
       {children}
     </button>
@@ -204,7 +204,7 @@ export function NormalizedConceptsManager() {
   }
 
   return (
-    <Card className="p-6">
+    <Card data-surface="normalized-concepts-layout" className="p-4 sm:p-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="max-w-3xl">
           <h2 className="text-xl font-semibold text-ink">Conceptos normalizados</h2>
@@ -219,20 +219,21 @@ export function NormalizedConceptsManager() {
         </button>
       </div>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+      <div className="mt-5 grid overflow-hidden rounded-2xl bg-slate-50/80 sm:grid-cols-3 sm:divide-x sm:divide-line/80">
         {[
           ["Conceptos totales", counters.total],
           ["Activos", counters.active],
           ["Años configurados", counters.years],
         ].map(([label, value]) => (
-          <div key={label} className="rounded-2xl border border-line bg-slate-50 px-4 py-3 shadow-subtle">
+          <div key={label} className="border-t border-line/70 px-4 py-3 first:border-t-0 sm:border-t-0">
             <p className="text-xs font-semibold uppercase text-muted">{label}</p>
             <p className="mt-1 text-2xl font-semibold text-ink">{value}</p>
           </div>
         ))}
       </div>
 
-      <div className="mt-5 grid gap-3 xl:grid-cols-[200px_1fr_200px]">
+      <section data-surface="normalized-concepts-table" className="mt-5 overflow-hidden border-y border-line">
+      <div className="grid gap-3 bg-slate-50/70 p-4 xl:grid-cols-[200px_1fr_200px]">
         <label className="text-sm font-semibold text-ink">
           Filtro Año
           <select value={yearFilter} onChange={(event) => setYearFilter(event.target.value)} className="filter-control mt-2">
@@ -261,12 +262,12 @@ export function NormalizedConceptsManager() {
       </div>
 
       {!concepts.length ? (
-        <div className="mt-5 rounded-2xl border border-dashed border-line bg-slate-50 px-6 py-8 text-center">
+        <div className="border-t border-dashed border-line bg-white px-6 py-8 text-center">
           <p className="font-semibold text-ink">No hay conceptos normalizados creados.</p>
           <p className="mt-1 text-sm text-muted">Crea el primer concepto para comenzar la parametrización.</p>
         </div>
       ) : (
-        <div className="mt-5 overflow-x-auto rounded-2xl border border-line shadow-subtle">
+        <div className="overflow-x-auto border-t border-line bg-white">
           <table className="min-w-[920px] w-full border-collapse text-left text-sm">
             <thead className="bg-slate-100 text-xs font-semibold uppercase text-muted">
               <tr>
@@ -315,6 +316,7 @@ export function NormalizedConceptsManager() {
           {!visibleConcepts.length ? <p className="p-6 text-sm font-semibold text-muted">No hay conceptos con estos filtros.</p> : null}
         </div>
       )}
+      </section>
 
       {editingId ? (
         <ModalShell

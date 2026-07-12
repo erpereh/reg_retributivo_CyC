@@ -10,7 +10,7 @@ export function IconButton({ label, icon: Icon, onClick, disabled = false, varia
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "flex size-11 items-center justify-center rounded-full border transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40",
+        "flex size-11 items-center justify-center rounded-xl border transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40",
         variant === "primary" && "border-primary bg-primary text-white hover:bg-primary-dark",
         variant === "secondary" && "border-line bg-white text-ink hover:border-blue-200 hover:bg-blue-50",
         variant === "danger" && "border-red-200 bg-white text-danger hover:bg-red-50",

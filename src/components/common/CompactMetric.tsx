@@ -12,13 +12,24 @@ const TONE_CLASS: Record<MetricTone, string> = {
   violet: "bg-violet-50 text-violet-700",
 };
 
-export function CompactMetric({ label, value, detail, icon: Icon, tone = "blue" }: Readonly<{ label: string; value: string | number; detail?: string; icon?: LucideIcon; tone?: MetricTone }>) {
+export type CompactMetricVariant = "card" | "row";
+
+export function CompactMetric({ label, value, detail, icon: Icon, tone = "blue", variant = "card" }: Readonly<{ label: string; value: string | number; detail?: string; icon?: LucideIcon; tone?: MetricTone; variant?: CompactMetricVariant }>) {
   return (
-    <div className="flex min-w-0 items-start gap-3 rounded-2xl border border-line/80 bg-white px-4 py-3">
+    <div
+      data-slot="compact-metric"
+      data-variant={variant}
+      className={cn(
+        "flex min-w-0 items-start gap-3",
+        variant === "card"
+          ? "rounded-2xl border border-line/90 bg-white px-4 py-3 shadow-subtle"
+          : "border-b border-line/80 px-0 py-3 last:border-b-0",
+      )}
+    >
       {Icon ? <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-xl", TONE_CLASS[tone])}><Icon aria-hidden="true" /></span> : null}
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <p className="text-xs font-semibold text-muted">{label}</p>
-        <p className="mt-1 break-words text-lg font-semibold text-ink tabular-nums">{value}</p>
+        <p className="mt-1 break-words font-mono text-lg font-semibold text-ink tabular-nums">{value}</p>
         {detail ? <p className="mt-1 text-xs leading-5 text-muted">{detail}</p> : null}
       </div>
     </div>

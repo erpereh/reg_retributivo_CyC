@@ -38,7 +38,7 @@ function NumberSetting({ id, label, value, onChange, helper }: Readonly<{ id: st
 }
 
 function SettingsPanel({ id, labelledBy, label, active, children }: Readonly<{ id: string; labelledBy: string; label: string; active: boolean; children: React.ReactNode }>) {
-  return <section id={id} role="tabpanel" aria-labelledby={labelledBy} aria-label={label} hidden={!active} aria-hidden={!active ? "true" : undefined}>{children}</section>;
+  return <section id={id} role="tabpanel" aria-labelledby={labelledBy} aria-label={label} data-surface="settings-panel" hidden={!active} aria-hidden={!active ? "true" : undefined}>{children}</section>;
 }
 
 export function SettingsView() {
@@ -73,9 +73,9 @@ export function SettingsView() {
 
       {visited.has("general") ? (
         <SettingsPanel id="settings-general-panel" labelledBy="settings-general-tab" label="General" active={activeSection === "general"}>
-          <Card className="p-4 sm:p-6">
-            <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-              <section aria-labelledby="settings-ai-heading" className="min-w-0">
+          <Card data-surface="settings-layout" className="overflow-hidden p-0">
+            <div className="grid xl:grid-cols-[1.05fr_0.95fr]">
+              <section aria-labelledby="settings-ai-heading" className="min-w-0 p-4 sm:p-6">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-center gap-3">
                     <span className="flex size-11 items-center justify-center rounded-xl bg-blue-50 text-primary"><BrainCircuit aria-hidden="true" /></span>
@@ -87,7 +87,7 @@ export function SettingsView() {
                   <StatusBadge value={aiStatus?.configured ? "API configurada" : "API no configurada"} />
                 </div>
 
-                <div className="mt-5 rounded-2xl border border-line bg-slate-50 px-4 py-3">
+                <div data-surface="settings-model" className="mt-5 rounded-2xl bg-slate-50/90 px-4 py-4">
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted">Modelo actual</p>
                   <p className="mt-1 font-mono text-sm font-semibold text-ink">{aiStatus?.model ?? settings.aiModel}</p>
                   <p className="mt-2 text-sm leading-6 text-muted">La API key se configura en el entorno y no se guarda en el navegador.</p>
@@ -107,9 +107,13 @@ export function SettingsView() {
                 </section>
               </section>
 
-              <section aria-labelledby="settings-analysis-heading" className="rounded-2xl bg-slate-50 p-4 sm:p-5">
+              <section
+                data-surface="settings-parameters"
+                aria-labelledby="settings-analysis-heading"
+                className="border-t border-line bg-slate-50/70 p-4 sm:p-6 xl:border-l xl:border-t-0"
+              >
                 <div className="flex items-center gap-3">
-                  <span className="flex size-11 items-center justify-center rounded-xl bg-white text-primary shadow-subtle"><SlidersHorizontal aria-hidden="true" /></span>
+                  <span className="flex size-11 items-center justify-center rounded-xl bg-white text-primary"><SlidersHorizontal aria-hidden="true" /></span>
                   <div>
                     <h2 id="settings-analysis-heading" className="text-lg font-semibold text-ink">Parámetros de análisis</h2>
                     <p className="mt-1 text-sm text-muted">Valores por defecto para nuevos análisis.</p>
@@ -145,15 +149,15 @@ export function SettingsView() {
               <span className="flex size-11 items-center justify-center rounded-xl bg-emerald-50 text-success"><ShieldCheck aria-hidden="true" /></span>
               <div><h2 className="text-lg font-semibold text-ink">Privacidad</h2><p className="mt-1 text-sm text-muted">Garantías aplicadas a exportación e IA.</p></div>
             </div>
-            <div className="mt-5 grid gap-2 md:grid-cols-2">
+            <ul className="mt-5 divide-y divide-line border-y border-line">
               {[
                 "No se exportan IBAN ni datos bancarios.",
                 "La IA se ejecuta exclusivamente bajo demanda.",
                 "La IA no recibe nombres ni documentos completos.",
                 "La IA no recibe datos bancarios.",
                 "Los cálculos se completan antes de solicitar una explicación.",
-              ].map((item) => <div key={item} className="flex items-start gap-3 rounded-xl bg-slate-50 px-4 py-3 text-sm font-semibold leading-6 text-ink"><CheckCircle2 className="mt-1 shrink-0 text-success" aria-hidden="true" />{item}</div>)}
-            </div>
+              ].map((item) => <li key={item} className="flex items-start gap-3 px-1 py-3 text-sm font-semibold leading-6 text-ink"><CheckCircle2 className="mt-1 shrink-0 text-success" aria-hidden="true" />{item}</li>)}
+            </ul>
             <p className="mt-4 inline-flex items-center gap-2 rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-muted"><LockKeyhole aria-hidden="true" />Los análisis permanecen en el almacenamiento local del navegador.</p>
           </Card>
         </SettingsPanel>

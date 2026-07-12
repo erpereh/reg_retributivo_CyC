@@ -91,14 +91,15 @@ export function ModalShell({ title, eyebrow = "Detalle determinista", children, 
         exit={reduceMotion ? undefined : { opacity: 0, scale: 0.99, y: 6 }}
         transition={{ duration: 0.18, ease: "easeOut" }}
         onKeyDown={handleKeyDown}
-        className={cn("grid max-h-[94dvh] w-full grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[22px] bg-white shadow-lift", WIDTH_CLASS[maxWidth], className)}
+        data-slot="modal-shell"
+        className={cn("grid max-h-[94dvh] w-full grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[20px] border border-line bg-white shadow-lift", WIDTH_CLASS[maxWidth], className)}
       >
         <header className="flex items-start justify-between gap-4 border-b border-line bg-white px-5 py-4 sm:px-6">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-muted">{eyebrow}</p>
             <h2 id={titleId} className="mt-1 text-xl font-semibold text-ink sm:text-2xl">{title}</h2>
           </div>
-          <button type="button" aria-label={`Cerrar ${title}`} title="Cerrar" onClick={onClose} className="flex size-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition-colors hover:bg-slate-200">
+          <button type="button" aria-label={`Cerrar ${title}`} title="Cerrar" onClick={onClose} className="flex size-11 shrink-0 items-center justify-center rounded-full border border-line bg-white text-muted transition-colors hover:bg-slate-100 hover:text-ink">
             <X aria-hidden="true" />
           </button>
         </header>

@@ -36,8 +36,11 @@ function HistoryCard({
   const summary = analysis.result?.summary;
 
   return (
-    <div>
-      <Card interactive className={cn("p-4", active && "border-blue-300 bg-blue-50/40 ring-1 ring-primary/30")}>
+    <Card
+      interactive
+      data-surface="history-row"
+      className={cn("p-4", active && "border-blue-300 bg-blue-50/40 ring-1 ring-primary/30")}
+    >
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
@@ -52,7 +55,10 @@ function HistoryCard({
               <StatusBadge value="IA bajo demanda" tone="info" />
             </div>
 
-            <dl className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            <dl
+              data-surface="history-metrics"
+              className="mt-4 grid overflow-hidden rounded-2xl bg-slate-50/80 xl:grid-cols-6 xl:divide-x xl:divide-y-0 xl:divide-line/80"
+            >
               {[
                 ["Recibos", analysis.pdfCount],
                 ["Personas", summary?.uniquePeople ?? 0],
@@ -61,7 +67,7 @@ function HistoryCard({
                 ["Ignorados", summary?.conceptsIgnored ?? 0],
                 ["Diferencia", formatEuro(summary?.matchedTotalDifference ?? summary?.totalGlobalDifference ?? 0)],
               ].map(([label, value]) => (
-                <div key={label as string} className="rounded-2xl bg-slate-50 px-3 py-2">
+                <div key={label as string} data-variant="row" className="border-t border-line/70 px-3 py-3 first:border-t-0 xl:border-t-0">
                   <dt className="text-[11px] font-semibold uppercase text-muted">{label as string}</dt>
                   <dd className="mt-1 truncate text-sm font-semibold text-ink tabular-nums">{String(value)}</dd>
                 </div>
@@ -84,8 +90,7 @@ function HistoryCard({
             </button>
           </div>
         </div>
-      </Card>
-    </div>
+    </Card>
   );
 }
 

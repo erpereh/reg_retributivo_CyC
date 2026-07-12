@@ -61,8 +61,14 @@ describe("HistoryView", () => {
 
     expect(screen.getByText("1.234,56 EUR")).toBeTruthy();
     const metricGrid = screen.getByText("Diferencia").closest("dl");
+    const historyRow = screen.getByRole("button", { name: /Abrir análisis/i }).closest('[data-slot="card"]');
     expect(screen.queryByText(/ajustad/i)).toBeNull();
 
     expect(metricGrid?.className).toContain("xl:grid-cols-6");
+    expect(metricGrid?.className).not.toContain("sm:grid-cols");
+    expect(metricGrid?.className).not.toContain("lg:grid-cols");
+    expect(metricGrid?.getAttribute("data-surface")).toBe("history-metrics");
+    expect(metricGrid?.querySelectorAll('[data-variant="row"]')).toHaveLength(6);
+    expect(historyRow?.getAttribute("data-surface")).toBe("history-row");
   });
 });

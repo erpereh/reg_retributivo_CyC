@@ -18,7 +18,15 @@ vi.mock("@/components/app/AppState", () => ({
 }));
 
 vi.mock("@/components/layout/TopNav", () => ({
-  TopNav: () => <nav aria-label="Navegación principal test" />,
+  TopNav: () => (
+    <header>
+      <nav aria-label="Navegación principal test">
+        <div role="tablist" aria-label="Vistas">
+          <button type="button" role="tab" aria-selected="true">Dashboard</button>
+        </div>
+      </nav>
+    </header>
+  ),
 }));
 
 describe("AppShell toast flow", () => {
@@ -35,5 +43,31 @@ describe("AppShell toast flow", () => {
     expect(content.textContent).toContain("Contenido del análisis activo");
     expect(toast.className).toContain("pointer-events-auto");
     expect(toast.parentElement?.className).toContain("pointer-events-none");
+
+    const shell = content.closest('[data-slot="app-shell"]');
+    const appContent = shell?.querySelector('[data-slot="app-content"]');
+    expect(shell?.getAttribute("data-surface")).toBe("canvas");
+    expect(appContent?.getAttribute("data-surface")).toBe("transparent");
+    expect(appContent?.className).not.toContain("bg-panel");
+    expect(appContent?.className).not.toContain("shadow-nav");
+  });
+
+  test("preserves roving focus in the main tablist when the view changes", () => {
+    const { rerender } = render(
+      <AppShell>
+        <section>Dashboard</section>
+      </AppShell>,
+    );
+    const dashboardTab = screen.getByRole("tab", { name: "Dashboard" });
+    dashboardTab.focus();
+
+    appState.value.view = "personas";
+    rerender(
+      <AppShell>
+        <section>Personas</section>
+      </AppShell>,
+    );
+
+    expect(document.activeElement).toBe(dashboardTab);
   });
 });

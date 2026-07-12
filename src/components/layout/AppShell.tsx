@@ -15,7 +15,13 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
 
   useEffect(() => {
     if (previousView.current !== view) {
-      mainRef.current?.focus({ preventScroll: true });
+      const activeElement = document.activeElement;
+      const preservePrimaryTabFocus = activeElement instanceof HTMLElement
+        && activeElement.getAttribute("role") === "tab"
+        && activeElement.closest('header [role="tablist"]');
+      if (!preservePrimaryTabFocus) {
+        mainRef.current?.focus({ preventScroll: true });
+      }
       const frame = window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
       previousView.current = view;
       return () => window.cancelAnimationFrame(frame);
@@ -24,10 +30,10 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
   }, [view]);
 
   return (
-    <div className="min-h-dvh bg-app-bg text-ink sm:p-3 lg:p-5">
-      <div className="mx-auto min-h-dvh w-full max-w-[1560px] overflow-clip border-line/80 bg-panel shadow-nav sm:min-h-[calc(100dvh-1.5rem)] sm:rounded-[20px] sm:border lg:min-h-[calc(100dvh-2.5rem)] lg:rounded-[28px]">
+    <div data-slot="app-shell" data-surface="canvas" className="min-h-dvh bg-app-bg text-ink">
+      <div data-slot="app-content" data-surface="transparent" className="mx-auto min-h-dvh w-full max-w-[1560px]">
         <TopNav />
-        <main ref={mainRef} className="scroll-mt-24 px-3 py-5 outline-none sm:px-5 sm:py-6 lg:px-7 xl:px-8" tabIndex={-1}>
+        <main ref={mainRef} className="scroll-mt-24 px-3 pb-8 pt-4 outline-none sm:px-5 sm:pb-10 sm:pt-5 lg:px-7 xl:px-8" tabIndex={-1}>
           {hydrating ? (
             <DashboardSkeleton />
           ) : (

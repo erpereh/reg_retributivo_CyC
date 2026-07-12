@@ -1,6 +1,6 @@
 "use client";
 
-import { motion, useReducedMotion, type HTMLMotionProps } from "motion/react";
+import { motion, type HTMLMotionProps } from "motion/react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils/classNames";
 
@@ -11,18 +11,15 @@ interface CardProps extends Omit<HTMLMotionProps<"div">, "children"> {
 }
 
 export function Card({ children, className, interactive = false, tone = "default", ...props }: CardProps) {
-  const reduceMotion = useReducedMotion();
-
   return (
     <motion.div
-      whileHover={interactive && !reduceMotion ? { y: -1 } : undefined}
-      transition={{ duration: 0.18, ease: "easeOut" }}
+      data-slot="card"
       className={cn(
-        "min-w-0 rounded-[20px] border shadow-soft",
+        "min-w-0 rounded-[18px] border bg-white text-ink shadow-subtle",
         tone === "blue"
-          ? "border-blue-400/30 bg-gradient-to-br from-primary to-[#4f8ff7] text-white"
-          : "border-line/80 bg-white text-ink",
-        interactive && "transition-shadow hover:shadow-lift",
+          ? "border-primary/30 border-t-2"
+          : "border-line/90",
+        interactive && "transition-colors duration-150 hover:border-primary/30",
         className,
       )}
       {...props}

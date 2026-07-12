@@ -1,7 +1,7 @@
 "use client";
 
 import { Copy, Search, Table2 } from "lucide-react";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { AiExplanationPanel } from "@/components/ai/AiExplanationPanel";
 import { useAppState, type DashboardFilters, EMPTY_FILTERS, matchesQuery } from "@/components/app/AppState";
 import { Badge } from "@/components/common/Badge";
@@ -127,7 +127,7 @@ function FiltersPanel({
   const quick = (status: string) => onChange({ ...filters, status });
 
   return (
-    <Card className="p-5">
+    <div className="flex flex-col gap-4">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <label className="text-sm font-semibold text-ink xl:col-span-1">
           Buscar
@@ -176,7 +176,7 @@ function FiltersPanel({
           </select>
         </label>
       </div>
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button type="button" className="btn-ghost min-h-10 px-4" onClick={() => quick("Diferencia")}>
           Ver solo diferencias
         </button>
@@ -193,7 +193,7 @@ function FiltersPanel({
           Limpiar filtros
         </button>
       </div>
-    </Card>
+    </div>
   );
 }
 
@@ -252,9 +252,9 @@ function PeriodChips({ periods }: Readonly<{ periods: readonly string[] }>) {
 
 function MoneyTriplet({ label, registro, pdf, diff }: Readonly<{ label: string; registro: number; pdf: number; diff: number }>) {
   return (
-    <div className="rounded-2xl border border-line bg-slate-50 p-4">
+    <div data-surface="economic-row" className="grid gap-3 py-4 sm:grid-cols-[minmax(120px,0.7fr)_minmax(0,2fr)] sm:items-center">
       <p className="text-sm font-semibold text-ink">{label}</p>
-      <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+      <div className="grid min-w-0 grid-cols-3 gap-2 text-xs">
         <ModalField label="Reg. Retrib." value={formatEuro(registro)} />
         <ModalField label="Recibo" value={formatEuro(pdf)} />
         <ModalField label="Dif." value={formatEuro(diff)} />
@@ -265,7 +265,7 @@ function MoneyTriplet({ label, registro, pdf, diff }: Readonly<{ label: string; 
 
 function PersonSummarySection({ row }: Readonly<{ row: PersonComparisonRow }>) {
   return (
-    <section className="mt-6 rounded-3xl border border-line bg-slate-50 p-4" aria-label="Resumen">
+    <section data-surface="person-summary" className="mt-6 border-y border-line bg-slate-50/80 px-4 py-4" aria-label="Resumen">
       <h3 className="text-lg font-semibold text-ink">Resumen</h3>
       <div className="mt-4 grid gap-3 md:grid-cols-4">
         <ModalField label="Total Reg. Retrib." value={formatEuro(row.registroTotal)} />
@@ -339,7 +339,7 @@ function PersonConceptsSection({
   ];
 
   return (
-    <section className="mt-6 rounded-3xl border border-line bg-white p-4 shadow-subtle sm:p-5" aria-label="Conceptos de la persona">
+    <section className="mt-6 border-t border-line pt-5" aria-label="Conceptos de la persona">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h3 className="text-lg font-semibold text-ink">Conceptos de la persona</h3>
@@ -555,7 +555,7 @@ function DetailModal({
         {state.kind === "person" ? <PersonSummarySection row={state.row} /> : null}
 
         {state.kind === "person" ? (
-          <div className="mt-6 grid gap-3 md:grid-cols-2">
+          <div data-surface="economic-breakdown" className="mt-6 divide-y divide-line border-y border-line">
             <MoneyTriplet label="Salario" registro={state.row.salaryRegistro} pdf={state.row.salaryPdf} diff={state.row.salaryDifference} />
             <MoneyTriplet label="C. Salarial" registro={state.row.salaryComplementRegistro} pdf={state.row.salaryComplementPdf} diff={state.row.salaryComplementDifference} />
             <MoneyTriplet label="Extrasalarial" registro={state.row.extraSalaryRegistro} pdf={state.row.extraSalaryPdf} diff={state.row.extraSalaryDifference} />
@@ -590,7 +590,7 @@ function DetailModal({
   );
 }
 
-function PersonasTable({ density, onOpen }: Readonly<{ density: TableDensity; onOpen: (state: DetailModalState) => void }>) {
+function PersonasTable({ density, onOpen, toolbar }: Readonly<{ density: TableDensity; onOpen: (state: DetailModalState) => void; toolbar: ReactNode }>) {
   const { result, filters } = useAppState();
   const allRows = result?.people ?? [];
   const rows = useMemo(
@@ -610,6 +610,7 @@ function PersonasTable({ density, onOpen }: Readonly<{ density: TableDensity; on
   return (
     <div>
       <DataTableShell
+        toolbar={toolbar}
         summary={<TableSummary visible={rows.length} total={allRows.length} difference={totalDifference} extra={`Recibo sin Reg. Retrib. visible: ${formatEuro(pdfWithoutRegistro)}`} />}
         empty={!rows.length ? <p className="p-6 text-sm text-muted">Sin personas con los filtros actuales.</p> : null}
       >
@@ -819,13 +820,19 @@ export function TablesView({ mode }: Readonly<{ mode: Extract<AppView, "personas
   return (
     <div className="space-y-6">
       <SectionHeader title={viewTitle(mode)} subtitle={viewSubtitle(mode)} />
-      {mode !== "agrupaciones" ? (
-        <FiltersPanel filters={filters} centers={centers} groups={groups} onChange={setFilters} />
-      ) : null}
       {mode === "personas" ? (
-        <PersonasTable density={density} onOpen={setModal} />
+        <PersonasTable
+          density={density}
+          onOpen={setModal}
+          toolbar={<FiltersPanel filters={filters} centers={centers} groups={groups} onChange={setFilters} />}
+        />
       ) : mode === "conceptos" ? (
-        <ConceptosTable density={density} onOpen={setModal} />
+        <>
+          <Card className="p-5">
+            <FiltersPanel filters={filters} centers={centers} groups={groups} onChange={setFilters} />
+          </Card>
+          <ConceptosTable density={density} onOpen={setModal} />
+        </>
       ) : (
         <AgrupacionesTable />
       )}

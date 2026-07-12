@@ -528,6 +528,12 @@ describe("TablesView", () => {
     expect(screen.queryByRole("button", { name: "Cómoda" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Compacta" })).toBeNull();
     expect(screen.getByRole("button", { name: "Ver Recibo sin Reg. Retrib." })).toBeTruthy();
+
+    const tableSurface = screen.getByRole("table").closest('[data-surface="table-shell"]');
+    const search = screen.getByPlaceholderText("Matrícula, persona o concepto");
+    expect(tableSurface).toBeTruthy();
+    expect(tableSurface?.contains(search)).toBe(true);
+    expect(tableSurface?.querySelector('[data-slot="table-toolbar"]')).toBeTruthy();
   });
 
   test("shows a compact person concept table before AI with filters, ordering and expandable detail", () => {
@@ -736,11 +742,26 @@ describe("TablesView", () => {
   test("renders Agrupaciones as a grouped Excel sheet viewer", () => {
     render(<TablesView mode="agrupaciones" />);
 
-    expect(screen.getByRole("button", { name: "Puesto" }).getAttribute("title")).toBe("Análisis por puesto");
-    expect(screen.getByRole("button", { name: "Valoración" }).getAttribute("title")).toBe("Análisis por valoración puesto");
-    expect(screen.getByRole("button", { name: "Categoría" }).getAttribute("title")).toBe("Análisis por categoría");
-    expect(screen.getByRole("button", { name: "Familia" }).getAttribute("title")).toBe("Análisis por familia de puesto");
-    expect(screen.getByRole("button", { name: "Cat. personal" }).getAttribute("title")).toBe("Agrupación Categoría Personal");
+    expect(screen.getByRole("tablist", { name: "Vistas de Agrupaciones" }).getAttribute("data-layout")).toBe("fit-content");
+    const positionTab = screen.getByRole("tab", { name: "Puesto" });
+    const valuationTab = screen.getByRole("tab", { name: "Valoración" });
+    expect(positionTab.getAttribute("title")).toBe("Análisis por puesto");
+    expect(valuationTab.getAttribute("title")).toBe("Análisis por valoración puesto");
+    expect(screen.getByRole("tab", { name: "Categoría" }).getAttribute("title")).toBe("Análisis por categoría");
+    expect(screen.getByRole("tab", { name: "Familia" }).getAttribute("title")).toBe("Análisis por familia de puesto");
+    expect(screen.getByRole("tab", { name: "Cat. personal" }).getAttribute("title")).toBe("Agrupación Categoría Personal");
+    expect(positionTab.tabIndex).toBe(0);
+    expect(valuationTab.tabIndex).toBe(-1);
+    expect(positionTab.getAttribute("aria-controls")).toBe("agrupaciones-sheet-panel");
+    expect(screen.getByRole("tabpanel", { name: "Puesto" }).id).toBe("agrupaciones-sheet-panel");
+
+    positionTab.focus();
+    fireEvent.keyDown(positionTab, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(valuationTab);
+    expect(valuationTab.getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(valuationTab, { key: "Home" });
+    expect(document.activeElement).toBe(positionTab);
+    expect(positionTab.getAttribute("aria-selected")).toBe("true");
     expect(screen.queryByRole("button", { name: "Análisis por puesto" })).toBeNull();
     expect(screen.getByLabelText(/Análisis por puesto · \d+ filas · \d+ columnas/)).toBeTruthy();
     expect(screen.getByPlaceholderText("Buscar en esta hoja")).toBeTruthy();
@@ -771,7 +792,7 @@ describe("TablesView", () => {
     expect(screen.queryByText("Administrativo/a Técnico SACYC")).toBeNull();
     expect(screen.getByText("Control de Calidad")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Valoración" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Valoración" }));
     expect(screen.getByTitle("Valoración Retributiva").textContent).toBe("Valoración");
     expect(screen.getByText("[SIN DEFINIR]")).toBeTruthy();
   });
@@ -795,13 +816,13 @@ describe("TablesView", () => {
   test("shows clean states for missing, empty, legacy and truncated grouped sheets", () => {
     render(<TablesView mode="agrupaciones" />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Categoría" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Categoría" }));
     expect(screen.getByText("No se ha encontrado esta hoja en el Excel Reg. Retrib.")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Familia" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Familia" }));
     expect(screen.getByText("No hay datos visibles en esta hoja.")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Cat. personal" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Cat. personal" }));
     expect(screen.getByText("Esta hoja se guardó parcialmente en Historial para mantener el rendimiento. Vuelve a analizar el Excel para ver todos los datos.")).toBeTruthy();
 
     appState.value.result.groupedExcelSheets = undefined as never;

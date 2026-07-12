@@ -191,8 +191,12 @@ describe("SettingsView", () => {
 
     const generalTab = screen.getByRole("tab", { name: "General" });
     const conceptsTab = screen.getByRole("tab", { name: "Conceptos" });
+    const generalPanel = screen.getByRole("tabpanel", { name: "General" });
     expect(generalTab.getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByRole("tabpanel", { name: "General" })).toBeTruthy();
+    expect(generalPanel.getAttribute("data-surface")).toBe("settings-panel");
+    expect(generalPanel.querySelector('[data-surface="settings-layout"]')).toBeTruthy();
+    expect(generalPanel.querySelector('[data-surface="settings-model"]')).toBeTruthy();
+    expect(generalPanel.querySelector('[data-surface="settings-parameters"]')).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Conceptos del análisis" })).toBeNull();
 
     fireEvent.click(conceptsTab);
@@ -304,6 +308,13 @@ describe("SettingsView", () => {
     expect(screen.queryByRole("heading", { name: "Reglas del mapa" })).toBeNull();
     expect(screen.queryByRole("heading", { name: /Conceptos detectados en este análisis/i })).toBeNull();
     expect(screen.getByRole("heading", { name: "Reglas y conceptos" })).toBeTruthy();
+    const conceptLayout = screen.getByRole("heading", { name: "Reglas y conceptos" }).closest('[data-slot="card"]');
+    expect(conceptLayout?.getAttribute("data-surface")).toBe("concept-map-layout");
+    expect(conceptLayout?.querySelectorAll('[data-slot="card"]')).toHaveLength(0);
+    const conceptMetrics = conceptLayout?.querySelector('[data-surface="concept-map-metrics"]');
+    expect(conceptMetrics).toBeTruthy();
+    expect(conceptMetrics?.className).toContain("xl:grid-cols-5");
+    expect(conceptMetrics?.className).not.toContain("sm:grid-cols");
     expect(screen.getByTestId("concept-map-unified-scroll").className).toContain("max-h");
     expect(screen.getByTestId("concept-map-unified-scroll").className).toContain("overflow-y-auto");
 
@@ -334,6 +345,9 @@ describe("SettingsView", () => {
     openSettingsTab("Exclusiones");
 
     expect(screen.getByRole("heading", { name: /Exclusiones por matr/i })).toBeTruthy();
+    const exclusionsLayout = screen.getByRole("heading", { name: /Exclusiones por matr/i }).closest('[data-slot="card"]');
+    expect(exclusionsLayout?.getAttribute("data-surface")).toBe("employee-exclusions");
+    expect(exclusionsLayout?.querySelectorAll('[data-slot="card"]')).toHaveLength(0);
     expect(screen.getByText(/0 matr/i)).toBeTruthy();
 
     const input = screen.getByPlaceholderText(/10074 o BC6/i);

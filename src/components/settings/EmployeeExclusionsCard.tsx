@@ -73,11 +73,11 @@ export function EmployeeExclusionsCard() {
   }
 
   return (
-    <Card className="p-6">
+    <Card data-surface="employee-exclusions" className="p-4 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-3">
-          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-orange-50 text-orange-700">
-            <UserMinus className="h-5 w-5" aria-hidden="true" />
+          <span className="flex size-11 items-center justify-center rounded-xl bg-orange-50 text-orange-700">
+            <UserMinus aria-hidden="true" />
           </span>
           <div>
             <h2 className="text-xl font-semibold text-ink">Exclusiones por matrícula</h2>
@@ -101,7 +101,7 @@ export function EmployeeExclusionsCard() {
             }}
             placeholder="Escribe una matrícula, por ejemplo 10074 o BC6"
             rows={2}
-            className="mt-2 min-h-12 w-full resize-y rounded-2xl border border-line bg-white px-4 py-3 text-sm font-medium text-ink shadow-subtle"
+            className="mt-2 min-h-12 w-full resize-y rounded-2xl border border-line bg-white px-4 py-3 text-sm font-medium text-ink"
           />
         </label>
         <div className="flex items-end gap-2">
@@ -126,12 +126,12 @@ export function EmployeeExclusionsCard() {
             </span>
           ))
         ) : (
-          <p className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-muted">No hay matrículas excluidas.</p>
+          <p className="w-full border-y border-line bg-slate-50/70 px-1 py-3 text-sm text-muted">No hay matrículas excluidas.</p>
         )}
       </div>
 
       {dirty ? (
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-900">
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-y border-blue-100 bg-blue-50/80 px-1 py-3 text-sm font-semibold text-blue-900">
           <span>Vuelve a analizar o pulsa Actualizar datos para aplicar los cambios.</span>
           <button type="button" onClick={() => void saveExclusionsAndRefresh(ids)} disabled={analyzing} className="btn-secondary min-h-10 px-4">
             <RotateCw className="h-4 w-4" aria-hidden="true" />

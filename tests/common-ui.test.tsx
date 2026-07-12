@@ -41,7 +41,9 @@ describe("shared UI primitives", () => {
 
     const general = screen.getByRole("tab", { name: "General" });
     const concepts = screen.getByRole("tab", { name: "Conceptos" });
+    const tablist = screen.getByRole("tablist", { name: "Secciones" });
     expect(general.getAttribute("aria-selected")).toBe("true");
+    expect(tablist.getAttribute("data-layout")).toBe("fit-content");
 
     fireEvent.keyDown(general, { key: "ArrowRight" });
     expect(concepts.getAttribute("aria-selected")).toBe("true");

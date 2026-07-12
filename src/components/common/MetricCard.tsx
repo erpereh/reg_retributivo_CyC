@@ -31,15 +31,15 @@ export function MetricCard({ label, value, detail, tooltip, badge, icon: Icon, h
       <Card tone={highlight ? "blue" : "default"} className="h-full min-h-[132px] p-4 sm:p-5">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className={cn("text-sm font-medium", highlight ? "text-blue-50" : "text-muted")}>{label}</p>
-            <p className={cn("mt-3 break-words text-2xl font-semibold leading-none sm:text-3xl", highlight ? "text-white" : "text-ink")}>{value}</p>
+            <p className="text-sm font-medium text-muted">{label}</p>
+            <p className="mt-3 break-words font-mono text-2xl font-semibold leading-none text-ink tabular-nums sm:text-3xl">{value}</p>
           </div>
-          <span className={cn("flex size-11 shrink-0 items-center justify-center rounded-xl", highlight ? "bg-white text-primary" : ACCENT_CLASS[accent])}>
-            <Icon className="h-5 w-5" aria-hidden="true" />
+          <span className={cn("flex size-11 shrink-0 items-center justify-center rounded-xl", ACCENT_CLASS[accent])}>
+            <Icon aria-hidden="true" />
           </span>
         </div>
-        {badge ? <span className={cn("mt-4 inline-flex min-h-7 items-center rounded-full px-2.5 text-xs font-semibold", highlight ? "bg-white/20 text-white" : ACCENT_CLASS[accent])}>{badge}</span> : null}
-        {detail ? <p className={cn("mt-4 text-sm leading-5", highlight ? "text-blue-50" : "text-muted")}>{detail}</p> : null}
+        {badge ? <span className={cn("mt-4 inline-flex min-h-7 items-center rounded-full px-2.5 text-xs font-semibold", ACCENT_CLASS[accent])}>{badge}</span> : null}
+        {detail ? <p className="mt-4 text-sm leading-5 text-muted">{detail}</p> : null}
       </Card>
     </div>
   );

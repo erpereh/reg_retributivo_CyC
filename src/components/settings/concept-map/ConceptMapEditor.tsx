@@ -372,7 +372,7 @@ function IconButton({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "inline-flex h-9 w-9 items-center justify-center rounded-full border text-sm transition hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-50",
+        "inline-flex h-9 w-9 items-center justify-center rounded-full border text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-50",
         toneClass,
       )}
     >
@@ -604,7 +604,7 @@ export function ConceptMapEditor() {
   ];
 
   return (
-    <Card className="p-6">
+    <Card data-surface="concept-map-layout" className="p-4 sm:p-6">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="max-w-3xl">
           <h2 className="text-xl font-semibold text-ink">Conceptos del análisis</h2>
@@ -649,7 +649,7 @@ export function ConceptMapEditor() {
         </div>
       </div>
 
-      <div className="mt-5 grid gap-2 md:grid-cols-5">
+      <div data-surface="concept-map-metrics" className="mt-5 grid overflow-hidden rounded-2xl bg-slate-50/80 xl:grid-cols-5 xl:divide-x xl:divide-y-0 xl:divide-line/80">
         {summaryCards.map((item) => (
           <button
             key={item.label}
@@ -657,8 +657,8 @@ export function ConceptMapEditor() {
             aria-label={`${item.label} ${item.value}`}
             onClick={item.action}
             className={cn(
-              "rounded-2xl border px-4 py-3 text-left shadow-subtle transition hover:-translate-y-0.5",
-              item.active ? "border-primary bg-blue-50" : "border-line bg-white hover:bg-slate-50",
+              "border-t border-line/70 px-4 py-3 text-left transition-colors first:border-t-0 hover:bg-white/80 xl:border-t-0",
+              item.active ? "bg-blue-50 text-primary" : "bg-transparent",
             )}
           >
             <span className="block text-xs font-semibold uppercase text-muted">{item.label}</span>
@@ -667,13 +667,13 @@ export function ConceptMapEditor() {
         ))}
       </div>
 
-      <section className="mt-6 rounded-3xl border border-line bg-slate-50/80 p-4" aria-label="Reglas y conceptos">
+      <section className="mt-6 border-t border-line pt-5" aria-label="Reglas y conceptos">
         <div className="flex flex-col gap-1">
           <h3 className="text-lg font-semibold text-ink">Reglas y conceptos</h3>
           <p className="text-sm leading-6 text-muted">Regla del mapa = configuración guardada. Concepto sin regla = concepto detectado en este análisis que requiere decisión.</p>
         </div>
 
-        <div className="mt-4 grid gap-3 xl:grid-cols-[1.4fr_180px_220px_220px_180px]">
+        <div className="-mx-4 mt-4 grid gap-3 border-y border-line bg-slate-50/70 px-4 py-4 sm:-mx-6 sm:px-6 xl:grid-cols-[minmax(280px,1.4fr)_180px_220px_220px]">
           <label className="relative block text-sm font-semibold text-ink">
             Buscar
             <Search className="pointer-events-none absolute bottom-3 left-4 h-4 w-4 text-muted" aria-hidden="true" />
@@ -681,7 +681,7 @@ export function ConceptMapEditor() {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Buscar por concepto, código, bloque o motivo"
-              className="mt-2 h-12 w-full rounded-full border border-line bg-white pl-10 pr-4 text-sm font-medium text-ink shadow-subtle"
+              className="mt-2 h-12 w-full rounded-full border border-line bg-white pl-10 pr-4 text-sm font-medium text-ink"
             />
           </label>
           <label className="block text-sm font-semibold text-ink">
@@ -705,7 +705,7 @@ export function ConceptMapEditor() {
           </label>
         </div>
 
-        <div data-testid="concept-map-unified-scroll" className="mt-4 max-h-[560px] overflow-y-auto rounded-2xl border border-line bg-white shadow-subtle">
+        <div data-testid="concept-map-unified-scroll" className="-mx-4 max-h-[560px] overflow-x-auto overflow-y-auto border-b border-line bg-white sm:-mx-6">
           <table className="min-w-[860px] w-full border-collapse text-left text-sm">
             <thead className="sticky top-0 z-10 bg-slate-100 text-xs font-semibold uppercase text-muted">
               <tr>
@@ -730,7 +730,7 @@ export function ConceptMapEditor() {
                     <td className="max-w-[300px] px-4 py-3">
                       <p className="font-semibold text-ink">{row.concept}</p>
                       {expanded ? (
-                        <div className="mt-2 rounded-2xl bg-slate-50 p-3 text-xs leading-5 text-muted">
+                        <div className="mt-2 border-l-2 border-line bg-slate-50/70 px-3 py-2 text-xs leading-5 text-muted">
                           <p>Motivo: {row.reason ?? "Sin motivo"}</p>
                         </div>
                       ) : row.reason ? (
@@ -797,7 +797,7 @@ export function ConceptMapEditor() {
 
       {message ? <p className="mt-4 rounded-2xl bg-blue-50 px-4 py-3 text-sm font-semibold text-primary" aria-live="polite">{message}</p> : null}
 
-      <section className="mt-6 rounded-3xl border border-line bg-white p-4 shadow-subtle" aria-label="Modo avanzado JSON">
+      <section className="mt-6 border-t border-line pt-5" aria-label="Modo avanzado JSON">
         <button
           type="button"
           className="flex w-full items-center justify-between gap-4 text-left"

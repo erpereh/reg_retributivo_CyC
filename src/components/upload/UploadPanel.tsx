@@ -39,6 +39,7 @@ function DropCard({
 
   return (
     <motion.div
+      data-surface="drop-zone"
       onDragOver={(event) => {
         event.preventDefault();
         setDragging(true);
@@ -53,10 +54,10 @@ function DropCard({
         backgroundColor: isActive ? "rgba(239,246,255,1)" : "rgba(248,250,252,0.85)",
       }}
       transition={{ duration: 0.2 }}
-      className="min-w-0 rounded-[18px] border border-dashed p-4"
+      className="min-w-0 rounded-2xl border border-dashed p-4"
     >
       <div className="flex items-start gap-4">
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-white text-primary shadow-subtle">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-line/80 bg-white text-primary">
           {icon}
         </span>
         <div className="min-w-0">
@@ -87,7 +88,7 @@ export function UploadPanel() {
   const missingReason = !pdfFiles.length ? "Faltan recibos." : !registroFile ? "Falta el Excel Reg. Retrib." : "Listo para analizar.";
 
   return (
-    <Card className="p-4 sm:p-5">
+    <Card data-surface="upload-panel" className="p-4 sm:p-5">
       <div className="grid gap-4 xl:grid-cols-[1.1fr_1fr_320px]">
         <DropCard
           title="Recibos"
@@ -165,9 +166,9 @@ export function UploadPanel() {
           </motion.p>
         </DropCard>
 
-        <div className="min-w-0 rounded-[18px] border border-line bg-slate-50/80 p-4">
+        <div data-surface="quick-config" className="min-w-0 rounded-2xl bg-slate-100/80 p-4">
           <div className="flex items-center gap-2">
-            <span className="flex size-9 items-center justify-center rounded-xl bg-white text-primary shadow-subtle">
+            <span className="flex size-9 items-center justify-center rounded-xl border border-line/80 bg-white text-primary">
               <Sparkles className="h-4 w-4" aria-hidden="true" />
             </span>
             <div>

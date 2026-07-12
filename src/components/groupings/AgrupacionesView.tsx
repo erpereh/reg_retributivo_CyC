@@ -1,7 +1,7 @@
 "use client";
 
 import { Search, Table2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useAppState } from "@/components/app/AppState";
 import { Card } from "@/components/common/Card";
 import { DataTableShell } from "@/components/common/DataTableShell";
@@ -24,6 +24,11 @@ const EMPTY_SHEET_MESSAGE = "No hay datos visibles en esta hoja.";
 const LEGACY_ANALYSIS_MESSAGE = "Este análisis no contiene datos de hojas agrupadas. Vuelve a analizar el Excel para visualizarlas.";
 const TRUNCATED_HISTORY_MESSAGE = "Esta hoja se guardó parcialmente en Historial para mantener el rendimiento. Vuelve a analizar el Excel para ver todos los datos.";
 const HEADER_ROW_HEIGHT = 36;
+const SHEET_PANEL_ID = "agrupaciones-sheet-panel";
+
+function sheetTabId(index: number): string {
+  return `agrupaciones-sheet-tab-${index}`;
+}
 
 function placeholderSheet(sheetName: string): GroupedExcelSheet {
   return {
@@ -227,6 +232,7 @@ export function AgrupacionesView() {
   const groupedExcelSheets = result?.groupedExcelSheets;
   const [activeSheetName, setActiveSheetName] = useState<GroupedSheetName>(GROUPED_SHEETS[0].fullName);
   const [query, setQuery] = useState("");
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
     setQuery("");
@@ -239,6 +245,25 @@ export function AgrupacionesView() {
   const visibleRows = useMemo(() => activeSheet.rows.filter((row) => rowMatchesQuery(row, activeSheet, query)), [activeSheet, query]);
   const activeGroupedHeaders = useMemo(() => groupedHeadersForSheet(activeSheet), [activeSheet]);
   const stickyColumnCount = useMemo(() => stickyIdentifierColumnCount(activeSheet), [activeSheet]);
+  const activeSheetIndex = GROUPED_SHEETS.findIndex((sheet) => sheet.fullName === activeSheetName);
+
+  const selectSheetAt = (index: number) => {
+    const sheet = GROUPED_SHEETS[index];
+    if (!sheet) return;
+    setActiveSheetName(sheet.fullName);
+    tabRefs.current[index]?.focus();
+  };
+
+  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    let nextIndex: number | undefined;
+    if (event.key === "ArrowRight") nextIndex = (index + 1) % GROUPED_SHEETS.length;
+    if (event.key === "ArrowLeft") nextIndex = (index - 1 + GROUPED_SHEETS.length) % GROUPED_SHEETS.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = GROUPED_SHEETS.length - 1;
+    if (nextIndex === undefined) return;
+    event.preventDefault();
+    selectSheetAt(nextIndex);
+  };
 
   if (!groupedExcelSheets) {
     return (
@@ -261,13 +286,22 @@ export function AgrupacionesView() {
         toolbar={
           <div className="flex flex-col gap-4">
             <div className="no-scrollbar max-w-full overflow-x-auto pb-1">
-              <div className="flex min-w-max gap-1 rounded-2xl bg-slate-100 p-1">
-                {GROUPED_SHEETS.map(({ fullName, shortLabel }) => (
+              <div role="tablist" aria-label="Vistas de Agrupaciones" data-layout="fit-content" className="flex w-max min-w-max gap-1 rounded-2xl bg-slate-100 p-1">
+                {GROUPED_SHEETS.map(({ fullName, shortLabel }, index) => (
                   <button
                     key={fullName}
+                    ref={(node) => {
+                      tabRefs.current[index] = node;
+                    }}
                     type="button"
+                    id={sheetTabId(index)}
+                    role="tab"
+                    aria-selected={activeSheetName === fullName}
+                    aria-controls={SHEET_PANEL_ID}
+                    tabIndex={activeSheetName === fullName ? 0 : -1}
                     title={fullName}
-                    onClick={() => setActiveSheetName(fullName)}
+                    onClick={() => selectSheetAt(index)}
+                    onKeyDown={(event) => handleTabKeyDown(event, index)}
                     className={cn(
                       "min-h-10 whitespace-nowrap rounded-xl px-3 text-sm font-semibold transition-colors",
                       activeSheetName === fullName ? "bg-white text-ink shadow-subtle" : "text-muted hover:text-ink",
@@ -298,11 +332,12 @@ export function AgrupacionesView() {
             </div>
           </div>
         }
-        empty={!sheetMessage(activeSheet) && !visibleRows.length ? <p className="p-6 text-sm text-muted">No hay filas con la búsqueda actual.</p> : null}
       >
-        {sheetMessage(activeSheet) ? (
-          <p className="p-6 text-sm font-semibold text-muted">{sheetMessage(activeSheet)}</p>
-        ) : (
+        <div role="tabpanel" id={SHEET_PANEL_ID} aria-labelledby={sheetTabId(activeSheetIndex)}>
+          {sheetMessage(activeSheet) ? (
+            <p className="p-6 text-sm font-semibold text-muted">{sheetMessage(activeSheet)}</p>
+          ) : (
+            <>
             <table className="w-full min-w-[1100px] border-separate border-spacing-0 text-left text-sm">
               <thead className="text-muted shadow-subtle">
                 {activeGroupedHeaders.map((headerRow, rowIndex) => (
@@ -349,7 +384,10 @@ export function AgrupacionesView() {
                 ))}
               </tbody>
             </table>
-        )}
+              {!visibleRows.length ? <p className="p-6 text-sm text-muted">No hay filas con la búsqueda actual.</p> : null}
+            </>
+          )}
+        </div>
       </DataTableShell>
     </div>
   );
