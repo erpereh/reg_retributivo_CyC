@@ -2,6 +2,8 @@
 
 import { MotionConfig } from "motion/react";
 import { AppStateProvider, useAppState } from "@/components/app/AppState";
+import { AssistantProvider } from "@/components/assistant/AssistantProvider";
+import { AssistantView } from "@/components/assistant/AssistantView";
 import { DashboardView } from "@/components/dashboard/DashboardView";
 import { CuadreExcelView } from "@/components/cuadre-excel/CuadreExcelView";
 import { HistoryView } from "@/components/history/HistoryView";
@@ -10,7 +12,7 @@ import { SettingsView } from "@/components/settings/SettingsView";
 import { TablesView } from "@/components/tables/TablesView";
 
 function ActiveView() {
-  const { view } = useAppState();
+  const { view, activeAnalysis } = useAppState();
 
   switch (view) {
     case "personas":
@@ -21,6 +23,8 @@ function ActiveView() {
       return <CuadreExcelView />;
     case "historial":
       return <HistoryView />;
+    case "asistente":
+      return <AssistantProvider activeAnalysis={activeAnalysis}><AssistantView /></AssistantProvider>;
     case "ajustes":
       return <SettingsView />;
     case "dashboard":

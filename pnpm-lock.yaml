@@ -66,6 +66,9 @@ importers:
       eslint-config-next:
         specifier: ^15.0.4
         version: 15.5.19(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3)
+      fake-indexeddb:
+        specifier: 6.2.4
+        version: 6.2.4
       jsdom:
         specifier: ^29.1.1
         version: 29.1.1
@@ -1842,6 +1845,10 @@ packages:
 
   extend@3.0.2:
     resolution: {integrity: sha512-fjquC59cD7CyW6urNXK0FBufkZcoiGG80wTuPujX590cB5Ttln20E2UB4S/WARVqhXffZl2LNgS+gQdPIIim/g==}
+
+  fake-indexeddb@6.2.4:
+    resolution: {integrity: sha512-INKeIKEtSViN4yVtEWEUqbsqmaIy7Ls+MfU0yxQVXg67pOJ/sH1ZxcVrP8XrKULUFohcPD9gnmym+qBfEybACw==}
+    engines: {node: '>=18'}
 
   fast-csv@4.3.6:
     resolution: {integrity: sha512-2RNSpuwwsJGP0frGsOmTb9oUF+VkFSM4SyLTDgwf2ciHWTarN0lQTC+F2f/t5J9QjW+c65VFIAAu85GsvMIusw==}
@@ -5090,6 +5097,8 @@ snapshots:
   expect-type@1.4.0: {}
 
   extend@3.0.2: {}
+
+  fake-indexeddb@6.2.4: {}
 
   fast-csv@4.3.6:
     dependencies:

@@ -54,7 +54,7 @@ describe("TopNav", () => {
 
     const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
 
-    expect(tabs).toEqual(["Dashboard", "Personas", "Cuadre Reg.", "Agrupaciones", "Historial", "Ajustes"]);
+    expect(tabs).toEqual(["Dashboard", "Personas", "Cuadre Reg.", "Agrupaciones", "Asistente", "Historial", "Ajustes"]);
     expect(screen.queryByRole("tab", { name: "Conceptos" })).toBeNull();
 
     fireEvent.click(screen.getByRole("tab", { name: "Cuadre Reg." }));

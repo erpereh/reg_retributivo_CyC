@@ -13,6 +13,7 @@ const TABS: ReadonlyArray<{ id: AppView; label: string }> = [
   { id: "personas", label: "Personas" },
   { id: "cuadre-excel", label: "Cuadre Reg." },
   { id: "agrupaciones", label: "Agrupaciones" },
+  { id: "asistente", label: "Asistente" },
   { id: "historial", label: "Historial" },
   { id: "ajustes", label: "Ajustes" },
 ];
