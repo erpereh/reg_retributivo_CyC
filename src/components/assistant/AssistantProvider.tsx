@@ -107,7 +107,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     const userMessage: ChatMessage = {
       id: createId("message"), conversationId: conversation.id, role: "user", content, status: "completed",
       contextOrigin: conversation.type, modelProfileId: conversation.modelProfileId, responseMode: conversation.responseMode,
-      contextStrategy: conversation.contextStrategy, analysisVersion: conversation.analysisVersion, sourceRefIds: [], actionIds: [], createdAt,
+      contextStrategy: conversation.contextStrategy, ...(conversation.analysisVersion ? { analysisVersion: conversation.analysisVersion } : {}), sourceRefIds: [], actionIds: [], createdAt,
     };
     const assistantMessage: ChatMessage = {
       ...userMessage, id: createId("message"), role: "assistant", content: "", status: "streaming", createdAt: now(),
@@ -150,7 +150,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     const assistantMessage: ChatMessage = {
       id: createId("message"), conversationId: conversation.id, role: "assistant", content: "", status: "streaming", contextOrigin: "analysis",
       modelProfileId: conversation.modelProfileId, responseMode: conversation.responseMode, contextStrategy: conversation.contextStrategy,
-      analysisVersion: conversation.analysisVersion, sourceRefIds: [profile.source.id], actionIds: [], createdAt: now(),
+      ...(conversation.analysisVersion ? { analysisVersion: conversation.analysisVersion } : {}), sourceRefIds: [profile.source.id], actionIds: [], createdAt: now(),
     };
     setStreaming(true);
     try {

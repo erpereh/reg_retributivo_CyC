@@ -4,6 +4,7 @@ import { IDBFactory, IDBKeyRange, IDBObjectStore, IDBTransaction } from "fake-in
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ASSISTANT_STORES, openAssistantDatabase } from "@/lib/assistant/storage/database";
 import { AssistantStorageError, createIndexedDbRepositories } from "@/lib/assistant/storage/indexedDbRepositories";
+import { PrivacyBoundaryError } from "@/lib/assistant/privacy/assertions";
 import type { ChatMessage, Conversation, SourceReference } from "@/lib/assistant/domain";
 
 const conversation = (id: string, updatedAt = "2026-07-13T10:00:00.000Z"): Conversation => ({
@@ -88,7 +89,7 @@ describe("assistant IndexedDB repositories", () => {
     const repositories = await createIndexedDbRepositories({ factory, dbName: "surface-test" });
     expect(Object.keys(repositories).sort()).toEqual([
       "actions", "analysisVersions", "assistantSettings", "cache", "chunks", "cleanupJobs", "conversations", "documents", "events",
-      "indexJobs", "messages", "modelProfiles", "searchTerms", "snapshots", "sources", "writeConversationBlock", "close",
+      "beginAnalysisIngestion", "copyDocumentCorpus", "deleteDocumentCorpus", "indexJobs", "messages", "modelProfiles", "replaceAnalysisCorpus", "searchTerms", "snapshots", "sources", "transferDocumentCorpus", "writeConversationBlock", "writeIngestionBlock", "close",
     ].sort());
     repositories.close();
   });
@@ -99,6 +100,15 @@ describe("assistant IndexedDB repositories", () => {
     expect(await repositories.conversations.get("c1")).toBeTruthy();
     expect((await repositories.messages.listByConversation("c1", { limit: 10 })).items).toHaveLength(1);
     expect(await repositories.sources.get("s1")).toBeTruthy();
+    repositories.close();
+  });
+
+  test("keeps the existing sanitized glossary response persistable", async () => {
+    const repositories = await createIndexedDbRepositories({ factory, dbName: "phase1-compat-test" });
+    const conversationId = `conversation-${crypto.randomUUID()}`;
+    const user = { ...message(`message-${crypto.randomUUID()}`, conversationId, new Date().toISOString()), content: "¿Qué es Cuadre Reg.?" };
+    const assistant = { ...message(`message-${crypto.randomUUID()}`, conversationId, new Date().toISOString()), role: "assistant" as const, content: "Retributivo compara el Registro Retributivo y los recibos. Cuadre Reg. muestra sus diferencias; conceptos y agrupaciones organizan el análisis." };
+    await expect(repositories.writeConversationBlock({ conversation: conversation(conversationId, new Date().toISOString()), messages: [user, assistant], sources: [] })).resolves.toBeUndefined();
     repositories.close();
   });
 
@@ -114,6 +124,183 @@ describe("assistant IndexedDB repositories", () => {
       .rejects.toEqual(new AssistantStorageError("quota_exceeded", "No hay espacio suficiente para guardar el bloque del Asistente."));
     expect(await repositories.conversations.get("c1")).toBeUndefined();
     expect(putSpy).toHaveBeenCalled();
+    repositories.close();
+  });
+
+  test("audits every sensitive store recursively before put", async () => {
+    const repositories = await createIndexedDbRepositories({ factory, dbName: "privacy-put-test" });
+    await expect(repositories.chunks.put({ id: "unsafe", content: "ana@example.com" })).rejects.toBeInstanceOf(PrivacyBoundaryError);
+    await expect(repositories.documents.put({ id: "unsafe", originalFileName: "nomina.pdf" } as never)).rejects.toBeInstanceOf(PrivacyBoundaryError);
+    expect(await repositories.chunks.get("unsafe")).toBeUndefined();
+    expect(await repositories.documents.get("unsafe")).toBeUndefined();
+    repositories.close();
+  });
+
+  test("persists sanitized ingestion records atomically after all audits", async () => {
+    const repositories = await createIndexedDbRepositories({ factory, dbName: "ingestion-atomic-test" });
+    await repositories.writeIngestionBlock({
+      document: { id: "d1", sanitizedSourceLabel: "Documento adicional 1", scope: { type: "conversation", conversationId: "c1" }, mediaType: "txt", status: "ready", createdAt: "2026-01-01", updatedAt: "2026-01-01" },
+      chunks: [{ id: "ch1", documentId: "d1", sequence: 0, content: "texto sanitizado", snippet: "texto sanitizado", sanitizedHash: "abc", terms: ["texto"] }],
+      searchTerms: [{ id: "term1", documentId: "d1", chunkId: "ch1", term: "texto", positions: [0] }],
+      indexJob: { id: "job1", documentId: "d1", status: "ready", indexedChunkIds: ["ch1"] },
+    });
+    expect(await repositories.documents.get("d1")).toBeTruthy();
+    expect(await repositories.chunks.get("ch1")).toBeTruthy();
+    expect(await repositories.searchTerms.get("term1")).toBeTruthy();
+    expect(await repositories.indexJobs.get("job1")).toBeTruthy();
+    repositories.close();
+  });
+
+  async function seedCorpus(repositories: Awaited<ReturnType<typeof createIndexedDbRepositories>>, id: string, conversationId: string): Promise<void> {
+    await repositories.writeIngestionBlock({
+      document: { id, sanitizedSourceLabel: `Documento ${id}`, scope: { type: "conversation", conversationId }, mediaType: "txt", status: "ready", createdAt: "2026-01-01", updatedAt: "2026-01-01" },
+      chunks: [{ id: `${id}-chunk`, documentId: id, sequence: 0, content: "texto sanitizado", snippet: "texto", sanitizedHash: "abc", terms: ["texto"] }],
+      searchTerms: [{ id: `${id}-term`, documentId: id, chunkId: `${id}-chunk`, term: "texto", positions: [0] }],
+      indexJob: { id: `${id}-job`, documentId: id, status: "ready", indexedChunkIds: [`${id}-chunk`] },
+    });
+  }
+
+  const analysisBlock = (analysisId: string, documentId: string, chunkIds: readonly string[]) => ({
+    document: { id: documentId, sanitizedSourceLabel: `Documento ${documentId}`, scope: { type: "analysis" as const, analysisId }, mediaType: "txt" as const, status: "ready" as const, createdAt: "2026-01-01", updatedAt: "2026-01-01" },
+    chunks: chunkIds.map((id, sequence) => ({ id, documentId, sequence, content: `texto sanitizado ${sequence}`, snippet: "texto sanitizado", sanitizedHash: `hash-${sequence}`, terms: ["texto"] })),
+    searchTerms: chunkIds.map((chunkId, sequence) => ({ id: `${chunkId}-term`, documentId, chunkId, term: "texto", positions: [sequence] })),
+    indexJob: { id: `${documentId}-index`, documentId, status: "ready" as const, indexedChunkIds: chunkIds },
+  });
+
+  test("copies only the selected conversation corpus including index jobs in one transaction", async () => {
+    const repositories = await createIndexedDbRepositories({ factory, dbName: "copy-corpus-test" });
+    await seedCorpus(repositories, "d1-copy-special", "c1");
+    await seedCorpus(repositories, "d2", "c2");
+    const mappings = await repositories.copyDocumentCorpus({ sourceConversationId: "c1", targetConversationId: "c3", documentIds: ["d1-copy-special"] });
+    expect(mappings).toEqual([{ sourceDocumentId: "d1-copy-special", targetDocumentId: "d1-copy-special-copy-c3" }]);
+    expect(await repositories.documents.get("d1-copy-special-copy-c3")).toEqual(expect.objectContaining({ scope: { type: "conversation", conversationId: "c3" } }));
+    expect(await repositories.chunks.get("d1-copy-special-copy-c3-chunk-0")).toEqual(expect.objectContaining({ documentId: "d1-copy-special-copy-c3" }));
+    expect(await repositories.indexJobs.get("d1-copy-special-copy-c3-index")).toEqual(expect.objectContaining({ documentId: "d1-copy-special-copy-c3", indexedChunkIds: ["d1-copy-special-copy-c3-chunk-0"] }));
+    expect(await repositories.documents.get("d2-copy-c3")).toBeUndefined();
+    repositories.close();
+  });
+
+  test("rejects a deterministic copy target collision without changing either complete corpus", async () => {
+    const repositories = await createIndexedDbRepositories({ factory, dbName: "copy-target-collision-test" });
+    await seedCorpus(repositories, "d1", "c1");
+    await seedCorpus(repositories, "d1-copy-c3", "c3");
+
+    await expect(repositories.copyDocumentCorpus({ sourceConversationId: "c1", targetConversationId: "c3", documentIds: ["d1"] }))
+      .rejects.toBeInstanceOf(AssistantStorageError);
+
+    expect(await repositories.documents.get("d1")).toBeTruthy();
+    expect(await repositories.chunks.get("d1-chunk")).toEqual(expect.objectContaining({ documentId: "d1" }));
+    expect(await repositories.documents.get("d1-copy-c3")).toEqual(expect.objectContaining({ scope: { type: "conversation", conversationId: "c3" } }));
+    expect(await repositories.chunks.get("d1-copy-c3-chunk")).toEqual(expect.objectContaining({ documentId: "d1-copy-c3" }));
+    expect(await repositories.searchTerms.get("d1-copy-c3-term")).toEqual(expect.objectContaining({ chunkId: "d1-copy-c3-chunk" }));
+    expect(await repositories.indexJobs.get("d1-copy-c3-job")).toEqual(expect.objectContaining({ indexedChunkIds: ["d1-copy-c3-chunk"] }));
+    expect(await repositories.chunks.get("d1-copy-c3-chunk-0")).toBeUndefined();
+    expect(await repositories.indexJobs.get("d1-copy-c3-index")).toBeUndefined();
+    repositories.close();
+  });
+
+  test("atomically replaces an analysis corpus, removing retired documents and surplus chunks", async () => {
+    const repositories = await createIndexedDbRepositories({ factory, dbName: "replace-analysis-corpus-test" });
+    await repositories.beginAnalysisIngestion({ analysisId: "a1", ingestionId: "v1" });
+    await expect(repositories.replaceAnalysisCorpus({
+      analysisId: "a1", ingestionId: "v1",
+      blocks: [analysisBlock("a1", "a1-registro", ["old-r-1", "old-r-2"]), analysisBlock("a1", "a1-recibo-1", ["old-p-1"])],
+    })).resolves.toBe(true);
+
+    await repositories.beginAnalysisIngestion({ analysisId: "a1", ingestionId: "v2" });
+    await expect(repositories.replaceAnalysisCorpus({
+      analysisId: "a1", ingestionId: "v2", blocks: [analysisBlock("a1", "a1-registro", ["new-r-1"])],
+    })).resolves.toBe(true);
+
+    expect(await repositories.documents.get("a1-registro")).toBeTruthy();
+    expect(await repositories.chunks.get("new-r-1")).toBeTruthy();
+    expect(await repositories.chunks.get("old-r-1")).toBeUndefined();
+    expect(await repositories.chunks.get("old-r-2")).toBeUndefined();
+    expect(await repositories.searchTerms.get("old-r-2-term")).toBeUndefined();
+    expect(await repositories.documents.get("a1-recibo-1")).toBeUndefined();
+    expect(await repositories.chunks.get("old-p-1")).toBeUndefined();
+    expect(await repositories.indexJobs.get("a1-recibo-1-index")).toBeUndefined();
+    repositories.close();
+  });
+
+  test("keeps the newest complete analysis corpus when an older ingestion finishes last", async () => {
+    const repositories = await createIndexedDbRepositories({ factory, dbName: "analysis-ingestion-race-test" });
+    await repositories.beginAnalysisIngestion({ analysisId: "a1", ingestionId: "old" });
+    await repositories.beginAnalysisIngestion({ analysisId: "a1", ingestionId: "new" });
+
+    await expect(repositories.replaceAnalysisCorpus({
+      analysisId: "a1", ingestionId: "new", blocks: [analysisBlock("a1", "a1-registro", ["new-chunk"])],
+    })).resolves.toBe(true);
+    await expect(repositories.replaceAnalysisCorpus({
+      analysisId: "a1", ingestionId: "old", blocks: [analysisBlock("a1", "a1-registro", ["old-chunk"])],
+    })).resolves.toBe(false);
+
+    expect(await repositories.chunks.get("new-chunk")).toBeTruthy();
+    expect(await repositories.searchTerms.get("new-chunk-term")).toBeTruthy();
+    expect(await repositories.chunks.get("old-chunk")).toBeUndefined();
+    expect(await repositories.searchTerms.get("old-chunk-term")).toBeUndefined();
+    expect(await repositories.indexJobs.get("a1-registro-index")).toEqual(expect.objectContaining({ indexedChunkIds: ["new-chunk"] }));
+    repositories.close();
+  });
+
+  test("rolls back a failed analysis replacement and preserves the previous complete corpus", async () => {
+    const repositories = await createIndexedDbRepositories({ factory, dbName: "replace-analysis-rollback-test" });
+    await repositories.beginAnalysisIngestion({ analysisId: "a1", ingestionId: "v1" });
+    await repositories.replaceAnalysisCorpus({ analysisId: "a1", ingestionId: "v1", blocks: [analysisBlock("a1", "a1-registro", ["old-chunk"])] });
+    await repositories.beginAnalysisIngestion({ analysisId: "a1", ingestionId: "v2" });
+    const originalPut = IDBObjectStore.prototype.put;
+    vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, value: unknown) {
+      if ((value as { id?: string }).id === "new-chunk") throw new DOMException("private", "QuotaExceededError");
+      return originalPut.call(this, value);
+    });
+
+    await expect(repositories.replaceAnalysisCorpus({
+      analysisId: "a1", ingestionId: "v2", blocks: [analysisBlock("a1", "a1-registro", ["new-chunk"])],
+    })).rejects.toEqual(new AssistantStorageError("quota_exceeded", "No hay espacio suficiente para guardar el bloque del Asistente."));
+
+    expect(await repositories.chunks.get("old-chunk")).toBeTruthy();
+    expect(await repositories.searchTerms.get("old-chunk-term")).toBeTruthy();
+    expect(await repositories.chunks.get("new-chunk")).toBeUndefined();
+    expect(await repositories.searchTerms.get("new-chunk-term")).toBeUndefined();
+    expect(await repositories.indexJobs.get("a1-registro-index")).toEqual(expect.objectContaining({ indexedChunkIds: ["old-chunk"] }));
+    repositories.close();
+  });
+
+  test("transfers atomically and leaves no source records or orphaned dependants", async () => {
+    const repositories = await createIndexedDbRepositories({ factory, dbName: "transfer-corpus-test" });
+    await seedCorpus(repositories, "d1", "c1");
+    await repositories.transferDocumentCorpus({ sourceConversationId: "c1", targetConversationId: "c3", documentIds: ["d1"] });
+    expect(await repositories.documents.get("d1")).toBeUndefined();
+    expect(await repositories.chunks.get("d1-chunk")).toBeUndefined();
+    expect(await repositories.searchTerms.get("d1-term")).toBeUndefined();
+    expect(await repositories.indexJobs.get("d1-job")).toBeUndefined();
+    expect(await repositories.documents.get("d1-copy-c3")).toBeTruthy();
+    repositories.close();
+  });
+
+  test("deletes document, chunks, search terms and index jobs together", async () => {
+    const repositories = await createIndexedDbRepositories({ factory, dbName: "delete-corpus-test" });
+    await seedCorpus(repositories, "d1", "c1");
+    await repositories.deleteDocumentCorpus({ conversationId: "c1", documentIds: ["d1"] });
+    expect(await repositories.documents.get("d1")).toBeUndefined();
+    expect(await repositories.chunks.get("d1-chunk")).toBeUndefined();
+    expect(await repositories.searchTerms.get("d1-term")).toBeUndefined();
+    expect(await repositories.indexJobs.get("d1-job")).toBeUndefined();
+    repositories.close();
+  });
+
+  test("aborts a failed corpus copy without partial targets or source loss", async () => {
+    const repositories = await createIndexedDbRepositories({ factory, dbName: "copy-atomic-failure-test" });
+    await seedCorpus(repositories, "d1", "c1");
+    const originalPut = IDBObjectStore.prototype.put;
+    const spy = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, value: unknown) {
+      if ((value as { id?: string }).id === "d1-copy-c3-chunk-0") throw new DOMException("private", "QuotaExceededError");
+      return originalPut.call(this, value);
+    });
+    await expect(repositories.copyDocumentCorpus({ sourceConversationId: "c1", targetConversationId: "c3", documentIds: ["d1"] })).rejects.toBeInstanceOf(AssistantStorageError);
+    expect(await repositories.documents.get("d1")).toBeTruthy();
+    expect(await repositories.documents.get("d1-copy-c3")).toBeUndefined();
+    expect(spy).toHaveBeenCalled();
     repositories.close();
   });
 });

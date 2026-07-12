@@ -21,6 +21,7 @@ import {
   type AppSettings,
 } from "@/lib/storage/analysisStorage";
 import { normalizeComparableText, normalizeEmployeeId } from "@/lib/utils/normalize";
+import { startAnalysisDocumentIngestion } from "@/lib/assistant/documents/ingestionService";
 
 export interface DashboardFilters {
   readonly query: string;
@@ -278,6 +279,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       };
 
       await saveAnalysis(record);
+      void startAnalysisDocumentIngestion({ analysisId: record.id, result, registroFile, pdfFiles }).catch(() => undefined);
       saveActiveAnalysisId(record.id);
       setActiveAnalysis(record);
       await refreshHistory();

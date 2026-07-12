@@ -21,6 +21,35 @@ export interface ConversationWriteBlock {
   events?: readonly ChatEvent[];
 }
 
+export interface IngestionWriteBlock {
+  document: PersistedDocumentMetadata;
+  chunks: readonly {
+    readonly id: string; readonly documentId: string; readonly sequence: number; readonly content: string;
+    readonly snippet: string; readonly sanitizedHash: string; readonly terms: readonly string[];
+  }[];
+  searchTerms: readonly {
+    readonly id: string; readonly documentId: string; readonly chunkId: string; readonly term: string; readonly positions: readonly number[];
+  }[];
+  indexJob: DocumentIndexJob;
+}
+
+export interface DocumentIndexJob {
+  readonly id: string;
+  readonly documentId: string;
+  readonly status: "ready" | "error";
+  readonly indexedChunkIds: readonly string[];
+  readonly nonIndexableReason?: "scanned_without_text" | "empty_document";
+}
+export interface DocumentCorpusSelection {
+  readonly sourceConversationId: string;
+  readonly targetConversationId: string;
+  readonly documentIds: readonly string[];
+}
+export interface DeleteDocumentCorpusInput { readonly conversationId: string; readonly documentIds: readonly string[] }
+export interface DocumentIdMapping { readonly sourceDocumentId: string; readonly targetDocumentId: string }
+export interface BeginAnalysisIngestionInput { readonly analysisId: string; readonly ingestionId: string }
+export interface ReplaceAnalysisCorpusInput extends BeginAnalysisIngestionInput { readonly blocks: readonly IngestionWriteBlock[] }
+
 export interface AssistantRepositories {
   conversations: ConversationRepository;
   messages: MessageRepository;
@@ -38,5 +67,11 @@ export interface AssistantRepositories {
   assistantSettings: EntityRepository<AssistantStoredRecord>;
   cleanupJobs: AssistantCleanupRepository;
   writeConversationBlock(block: ConversationWriteBlock): Promise<void>;
+  writeIngestionBlock(block: IngestionWriteBlock): Promise<void>;
+  beginAnalysisIngestion(input: BeginAnalysisIngestionInput): Promise<void>;
+  replaceAnalysisCorpus(input: ReplaceAnalysisCorpusInput): Promise<boolean>;
+  copyDocumentCorpus(input: DocumentCorpusSelection): Promise<readonly DocumentIdMapping[]>;
+  transferDocumentCorpus(input: DocumentCorpusSelection): Promise<readonly DocumentIdMapping[]>;
+  deleteDocumentCorpus(input: DeleteDocumentCorpusInput): Promise<void>;
   close(): void;
 }
