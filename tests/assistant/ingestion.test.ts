@@ -240,4 +240,11 @@ describe("strict local-first ingestion", () => {
     const record = new DirectIndexExecutor().execute(chunks).terms.find((term) => term.term === "matricula");
     expect(record?.positions).toEqual([content.indexOf("matrícula"), content.lastIndexOf("matrícula")]);
   });
+
+  test("maps equal-total-width compatibility decompositions to the original source offset", () => {
+    const content = "\uFB01\u0301";
+    const chunks = [{ id: "chunk-width", documentId: "document-width", sequence: 0, content, snippet: content, sanitizedHash: "safe-width", terms: ["i"] }];
+    const record = new DirectIndexExecutor().execute(chunks).terms.find((term) => term.term === "i");
+    expect(record?.positions).toEqual([0]);
+  });
 });

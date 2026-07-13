@@ -778,8 +778,17 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       if (!runIsCurrent()) return;
       if (partialTimer) clearTimeout(partialTimer);
       partialTimer = undefined;
-      const completed = { ...assistantMessage, content: result.text, status: "completed" as const };
-      const persisted = await persistRunRound(conversation.id, [...baseMessages, userMessage, completed], nextSources, runIsCurrent);
+      const producedMessages = result.producedMessages.map((produced, index) => ({
+        ...assistantMessage,
+        id: produced.id,
+        content: produced.content,
+        status: produced.status,
+        modelProfileId: produced.modelProfileId,
+        modelId: produced.modelId,
+        createdAt: new Date(Date.parse(assistantMessage.createdAt) + index).toISOString(),
+      }));
+      const completed = producedMessages.at(-1) ?? { ...assistantMessage, content: result.text, status: "completed" as const };
+      const persisted = await persistRunRound(conversation.id, [...baseMessages, userMessage, ...producedMessages], nextSources, runIsCurrent);
       if (persisted && runIsCurrent()) { setNotice("Respuesta completada"); setAnnouncement(`Respuesta completada: ${completed.content}`); }
     } catch (caught) {
       if (!runIsCurrent()) return;

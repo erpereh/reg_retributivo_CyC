@@ -277,15 +277,62 @@ describe("Phase 6 reviewed integration", () => {
     persisted.close();
   });
 
-  test("aborts an active analysis run before cleanup and cannot persist after completion", async () => {
-    const factory = new IDBFactory(); const dbName = "phase6-cleanup-active-run";
-    const repositories = await createIndexedDbRepositories({ factory, dbName }); await repositories.conversations.put(conversation()); repositories.close();
-    const encoder = new TextEncoder(); let release: (() => void) | undefined;
+  test.each(["switch", "delete"] as const)("does not leak a fallback partial into another conversation after %s", async (operation) => {
+    if (operation === "delete") vi.spyOn(window, "confirm").mockReturnValue(true);
+    const factory = new IDBFactory(); const dbName = `phase7-fallback-cas-${operation}`;
+    const repositories = await createIndexedDbRepositories({ factory, dbName });
+    await repositories.conversations.put({ ...conversation(), updatedAt: "2026-07-13T10:02:00.000Z" });
+    await repositories.conversations.put({ id: "conversation-b", type: "general", title: "General B", associatedPersonIds: [], modelProfileId: "fake-retributivo-v1", responseMode: "strict", contextStrategy: "automatic", status: "active", createdAt: at, updatedAt: "2026-07-13T10:01:00.000Z" });
+    repositories.close();
+    const encoder = new TextEncoder(); let release: (() => void) | undefined; let attempt = 0;
     const adapter = {
       streamGeneral: async function* () { yield new Uint8Array(); },
       streamPersonProfile: async function* () {
-        yield encoder.encode(`${JSON.stringify({ type: "text_delta", messageId: "local", delta: "Parcial antes de limpiar" })}\n`);
+        attempt += 1;
+        if (attempt === 1) {
+          yield encoder.encode(`${JSON.stringify({ type: "text_delta", messageId: "local", delta: "Parcial fallback A" })}\n`);
+          yield encoder.encode(`${JSON.stringify({ type: "error", code: "transient", classification: "transient", message: "Fallo transitorio sanitizado", retryable: true })}\n`);
+          return;
+        }
         await new Promise<void>((resolve) => { release = resolve; });
+        yield encoder.encode(`${JSON.stringify({ type: "text_delta", messageId: "local", delta: "Continuación tardía" })}\n`);
+        yield encoder.encode(`${JSON.stringify({ type: "done", finishReason: "stop" })}\n`);
+      },
+    };
+    function Probe() {
+      const assistant = useAssistant();
+      return <><button onClick={() => void assistant.send("Consulta la matrícula 001")}>Enviar fallback</button><button onClick={() => void assistant.selectConversation("conversation-b")}>Cambiar a B</button><button onClick={() => void assistant.deleteConversation()}>Eliminar A</button></>;
+    }
+    render(<AssistantProvider activeAnalysis={analysis()} factory={factory} dbName={dbName} adapter={adapter}><AssistantView /><Probe /></AssistantProvider>);
+    await screen.findByRole("heading", { name: "Análisis" });
+    fireEvent.click(screen.getByRole("button", { name: "Enviar fallback" }));
+    await screen.findByText("Parcial fallback A");
+    fireEvent.click(screen.getByRole("button", { name: operation === "switch" ? "Cambiar a B" : "Eliminar A" }));
+    release?.();
+    await screen.findByRole("heading", { name: "General B" });
+    const persisted = await createIndexedDbRepositories({ factory, dbName });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect((await persisted.messages.listByConversation("conversation-b", { limit: 10 })).items).toEqual([]);
+    expect((await persisted.messages.listByConversation("conversation-1", { limit: 10 })).items).toEqual([]);
+    if (operation === "delete") expect(await persisted.conversations.get("conversation-1")).toBeUndefined();
+    persisted.close();
+  });
+
+  test("aborts an active analysis run before cleanup and cannot persist after completion", async () => {
+    const factory = new IDBFactory(); const dbName = "phase6-cleanup-active-run";
+    const repositories = await createIndexedDbRepositories({ factory, dbName }); await repositories.conversations.put(conversation()); repositories.close();
+    const encoder = new TextEncoder(); let release: (() => void) | undefined; let attempt = 0;
+    const adapter = {
+      streamGeneral: async function* () { yield new Uint8Array(); },
+      streamPersonProfile: async function* () {
+        attempt += 1;
+        if (attempt === 1) {
+          yield encoder.encode(`${JSON.stringify({ type: "text_delta", messageId: "local", delta: "Parcial antes de limpiar" })}\n`);
+          yield encoder.encode(`${JSON.stringify({ type: "error", code: "transient", classification: "transient", message: "Fallo transitorio sanitizado", retryable: true })}\n`);
+          return;
+        }
+        await new Promise<void>((resolve) => { release = resolve; });
+        yield encoder.encode(`${JSON.stringify({ type: "text_delta", messageId: "local", delta: "Continuación tardía" })}\n`);
         yield encoder.encode(`${JSON.stringify({ type: "done", finishReason: "stop" })}\n`);
       },
     };

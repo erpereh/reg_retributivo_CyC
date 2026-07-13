@@ -1,6 +1,7 @@
 "use client";
 
 import { MotionConfig } from "motion/react";
+import dynamic from "next/dynamic";
 import { AppStateProvider, useAppState } from "@/components/app/AppState";
 import { AssistantProvider } from "@/components/assistant/AssistantProvider";
 import { AssistantView } from "@/components/assistant/AssistantView";
@@ -10,6 +11,11 @@ import { HistoryView } from "@/components/history/HistoryView";
 import { AppShell } from "@/components/layout/AppShell";
 import { SettingsView } from "@/components/settings/SettingsView";
 import { TablesView } from "@/components/tables/TablesView";
+
+const AssistantE2EAppScope = dynamic(
+  () => import("@/components/assistant/AssistantE2EAppScope").then((module) => module.AssistantE2EAppScope),
+  { ssr: false },
+);
 
 function ActiveView() {
   const { view } = useAppState();
@@ -33,11 +39,11 @@ function ActiveView() {
   }
 }
 
-export function DashboardApp() {
+export function DashboardApp({ assistantE2EMode = false }: Readonly<{ assistantE2EMode?: boolean }>) {
   return (
     <MotionConfig reducedMotion="user">
       <AppStateProvider>
-        <AssistantAppScope />
+        {assistantE2EMode ? <AssistantE2EAppScope><AppShell><ActiveView /></AppShell></AssistantE2EAppScope> : <AssistantAppScope />}
       </AppStateProvider>
     </MotionConfig>
   );

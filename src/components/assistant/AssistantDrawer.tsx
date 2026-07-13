@@ -43,7 +43,7 @@ export function AssistantDrawer({ open, title, side, onClose, children }: Readon
   return (
     <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-labelledby={titleId}>
       <button type="button" className="absolute inset-0 min-h-11 min-w-11 cursor-default bg-slate-950/35" aria-label={`Descartar ${title.toLowerCase()}`} onClick={onClose} />
-      <div ref={panelRef} className={`absolute inset-y-0 ${side === "left" ? "left-0" : "right-0"} flex w-[min(90vw,24rem)] flex-col bg-white shadow-lift transition-transform duration-180 motion-reduce:transition-none ${entered ? "translate-x-0" : side === "left" ? "-translate-x-full" : "translate-x-full"}`}>
+      <div ref={panelRef} data-testid="assistant-drawer-panel" className={`absolute inset-y-0 ${side === "left" ? "left-0" : "right-0"} flex w-[min(90vw,24rem)] flex-col bg-white shadow-lift transition-transform duration-180 motion-reduce:transition-none ${entered ? "translate-x-0" : side === "left" ? "-translate-x-full" : "translate-x-full"}`}>
         <header className="flex min-h-16 items-center gap-3 border-b border-line px-4">
           <h2 id={titleId} className="flex-1 text-base font-bold text-ink">{title}</h2>
           <button type="button" className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl text-muted hover:bg-slate-100 hover:text-ink" aria-label={`Cerrar ${title.toLowerCase()}`} onClick={onClose}><X aria-hidden="true" className="size-5" /></button>

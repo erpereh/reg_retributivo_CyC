@@ -67,12 +67,29 @@ export class DirectSearchIndex implements SearchIndex {
   }
 }
 
-function normalizeWithSourcePositions(input: string): { readonly text: string; readonly sourcePositions: readonly number[] } {
+function normalizeCharacter(character: string, cache: Map<string, string>): string {
+  const cached = cache.get(character);
+  if (cached !== undefined) return cached;
+  const normalized = character.normalize("NFKD").replace(/[\u0300-\u036f]/gu, "").toLowerCase();
+  cache.set(character, normalized);
+  return normalized;
+}
+
+function hasIdentityWidthNormalization(input: string, cache: Map<string, string>): boolean {
+  for (const character of input) if (normalizeCharacter(character, cache).length !== character.length) return false;
+  return true;
+}
+
+function normalizeWithSourcePositions(input: string, cache: Map<string, string>): { readonly text: string; readonly sourcePositions: readonly number[] } {
+  const normalizedWhole = input.normalize("NFKD").replace(/[\u0300-\u036f]/gu, "").toLowerCase();
+  if (normalizedWhole.length === input.length && hasIdentityWidthNormalization(input, cache)) {
+    return { text: normalizedWhole, sourcePositions: [] };
+  }
   let text = "";
   const sourcePositions: number[] = [];
   let sourcePosition = 0;
   for (const character of input) {
-    const normalized = character.normalize("NFKD").replace(/[\u0300-\u036f]/gu, "").toLowerCase();
+    const normalized = normalizeCharacter(character, cache);
     text += normalized;
     for (let index = 0; index < normalized.length; index += 1) sourcePositions.push(sourcePosition);
     sourcePosition += character.length;
@@ -83,15 +100,16 @@ function normalizeWithSourcePositions(input: string): { readonly text: string; r
 export class DirectIndexExecutor implements IndexExecutor {
   execute(chunks: readonly SanitizedDocumentChunk[]): DirectIndexResult {
     const terms: SearchTermRecord[] = [];
+    const normalizationCache = new Map<string, string>();
     for (const chunk of chunks) {
-      const normalizedContent = normalizeWithSourcePositions(chunk.content);
+      const normalizedContent = normalizeWithSourcePositions(chunk.content, normalizationCache);
       for (const term of chunk.terms) {
         const positions: number[] = [];
         let from = 0;
         while (from < normalizedContent.text.length) {
           const position = normalizedContent.text.indexOf(term, from);
           if (position < 0) break;
-          positions.push(normalizedContent.sourcePositions[position] ?? position);
+          positions.push(normalizedContent.sourcePositions.length ? (normalizedContent.sourcePositions[position] ?? position) : position);
           from = position + term.length;
         }
         terms.push({ id: `${chunk.id}-term-${term}`, documentId: chunk.documentId, chunkId: chunk.id, term, positions });

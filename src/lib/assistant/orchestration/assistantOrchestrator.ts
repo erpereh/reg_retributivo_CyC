@@ -12,7 +12,8 @@ import { canonicalizePrivacyText } from "@/lib/assistant/privacy/patterns";
 
 export type AssistantTransport = (body: Record<string, unknown>, signal?: AbortSignal) => Promise<Response>;
 export interface ProducedMessage { readonly id: string; readonly status: "interrupted" | "completed"; readonly content: string; readonly modelProfileId: string; readonly modelId: string }
-export interface RunWriteContext { readonly signal: AbortSignal; readonly executionId: string; readonly generation: number }
+export interface AssistantRunResult { readonly text: string; readonly events: readonly AssistantStreamEvent[]; readonly rounds: number; readonly producedMessages: readonly ProducedMessage[] }
+export interface RunWriteContext { readonly signal: AbortSignal; readonly executionId: string; readonly generation: number; readonly producedMessageIds?: ReadonlySet<string> }
 export interface OrchestratorDependencies { readonly transport: AssistantTransport; readonly registry: AnalysisToolRegistry; readonly idFactory?: () => string; readonly validateRequestScope: (body: Readonly<Record<string, unknown>>, context: RunWriteContext) => Promise<void>; readonly persistMessage?: (message: ProducedMessage, context: RunWriteContext) => Promise<void>; readonly persistSnapshot?: (snapshot: ContextSnapshot, context: RunWriteContext) => Promise<void>; readonly persistRunMetadata?: (metadata: { conversationId: string; actualStrategy: ContextStrategy; actualResponseMode: ResponseMode; snapshotId?: string }, context: RunWriteContext) => Promise<void>; readonly markMessageReplaced?: (messageId: string, context: RunWriteContext) => Promise<void> }
 export interface SendAssistantInput { readonly conversationId: string; readonly analysisId?: string; readonly question: string; readonly assistantMessageId?: string; readonly modelProfileId: string; readonly modelId: string; readonly profile?: ModelProfile; readonly compatibleDefaultProfile?: ModelProfile; readonly apiKey?: string; readonly privacyBlockedTerms?: readonly string[]; readonly contextCandidates?: readonly ContextCandidate[]; readonly compaction?: Omit<CompactionInput, "idFactory">; readonly responseMode: ResponseMode; readonly contextStrategy: ContextStrategy; readonly signal?: AbortSignal; readonly resumeFrom?: { readonly messageId: string; readonly context: string }; readonly onTextDelta?: (delta: string) => void }
 
@@ -32,11 +33,11 @@ async function sha256(value: string): Promise<string> { const digest = await cry
 function sameValue(left: unknown, right: unknown): boolean { return canonicalJson(left) === canonicalJson(right); }
 
 export function createRepositoryRequestScopeValidator(repositories: Pick<AssistantRepositories, "conversations" | "messages" | "documents" | "chunks" | "sources">): OrchestratorDependencies["validateRequestScope"] {
-  return async (body) => {
+  return async (body, context) => {
     const conversationId = String(body.conversationId ?? ""); const analysisId = typeof body.analysisId === "string" ? body.analysisId : undefined;
     const conversation = await repositories.conversations.get(conversationId);
     if (!conversation || (analysisId ? conversation.type !== "analysis" || conversation.analysisId !== analysisId : conversation.type !== "general")) throw new ProviderAdapterError("privacy", "local_scope_mismatch");
-    if (typeof body.interruptedMessageId === "string") { const message = await repositories.messages.get(body.interruptedMessageId); if (!message || message.conversationId !== conversationId) throw new ProviderAdapterError("privacy", "local_message_scope_mismatch"); }
+    if (typeof body.interruptedMessageId === "string") { const message = await repositories.messages.get(body.interruptedMessageId); if ((!message || message.conversationId !== conversationId) && !context.producedMessageIds?.has(body.interruptedMessageId)) throw new ProviderAdapterError("privacy", "local_message_scope_mismatch"); }
     const candidates = Array.isArray(body.contextCandidates) ? body.contextCandidates as Record<string, unknown>[] : [];
     for (const candidate of candidates) {
       const candidateId = String(candidate.id ?? ""); const sourceId = String(candidate.sourceId ?? "");
@@ -103,16 +104,17 @@ export class AssistantOrchestrator {
   retry(onTextDelta?: (delta: string) => void) { if (!this.lastInput) return Promise.reject(new Error("No hay una solicitud para reintentar.")); return this.send({ ...this.lastInput, ...(onTextDelta ? { onTextDelta } : {}), resumeFrom: this.lastInterrupted }); }
   async regenerate(onTextDelta?: (delta: string) => void) { if (!this.lastInput) throw new Error("No hay una respuesta para regenerar."); const input = { ...this.lastInput, ...(onTextDelta ? { onTextDelta } : {}), resumeFrom: undefined }; const replacedId = this.lastProducedMessageId; return this.execute(input, replacedId ? (context) => this.dependencies.markMessageReplaced?.(replacedId, context) : undefined); }
 
-  async send(input: SendAssistantInput): Promise<{ readonly text: string; readonly events: readonly AssistantStreamEvent[]; readonly rounds: number }> {
+  async send(input: SendAssistantInput): Promise<AssistantRunResult> {
     return this.execute(input);
   }
 
-  private async execute(input: SendAssistantInput, beforeRun?: (context: RunWriteContext) => Promise<void> | undefined): Promise<{ readonly text: string; readonly events: readonly AssistantStreamEvent[]; readonly rounds: number }> {
+  private async execute(input: SendAssistantInput, beforeRun?: (context: RunWriteContext) => Promise<void> | undefined): Promise<AssistantRunResult> {
     assertInputSafe(input); if (input.signal?.aborted) throw input.signal.reason ?? new DOMException("Cancelled", "AbortError"); this.stop();
     const generation = ++this.activeGeneration; const executionId = (this.dependencies.idFactory ?? (() => crypto.randomUUID()))();
-    const controller = new AbortController(); const runContext: RunWriteContext = { signal: controller.signal, executionId, generation }; const assertActive = () => { if (controller.signal.aborted || this.activeGeneration !== generation) throw controller.signal.reason ?? new DOMException("Stale run", "AbortError"); };
+    const controller = new AbortController(); const producedMessageIds = new Set<string>(); const runContext: RunWriteContext = { signal: controller.signal, executionId, generation, producedMessageIds }; const assertActive = () => { if (controller.signal.aborted || this.activeGeneration !== generation) throw controller.signal.reason ?? new DOMException("Stale run", "AbortError"); };
     const abortFromParent = () => controller.abort(input.signal?.reason ?? new DOMException("Cancelled", "AbortError")); input.signal?.addEventListener("abort", abortFromParent, { once: true }); this.activeController = controller; this.lastInput = { ...input, apiKey: undefined, resumeFrom: undefined };
     const allEvents: AssistantStreamEvent[] = [];
+    const producedMessages: ProducedMessage[] = [];
     try {
       await beforeRun?.(runContext); assertActive();
       const current = { id: input.modelProfileId, modelId: input.modelId, profile: input.profile };
@@ -130,12 +132,12 @@ export class AssistantOrchestrator {
           for (const status of events) if (status.type === "status" && status.code === "context_compacted" && status.snapshot) { await this.dependencies.persistSnapshot?.(status.snapshot, runContext); assertActive(); }
           const errorEvent = events.find((event): event is Extract<AssistantStreamEvent, { type: "error" }> => event.type === "error"); if (errorEvent) throw new ProviderAdapterError(errorEvent.classification ?? (errorEvent.retryable ? "transient" : "provider"), errorEvent.code);
           const requests = events.filter((event): event is Extract<AssistantStreamEvent, { type: "tool_request" }> => event.type === "tool_request");
-          if (!requests.length) { await this.dependencies.persistMessage?.({ id: messageId, status: "completed", content: text, modelProfileId: producer.id, modelId: producer.modelId }, runContext); assertActive(); const snapshotId = events.find((event): event is Extract<AssistantStreamEvent, { type: "status" }> & { snapshot: ContextSnapshot } => event.type === "status" && event.code === "context_compacted" && Boolean(event.snapshot))?.snapshot.id; await this.dependencies.persistRunMetadata?.({ conversationId: input.conversationId, actualStrategy: input.contextStrategy, actualResponseMode: input.responseMode, ...(snapshotId ? { snapshotId } : {}) }, runContext); assertActive(); this.lastProducedMessageId = messageId; this.lastInterrupted = undefined; return { text, events: allEvents, rounds: posts }; }
+          if (!requests.length) { const completed = { id: messageId, status: "completed" as const, content: text, modelProfileId: producer.id, modelId: producer.modelId }; producedMessages.push(completed); await this.dependencies.persistMessage?.(completed, runContext); assertActive(); const snapshotId = events.find((event): event is Extract<AssistantStreamEvent, { type: "status" }> & { snapshot: ContextSnapshot } => event.type === "status" && event.code === "context_compacted" && Boolean(event.snapshot))?.snapshot.id; await this.dependencies.persistRunMetadata?.({ conversationId: input.conversationId, actualStrategy: input.contextStrategy, actualResponseMode: input.responseMode, ...(snapshotId ? { snapshotId } : {}) }, runContext); assertActive(); this.lastProducedMessageId = messageId; this.lastInterrupted = undefined; return { text, events: allEvents, rounds: posts, producedMessages }; }
           toolResults = []; for (const request of requests) { const envelope = this.dependencies.registry.executeEnvelope ? await this.dependencies.registry.executeEnvelope(request.tool as AnalysisToolName, request.args, request.requestId) : { data: await this.dependencies.registry.execute(request.tool as AnalysisToolName, request.args), sources: [] }; assertActive(); assertSafeForProvider(envelope); toolResults.push({ requestId: request.requestId, tool: request.tool, data: envelope.data, sources: envelope.sources }); }
           phase = phase === "plan" ? "respond" : "continue";
         } catch (error) {
           lastError = error; if (controller.signal.aborted) throw error;
-          if (text) { await this.dependencies.persistMessage?.({ id: messageId, status: "interrupted", content: text, modelProfileId: producer.id, modelId: producer.modelId }, runContext); assertActive(); continuation = { messageId, context: `${continuation?.context ?? ""}${text}` }; this.lastInterrupted = continuation; }
+          if (text) { const interrupted = { id: messageId, status: "interrupted" as const, content: text, modelProfileId: producer.id, modelId: producer.modelId }; producedMessages.push(interrupted); producedMessageIds.add(messageId); await this.dependencies.persistMessage?.(interrupted, runContext); assertActive(); continuation = { messageId, context: `${continuation?.context ?? ""}${text}` }; this.lastInterrupted = continuation; }
           const classification = error instanceof ProviderAdapterError ? error.classification : "provider";
           if (classification !== "transient") throw error; attempt += 1; phase = continuation ? "continue" : "plan"; toolResults = [];
         }
