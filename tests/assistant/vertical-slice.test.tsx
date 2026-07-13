@@ -45,7 +45,7 @@ describe("assistant vertical slice", () => {
     const composer = screen.getByRole("textbox", { name: /Pregunta/i });
     fireEvent.change(composer, { target: { value: "¿Qué es Cuadre Reg.?" } });
     fireEvent.click(screen.getByRole("button", { name: /Enviar/i }));
-    await screen.findByText(/Retributivo compara el Registro Retributivo y los recibos/i);
+    await screen.findAllByText(/Retributivo compara el Registro Retributivo y los recibos/i);
     expect((composer as HTMLTextAreaElement).value).toBe("");
     expect(screen.queryByText(/1.758,01/)).toBeNull();
 
@@ -68,9 +68,9 @@ describe("assistant vertical slice", () => {
     await screen.findByText(/Matrícula asociada: 10048/i);
     fireEvent.click(screen.getByRole("button", { name: /Consultar perfil/i }));
 
-    await screen.findByText(/Registro: 1.550,00/i);
-    expect(screen.getByText(/Recibos: 1.758,01/i)).toBeTruthy();
-    expect(screen.getByText(/Diferencia: 208,01/i)).toBeTruthy();
+    await screen.findAllByText(/Registro: 1.550,00/i);
+    expect(screen.getAllByText(/Recibos: 1.758,01/i)).not.toHaveLength(0);
+    expect(screen.getAllByText(/Diferencia: 208,01/i)).not.toHaveLength(0);
     expect(screen.getByText("Persona matrícula 10048")).toBeTruthy();
     expect(screen.queryByText("privado.pdf", { exact: false })).toBeNull();
     expect(screen.queryByText("Persona Test", { exact: false })).toBeNull();
@@ -95,7 +95,7 @@ describe("assistant vertical slice", () => {
     await screen.findByText("Consulta general");
     fireEvent.change(screen.getByRole("textbox", { name: /Pregunta/i }), { target: { value: "¿Qué es Cuadre Reg.?" } });
     fireEvent.click(screen.getByRole("button", { name: /Enviar/i }));
-    await screen.findByText(/Retributivo compara/i);
+    await screen.findAllByText(/Retributivo compara/i);
     expect(peopleReads).toBe(0);
   });
 

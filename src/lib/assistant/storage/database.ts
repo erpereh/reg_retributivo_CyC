@@ -1,5 +1,5 @@
 export const ASSISTANT_DB_NAME = "retributivo-assistant-v1";
-export const ASSISTANT_DB_VERSION = 2;
+export const ASSISTANT_DB_VERSION = 3;
 export const ASSISTANT_STORES = [
   "actions", "analysisVersions", "assistantSettings", "cache", "chunks", "cleanupJobs", "conversations", "documents",
   "events", "indexJobs", "messages", "modelProfiles", "searchTerms", "snapshots", "sources",
@@ -23,7 +23,11 @@ export function migrateAssistantDatabase(db: IDBDatabase, transaction: IDBTransa
     ensureIndex(store, "status", "status");
     ensureIndex(store, "createdAt", "createdAt");
     ensureIndex(store, "updatedAt", "updatedAt");
-    if (name === "messages") ensureIndex(store, "conversationCreatedAt", ["conversationId", "createdAt"]);
+    if (name === "conversations") ensureIndex(store, "updatedAtId", ["updatedAt", "id"]);
+    if (name === "messages") {
+      ensureIndex(store, "conversationCreatedAt", ["conversationId", "createdAt"]);
+      ensureIndex(store, "conversationCreatedAtId", ["conversationId", "createdAt", "id"]);
+    }
     if (name === "documents") {
       ensureIndex(store, "scopeType", "scope.type");
       ensureIndex(store, "scopeAnalysisId", "scope.analysisId");

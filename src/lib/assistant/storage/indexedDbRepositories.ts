@@ -1,4 +1,4 @@
-import type { AssistantSettings, ChatAction, ChatEvent, ChatMessage, Conversation, ModelProfile, PersistedDocumentMetadata, SourceReference } from "@/lib/assistant/domain";
+import { convertConversationToAnalysis as buildConversationAnalysisConversion, type AssistantSettings, type ChatAction, type ChatEvent, type ChatMessage, type Conversation, type ModelProfile, type PersistedDocumentMetadata, type SourceReference } from "@/lib/assistant/domain";
 import { openAssistantDatabase, type AssistantStoreName } from "@/lib/assistant/storage/database";
 import { assertSafeForPersistence } from "@/lib/assistant/privacy/assertions";
 import { DirectSearchIndex, type SearchFacets, type SearchIndexRecord } from "@/lib/assistant/search/directIndex";
@@ -7,8 +7,8 @@ import { cleanupJobSchema, contextSnapshotSchema } from "@/lib/assistant/schemas
 import type { z } from "zod";
 import type {
   AssistantCleanupRepository, AssistantDocumentRepository, AssistantRepositories, AssistantSettingsRepository, AssistantStoredRecord, BeginAnalysisIngestionInput, CleanupJob, ContextSnapshot,
-  ContextSnapshotRepository, ConversationRepository, ConversationWriteBlock, DeleteDocumentCorpusInput, DocumentCorpusSelection,
-  DocumentIdMapping, DocumentIndexJob, EntityRepository, IngestionWriteBlock, MessageRepository,
+  ContextSnapshotRepository, ConversationRepository, ConversationWriteBlock, ConvertConversationInput, ConvertConversationResult, DeleteDocumentCorpusInput, DocumentCorpusSelection,
+  ConversationCollectionRepository, DocumentIdMapping, DocumentIndexJob, EntityRepository, IngestionWriteBlock, MessageRepository,
   ModelConfigurationWrite, ModelProfileRepository, Page, PageOptions, ReplaceAnalysisCorpusInput, SourceRepository,
 } from "@/lib/assistant/storage/repositories";
 
@@ -77,7 +77,23 @@ class ValidatedIndexedEntityRepository<T extends { id: string }> extends Indexed
   override async put(value: T): Promise<void> { await super.put(this.schema.parse(value)); }
 }
 
-interface CursorPosition { indexKey: IDBValidKey; primaryKey: IDBValidKey }
+class IndexedConversationCollectionRepository<T extends { id: string; conversationId: string; createdAt: string }>
+  extends IndexedEntityRepository<T> implements ConversationCollectionRepository<T> {
+  async listByConversation(conversationId: string): Promise<T[]> {
+    const transaction = this.db.transaction(this.storeName, "readonly");
+    const values = await requestResult(transaction.objectStore(this.storeName).index("conversationId").getAll(IDBKeyRange.only(conversationId)));
+    await transactionDone(transaction);
+    return (values as T[]).sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+}
+
+class ValidatedConversationCollectionRepository<T extends { id: string; conversationId: string; createdAt: string }>
+  extends IndexedConversationCollectionRepository<T> {
+  constructor(db: IDBDatabase, storeName: AssistantStoreName, private readonly schema: z.ZodType<T>) { super(db, storeName); }
+  override async put(value: T): Promise<void> { await super.put(this.schema.parse(value)); }
+}
+
+interface CursorPosition { indexKey: string; primaryKey: string }
 
 function encodeCursor(position: CursorPosition): string {
   return encodeURIComponent(JSON.stringify(position));
@@ -87,27 +103,34 @@ function decodeCursor(cursor: string): CursorPosition {
   return JSON.parse(decodeURIComponent(cursor)) as CursorPosition;
 }
 
-function comparePrimaryKeys(left: IDBValidKey, right: IDBValidKey): number {
-  if (typeof left === "number" && typeof right === "number") return left - right;
-  return String(left).localeCompare(String(right));
-}
-
-function cursorPage<T>(request: IDBRequest<IDBCursorWithValue | null>, limit: number, after?: CursorPosition): Promise<Page<T>> {
+function cursorValues<T>(request: IDBRequest<IDBCursorWithValue | null>, limit: number): Promise<T[]> {
   return new Promise((resolve, reject) => {
-    const items: T[] = [];
-    let lastIncludedKey: IDBValidKey | undefined;
+    const values: T[] = [];
     request.onerror = () => reject(request.error);
     request.onsuccess = () => {
       const cursor = request.result;
-      if (!cursor) return resolve({ items });
-      if (after && JSON.stringify(cursor.key) === JSON.stringify(after.indexKey) && comparePrimaryKeys(cursor.primaryKey, after.primaryKey) <= 0) {
-        cursor.continue();
-        return;
-      }
-      if (items.length >= limit) return resolve({ items, nextCursor: encodeCursor({ indexKey: lastIncludedKey!, primaryKey: (items.at(-1) as { id: IDBValidKey }).id }) });
-      items.push(cursor.value as T);
-      lastIncludedKey = cursor.key;
+      if (!cursor || values.length >= limit) { resolve(values); return; }
+      values.push(cursor.value as T);
+      if (values.length >= limit) { resolve(values); return; }
       cursor.continue();
+    };
+  });
+}
+
+function convertMessageCursor(request: IDBRequest<IDBCursorWithValue | null>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      try {
+        const cursor = request.result;
+        if (!cursor) { resolve(); return; }
+        const converted = { ...(cursor.value as ChatMessage), contextOrigin: "general" as const };
+        assertSafeForPersistence(converted);
+        cursor.update(converted);
+        cursor.continue();
+      } catch (error) {
+        reject(error);
+      }
     };
   });
 }
@@ -116,10 +139,13 @@ class IndexedConversationRepository extends IndexedEntityRepository<Conversation
   constructor(db: IDBDatabase) { super(db, "conversations"); }
   async list(options: PageOptions): Promise<Page<Conversation>> {
     const transaction = this.db.transaction(this.storeName, "readonly");
-    const index = transaction.objectStore(this.storeName).index("updatedAt");
     const after = options.cursor ? decodeCursor(options.cursor) : undefined;
-    const range = after ? IDBKeyRange.lowerBound(after.indexKey) : undefined;
-    return cursorPage(index.openCursor(range), options.limit, after);
+    const range = after ? IDBKeyRange.upperBound([after.indexKey, after.primaryKey], true) : undefined;
+    const values = await cursorValues<Conversation>(transaction.objectStore(this.storeName).index("updatedAtId").openCursor(range, "prev"), options.limit + 1);
+    await transactionDone(transaction);
+    const items = values.slice(0, options.limit);
+    const last = items.at(-1);
+    return { items, nextCursor: values.length > items.length && last ? encodeCursor({ indexKey: last.updatedAt, primaryKey: last.id }) : undefined };
   }
 }
 
@@ -127,11 +153,16 @@ class IndexedMessageRepository extends IndexedEntityRepository<ChatMessage> impl
   constructor(db: IDBDatabase) { super(db, "messages"); }
   async listByConversation(conversationId: string, options: PageOptions): Promise<Page<ChatMessage>> {
     const transaction = this.db.transaction(this.storeName, "readonly");
-    const index = transaction.objectStore(this.storeName).index("conversationCreatedAt");
     const after = options.cursor ? decodeCursor(options.cursor) : undefined;
-    const lower = after?.indexKey ?? [conversationId, ""];
-    const range = IDBKeyRange.bound(lower, [conversationId, "\uffff"], false, false);
-    return cursorPage(index.openCursor(range), options.limit, after);
+    const lower: IDBValidKey = [conversationId];
+    const upper: IDBValidKey = after ? [conversationId, after.indexKey, after.primaryKey] : [conversationId, []];
+    const range = IDBKeyRange.bound(lower, upper, false, Boolean(after));
+    const values = await cursorValues<ChatMessage>(transaction.objectStore(this.storeName).index("conversationCreatedAtId").openCursor(range, "prev"), options.limit + 1);
+    await transactionDone(transaction);
+    const selected = values.slice(0, options.limit);
+    const last = selected.at(-1);
+    const items = selected.sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+    return { items, nextCursor: values.length > selected.length && last ? encodeCursor({ indexKey: last.createdAt, primaryKey: last.id }) : undefined };
   }
 }
 
@@ -193,13 +224,13 @@ export async function createIndexedDbRepositories(options: IndexedDbRepositories
   const db = await openAssistantDatabase(options.factory, options.dbName);
   const conversations = new IndexedConversationRepository(db);
   const messages = new IndexedMessageRepository(db);
-  const events = new IndexedEntityRepository<ChatEvent>(db, "events");
-  const actions = new IndexedEntityRepository<ChatAction>(db, "actions");
+  const events = new IndexedConversationCollectionRepository<ChatEvent>(db, "events");
+  const actions = new IndexedConversationCollectionRepository<ChatAction>(db, "actions");
   const documents = new IndexedEntityRepository<PersistedDocumentMetadata>(db, "documents") as AssistantDocumentRepository;
   const sources = new IndexedEntityRepository<SourceReference>(db, "sources") as SourceRepository;
   const chunks = new IndexedEntityRepository<AssistantStoredRecord>(db, "chunks");
   const searchTerms = new IndexedEntityRepository<AssistantStoredRecord>(db, "searchTerms");
-  const snapshots = new ValidatedIndexedEntityRepository<ContextSnapshot>(db, "snapshots", contextSnapshotSchema) as ContextSnapshotRepository;
+  const snapshots = new ValidatedConversationCollectionRepository<ContextSnapshot>(db, "snapshots", contextSnapshotSchema) as ContextSnapshotRepository;
   const cache = new IndexedEntityRepository<AssistantStoredRecord>(db, "cache");
   const analysisVersions = new IndexedEntityRepository<AssistantStoredRecord>(db, "analysisVersions");
   const indexJobs = new IndexedEntityRepository<AssistantStoredRecord>(db, "indexJobs");
@@ -281,6 +312,28 @@ export async function createIndexedDbRepositories(options: IndexedDbRepositories
         try { transaction.abort(); } catch { /* already completed or aborted */ }
         await done.catch(() => undefined);
         throw safeStorageError(error);
+      }
+    },
+    async convertConversationToAnalysis(input: ConvertConversationInput): Promise<ConvertConversationResult | undefined> {
+      const transaction = db.transaction(["conversations", "messages", "events"], "readwrite");
+      const done = transactionDone(transaction);
+      try {
+        const authoritative = await requestResult(transaction.objectStore("conversations").get(input.conversationId)) as Conversation | undefined;
+        if (!authoritative || authoritative.type !== "general") {
+          await done;
+          return undefined;
+        }
+        const converted = buildConversationAnalysisConversion(authoritative, [], input.analysisId, input.analysisVersion, input.convertedAt);
+        assertSafeForPersistence(converted);
+        await convertMessageCursor(transaction.objectStore("messages").index("conversationId").openCursor(IDBKeyRange.only(input.conversationId)));
+        transaction.objectStore("conversations").put(converted.conversation);
+        transaction.objectStore("events").put(converted.event);
+        await done;
+        return { conversation: converted.conversation, event: converted.event };
+      } catch (error) {
+        try { transaction.abort(); } catch { /* already completed or aborted */ }
+        await done.catch(() => undefined);
+        throw error instanceof Error && error.name === "PrivacyBoundaryError" ? error : safeStorageError(error);
       }
     },
     async writeIngestionBlock(block: IngestionWriteBlock): Promise<void> {
@@ -370,6 +423,41 @@ export async function createIndexedDbRepositories(options: IndexedDbRepositories
         const records = await readDocumentCorpus(transaction);
         selectedConversationDocuments(records, input.conversationId, input.documentIds);
         deleteCorpusRecords(transaction, records, new Set(input.documentIds));
+        await done;
+      } catch (error) {
+        try { transaction.abort(); } catch { /* already completed or aborted */ }
+        await done.catch(() => undefined);
+        throw safeStorageError(error);
+      }
+    },
+    async deleteConversation(conversationId: string): Promise<void> {
+      const stores: AssistantStoreName[] = ["actions", "cache", "chunks", "cleanupJobs", "conversations", "documents", "events", "indexJobs", "messages", "searchTerms", "snapshots", "sources"];
+      const transaction = db.transaction(stores, "readwrite");
+      const done = transactionDone(transaction);
+      try {
+        const records = new Map<AssistantStoreName, AssistantStoredRecord[]>();
+        await Promise.all(stores.map(async (store) => {
+          records.set(store, await requestResult(transaction.objectStore(store).getAll()) as AssistantStoredRecord[]);
+        }));
+        const conversationDocumentIds = new Set((records.get("documents") ?? [])
+          .filter((record) => {
+            const scope = record.scope as { type?: string; conversationId?: string } | undefined;
+            return scope?.type === "conversation" && scope.conversationId === conversationId;
+          })
+          .map((record) => record.id));
+        const belongsToConversation = (record: AssistantStoredRecord): boolean => {
+          const scope = record.scope as { type?: string; conversationId?: string } | undefined;
+          const documentIds = record.documentIds as readonly string[] | undefined;
+          return record.conversationId === conversationId
+            || (scope?.type === "conversation" && scope.conversationId === conversationId)
+            || (typeof record.documentId === "string" && conversationDocumentIds.has(record.documentId))
+            || Boolean(documentIds?.some((id) => conversationDocumentIds.has(id)));
+        };
+        for (const store of stores) {
+          for (const record of records.get(store) ?? []) {
+            if ((store === "conversations" && record.id === conversationId) || (store !== "conversations" && belongsToConversation(record))) transaction.objectStore(store).delete(record.id);
+          }
+        }
         await done;
       } catch (error) {
         try { transaction.abort(); } catch { /* already completed or aborted */ }

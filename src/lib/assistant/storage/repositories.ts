@@ -7,10 +7,11 @@ export interface Page<T> { items: T[]; nextCursor?: string }
 export interface EntityRepository<T extends { id: string }> { get(id: string): Promise<T | undefined>; put(value: T): Promise<void>; delete(id: string): Promise<void> }
 export interface ConversationRepository extends EntityRepository<Conversation> { list(options: PageOptions): Promise<Page<Conversation>> }
 export interface MessageRepository extends EntityRepository<ChatMessage> { listByConversation(conversationId: string, options: PageOptions): Promise<Page<ChatMessage>> }
-export interface AssistantDocumentRepository extends EntityRepository<PersistedDocumentMetadata> {}
+export interface ConversationCollectionRepository<T extends { id: string; conversationId: string }> extends EntityRepository<T> { listByConversation(conversationId: string): Promise<T[]> }
+export interface AssistantDocumentRepository extends CollectionRepository<PersistedDocumentMetadata> {}
 export interface SourceRepository extends EntityRepository<SourceReference> {}
 export interface ContextSnapshot { id: string; conversationId: string; analysisId?: string; summary: string; summarizedMessageIds: readonly string[]; decisions: readonly string[]; figures: readonly number[]; sourceIds: readonly string[]; actionIds: readonly string[]; personIds: readonly string[]; analysisVersion: string; actualStrategy: ContextStrategy; actualResponseMode: ResponseMode; createdAt: string }
-export interface ContextSnapshotRepository extends EntityRepository<ContextSnapshot> {}
+export interface ContextSnapshotRepository extends ConversationCollectionRepository<ContextSnapshot> {}
 export interface CollectionRepository<T extends { id: string }> extends EntityRepository<T> { listAll(): Promise<T[]> }
 export interface ModelProfileRepository extends CollectionRepository<ModelProfile> {}
 export interface AssistantSettingsRepository extends EntityRepository<AssistantSettings> {}
@@ -23,6 +24,18 @@ export interface ConversationWriteBlock {
   messages: readonly ChatMessage[];
   sources: readonly SourceReference[];
   events?: readonly ChatEvent[];
+}
+
+export interface ConvertConversationInput {
+  readonly conversationId: string;
+  readonly analysisId: string;
+  readonly analysisVersion: string;
+  readonly convertedAt: string;
+}
+
+export interface ConvertConversationResult {
+  readonly conversation: Conversation;
+  readonly event: ChatEvent;
 }
 
 export interface IngestionWriteBlock {
@@ -64,8 +77,8 @@ export interface ModelConfigurationWrite {
 export interface AssistantRepositories {
   conversations: ConversationRepository;
   messages: MessageRepository;
-  events: EntityRepository<ChatEvent>;
-  actions: EntityRepository<ChatAction>;
+  events: ConversationCollectionRepository<ChatEvent>;
+  actions: ConversationCollectionRepository<ChatAction>;
   documents: AssistantDocumentRepository;
   sources: SourceRepository;
   chunks: EntityRepository<AssistantStoredRecord>;
@@ -73,17 +86,19 @@ export interface AssistantRepositories {
   snapshots: ContextSnapshotRepository;
   cache: EntityRepository<AssistantStoredRecord>;
   analysisVersions: EntityRepository<AssistantStoredRecord>;
-  indexJobs: EntityRepository<AssistantStoredRecord>;
+  indexJobs: CollectionRepository<AssistantStoredRecord>;
   modelProfiles: ModelProfileRepository;
   assistantSettings: AssistantSettingsRepository;
   cleanupJobs: AssistantCleanupRepository;
   writeConversationBlock(block: ConversationWriteBlock): Promise<void>;
+  convertConversationToAnalysis(input: ConvertConversationInput): Promise<ConvertConversationResult | undefined>;
   writeIngestionBlock(block: IngestionWriteBlock): Promise<void>;
   beginAnalysisIngestion(input: BeginAnalysisIngestionInput): Promise<void>;
   replaceAnalysisCorpus(input: ReplaceAnalysisCorpusInput): Promise<boolean>;
   copyDocumentCorpus(input: DocumentCorpusSelection): Promise<readonly DocumentIdMapping[]>;
   transferDocumentCorpus(input: DocumentCorpusSelection): Promise<readonly DocumentIdMapping[]>;
   deleteDocumentCorpus(input: DeleteDocumentCorpusInput): Promise<void>;
+  deleteConversation(conversationId: string): Promise<void>;
   clearAssistantContent(): Promise<void>;
   writeModelConfiguration(input: ModelConfigurationWrite): Promise<void>;
   buildSearchIndex(scope: DocumentScope): Promise<SearchIndex>;

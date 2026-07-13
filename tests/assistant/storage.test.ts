@@ -33,12 +33,12 @@ describe("assistant IndexedDB repositories", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  test("creates the complete idempotent version 2 schema", async () => {
+  test("creates the complete idempotent version 3 schema", async () => {
     const db = await openAssistantDatabase(factory, "schema-test");
     expect(Array.from(db.objectStoreNames)).toEqual([...ASSISTANT_STORES].sort());
     db.close();
     const reloaded = await openAssistantDatabase(factory, "schema-test");
-    expect(reloaded.version).toBe(2);
+    expect(reloaded.version).toBe(3);
     expect(Array.from(reloaded.objectStoreNames)).toEqual([...ASSISTANT_STORES].sort());
     reloaded.close();
   });
@@ -64,10 +64,10 @@ describe("assistant IndexedDB repositories", () => {
     await repositories.messages.put(message("m3", "c1", "2026-07-13T10:03:00.000Z"));
 
     const first = await repositories.messages.listByConversation("c1", { limit: 2 });
-    expect(first.items.map((item) => item.id)).toEqual(["m1", "m2"]);
+    expect(first.items.map((item) => item.id)).toEqual(["m2", "m3"]);
     expect(first.nextCursor).toBeTruthy();
     const second = await repositories.messages.listByConversation("c1", { limit: 2, cursor: first.nextCursor });
-    expect(second.items.map((item) => item.id)).toEqual(["m3"]);
+    expect(second.items.map((item) => item.id)).toEqual(["m1"]);
     expect(second.nextCursor).toBeUndefined();
     repositories.close();
   });
@@ -81,7 +81,7 @@ describe("assistant IndexedDB repositories", () => {
     const first = await repositories.messages.listByConversation("c1", { limit: 1 });
     const second = await repositories.messages.listByConversation("c1", { limit: 1, cursor: first.nextCursor });
     const third = await repositories.messages.listByConversation("c1", { limit: 1, cursor: second.nextCursor });
-    expect([...first.items, ...second.items, ...third.items].map((item) => item.id)).toEqual(["m1", "m2", "m3"]);
+    expect([...first.items, ...second.items, ...third.items].map((item) => item.id)).toEqual(["m3", "m2", "m1"]);
     repositories.close();
   });
 
@@ -89,7 +89,7 @@ describe("assistant IndexedDB repositories", () => {
     const repositories = await createIndexedDbRepositories({ factory, dbName: "surface-test" });
     expect(Object.keys(repositories).sort()).toEqual([
       "actions", "analysisVersions", "assistantSettings", "cache", "chunks", "cleanupJobs", "conversations", "documents", "events",
-      "beginAnalysisIngestion", "buildSearchIndex", "clearAssistantContent", "copyDocumentCorpus", "deleteDocumentCorpus", "indexJobs", "messages", "modelProfiles", "replaceAnalysisCorpus", "searchTerms", "snapshots", "sources", "transferDocumentCorpus", "writeConversationBlock", "writeIngestionBlock", "writeModelConfiguration", "close",
+      "beginAnalysisIngestion", "buildSearchIndex", "clearAssistantContent", "convertConversationToAnalysis", "copyDocumentCorpus", "deleteConversation", "deleteDocumentCorpus", "indexJobs", "messages", "modelProfiles", "replaceAnalysisCorpus", "searchTerms", "snapshots", "sources", "transferDocumentCorpus", "writeConversationBlock", "writeIngestionBlock", "writeModelConfiguration", "close",
     ].sort());
     repositories.close();
   });

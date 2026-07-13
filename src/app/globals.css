@@ -43,6 +43,29 @@ body {
   font-family: var(--font-body), "Segoe UI", sans-serif;
 }
 
+[data-testid="assistant-shell"] {
+  max-width: 100%;
+  isolation: isolate;
+}
+
+.assistant-markdown {
+  overflow-wrap: anywhere;
+}
+
+.assistant-markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.assistant-markdown th,
+.assistant-markdown td {
+  border: 1px solid #e2e8f0;
+  padding: 0.5rem;
+  text-align: start;
+}
+
 [data-slot="table-viewport"] thead {
   background-color: #f1f5f9;
 }
