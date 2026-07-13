@@ -1,7 +1,7 @@
 "use client";
 
 import { Copy, Search, Table2 } from "lucide-react";
-import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { AiExplanationPanel } from "@/components/ai/AiExplanationPanel";
 import { useAppState, type DashboardFilters, EMPTY_FILTERS, matchesQuery } from "@/components/app/AppState";
 import { Badge } from "@/components/common/Badge";
@@ -19,6 +19,8 @@ import { describeConceptCause, describePersonCause, type ProbableCause } from "@
 import { cn } from "@/lib/utils/classNames";
 import { displayText } from "@/lib/ui/displayText";
 import { selectPersonProfileFromRow } from "@/lib/assistant/tools/sharedSelectors";
+import { useOptionalAssistant } from "@/components/assistant/AssistantProvider";
+import { PersonDetail } from "@/components/tables/PersonDetail";
 
 interface TableHeader {
   readonly key: string;
@@ -483,6 +485,9 @@ function DetailModal({
   unmappedConcepts,
   onClose,
 }: Readonly<{ state: DetailModalState; tolerance: number; concepts: readonly ConceptComparisonRow[]; unmappedConcepts: readonly UnmappedConceptRow[]; onClose: () => void }>) {
+  const assistant = useOptionalAssistant();
+  const { setView } = useAppState();
+  const [continuing, setContinuing] = useState(false);
   const title = state.kind === "person" ? "Detalle persona" : state.kind === "concept" ? "Detalle concepto" : "Detalle concepto no incluido";
   const cause =
     state.kind === "person"
@@ -518,6 +523,10 @@ function DetailModal({
         </div>
       }
     >
+        {state.kind === "person" && assistant ? <PersonDetail row={state.row} ready={assistant.ready} busy={continuing} onContinue={async (personId) => {
+          setContinuing(true);
+          try { await assistant.continuePersonInAssistant(personId); onClose(); setView("asistente"); } catch { /* provider exposes the sanitized failure */ } finally { setContinuing(false); }
+        }} /> : null}
         <div className="grid gap-4 md:grid-cols-4">
           {state.kind === "person" ? (
             <>
@@ -804,12 +813,19 @@ function viewSubtitle(mode: Extract<AppView, "personas" | "conceptos" | "agrupac
 }
 
 export function TablesView({ mode }: Readonly<{ mode: Extract<AppView, "personas" | "conceptos" | "agrupaciones"> }>) {
-  const { result, filters, setFilters } = useAppState();
+  const { result, filters, setFilters, assistantNavigationIntent, consumeAssistantNavigationIntent } = useAppState();
   const density: TableDensity = "compact";
   const [modal, setModal] = useState<DetailModalState | undefined>();
   const people = result?.people ?? [];
   const centers = unique(people.map((item) => item.workplace));
   const groups = unique(people.flatMap((item) => [item.position, item.category]));
+
+  useEffect(() => {
+    if (mode !== "personas" || assistantNavigationIntent?.type !== "open_person" || !result) return;
+    const row = result.people.find((item) => item.employeeNumber === assistantNavigationIntent.personId);
+    if (row) setModal({ kind: "person", row });
+    consumeAssistantNavigationIntent();
+  }, [assistantNavigationIntent, consumeAssistantNavigationIntent, mode, result]);
 
   if (!result) {
     return (

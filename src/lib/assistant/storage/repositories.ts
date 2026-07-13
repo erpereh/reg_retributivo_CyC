@@ -1,4 +1,4 @@
-import type { AssistantSettings, ChatAction, ChatEvent, ChatMessage, Conversation, ModelProfile, PersistedDocumentMetadata, SourceReference } from "@/lib/assistant/domain";
+import type { AnalysisVersionSnapshot, AssistantSettings, ChatAction, ChatEvent, ChatMessage, Conversation, ModelProfile, PersistedDocumentMetadata, SourceReference } from "@/lib/assistant/domain";
 import type { ContextStrategy, DocumentScope, ResponseMode } from "@/lib/assistant/domain";
 import type { SearchFacets, SearchIndex } from "@/lib/assistant/search/directIndex";
 
@@ -15,8 +15,9 @@ export interface ContextSnapshotRepository extends ConversationCollectionReposit
 export interface CollectionRepository<T extends { id: string }> extends EntityRepository<T> { listAll(): Promise<T[]> }
 export interface ModelProfileRepository extends CollectionRepository<ModelProfile> {}
 export interface AssistantSettingsRepository extends EntityRepository<AssistantSettings> {}
-export interface CleanupJob { id: string; scope: DocumentScope; status: "pending" | "running" | "completed" | "failed"; documentIds: readonly string[]; attempts: number; createdAt: string; updatedAt: string }
-export interface AssistantCleanupRepository extends EntityRepository<CleanupJob> {}
+export type CleanupPolicy = "delete_all" | "preserve_conversations";
+export interface CleanupJob { id: string; analysisId: string; scope: DocumentScope; policy: CleanupPolicy; stage: "pending" | "assistant_cleaned" | "functional_deleted"; status: "pending" | "running" | "completed" | "failed"; documentIds: readonly string[]; attempts: number; lastError?: string; createdAt: string; updatedAt: string }
+export interface AssistantCleanupRepository extends EntityRepository<CleanupJob> { listByStatus(statuses: readonly CleanupJob["status"][]): Promise<CleanupJob[]> }
 export interface AssistantStoredRecord extends Record<string, unknown> { id: string }
 
 export interface ConversationWriteBlock {
@@ -74,6 +75,21 @@ export interface ModelConfigurationWrite {
   readonly settings: AssistantSettings;
 }
 
+export interface ResolveChatActionInput {
+  readonly expected: ChatAction;
+  readonly status: "accepted" | "rejected" | "failed";
+  readonly resolvedAt: string;
+}
+export interface ResolveChatActionResult {
+  readonly action: ChatAction;
+  readonly conversation?: Conversation;
+  readonly createdConversation?: Conversation;
+  readonly documentMappings?: readonly DocumentIdMapping[];
+}
+export interface SyncAnalysisVersionInput { readonly snapshot: AnalysisVersionSnapshot; readonly analysisId: string; readonly updatedAt: string }
+export interface SyncAnalysisVersionResult { readonly changed: boolean; readonly updatedConversationIds: readonly string[] }
+export interface ContinueAnalysisPersonInput { readonly analysisId: string; readonly analysisVersion: string; readonly personId: string; readonly modelProfileId: string; readonly updatedAt: string }
+
 export interface AssistantRepositories {
   conversations: ConversationRepository;
   messages: MessageRepository;
@@ -85,12 +101,16 @@ export interface AssistantRepositories {
   searchTerms: EntityRepository<AssistantStoredRecord>;
   snapshots: ContextSnapshotRepository;
   cache: EntityRepository<AssistantStoredRecord>;
-  analysisVersions: EntityRepository<AssistantStoredRecord>;
+  analysisVersions: EntityRepository<AssistantStoredRecord | AnalysisVersionSnapshot>;
   indexJobs: CollectionRepository<AssistantStoredRecord>;
   modelProfiles: ModelProfileRepository;
   assistantSettings: AssistantSettingsRepository;
   cleanupJobs: AssistantCleanupRepository;
   writeConversationBlock(block: ConversationWriteBlock): Promise<void>;
+  updateActiveConversation(conversationId: string, patch: Partial<Conversation>, updatedAt: string): Promise<Conversation | undefined>;
+  continueAnalysisPerson(input: ContinueAnalysisPersonInput): Promise<Conversation | undefined>;
+  resolveChatAction(input: ResolveChatActionInput): Promise<ResolveChatActionResult>;
+  syncAnalysisVersion(input: SyncAnalysisVersionInput): Promise<SyncAnalysisVersionResult>;
   convertConversationToAnalysis(input: ConvertConversationInput): Promise<ConvertConversationResult | undefined>;
   writeIngestionBlock(block: IngestionWriteBlock): Promise<void>;
   beginAnalysisIngestion(input: BeginAnalysisIngestionInput): Promise<void>;
@@ -100,6 +120,7 @@ export interface AssistantRepositories {
   deleteDocumentCorpus(input: DeleteDocumentCorpusInput): Promise<void>;
   deleteConversation(conversationId: string): Promise<void>;
   clearAssistantContent(): Promise<void>;
+  cleanupAnalysis(analysisId: string, policy: CleanupPolicy): Promise<void>;
   writeModelConfiguration(input: ModelConfigurationWrite): Promise<void>;
   buildSearchIndex(scope: DocumentScope): Promise<SearchIndex>;
   close(): void;

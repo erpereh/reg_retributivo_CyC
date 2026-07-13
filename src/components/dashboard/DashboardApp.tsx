@@ -44,6 +44,6 @@ export function DashboardApp() {
 }
 
 function AssistantAppScope() {
-  const { activeAnalysis } = useAppState();
-  return <AssistantProvider activeAnalysis={activeAnalysis}><AppShell><ActiveView /></AppShell></AssistantProvider>;
+  const { activeAnalysis, navigateAssistantIntent } = useAppState();
+  return <AssistantProvider activeAnalysis={activeAnalysis} onNavigate={navigateAssistantIntent}><AppShell><ActiveView /></AppShell></AssistantProvider>;
 }

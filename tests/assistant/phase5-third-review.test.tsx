@@ -213,7 +213,7 @@ describe("Phase 5 third-review regressions", () => {
     persisted.close();
   });
 
-  test("send completion preserves concurrent rename, archive and preference mutations", async () => {
+  test("send completion preserves rename and archive while rejecting preferences queued after archival", async () => {
     const factory = new IDBFactory();
     const dbName = "phase5-authoritative-mutation";
     await seed(factory, dbName, [conversation("conversation-a")]);
@@ -230,11 +230,11 @@ describe("Phase 5 third-review regressions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Enviar carrera" }));
     await startedPromise;
     fireEvent.click(screen.getByRole("button", { name: "Mutar conversación" }));
-    await waitFor(() => expect(screen.getByTestId("mutation-conversation")).toHaveTextContent('"contextStrategy":"optimized"'));
+    await waitFor(() => expect(screen.getByTestId("mutation-conversation")).toHaveTextContent('"status":"archived"'));
     release();
     await waitFor(() => expect(screen.getByTestId("mutation-streaming")).toHaveTextContent("false"));
     const persisted = await createIndexedDbRepositories({ factory, dbName });
-    expect(await persisted.conversations.get("conversation-a")).toMatchObject({ title: "Renombrada", status: "archived", responseMode: "flexible", contextStrategy: "optimized" });
+    expect(await persisted.conversations.get("conversation-a")).toMatchObject({ title: "Renombrada", status: "archived", responseMode: "strict", contextStrategy: "automatic" });
     persisted.close();
   });
 

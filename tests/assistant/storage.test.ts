@@ -33,12 +33,12 @@ describe("assistant IndexedDB repositories", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  test("creates the complete idempotent version 3 schema", async () => {
+  test("creates the complete idempotent version 4 schema", async () => {
     const db = await openAssistantDatabase(factory, "schema-test");
     expect(Array.from(db.objectStoreNames)).toEqual([...ASSISTANT_STORES].sort());
     db.close();
     const reloaded = await openAssistantDatabase(factory, "schema-test");
-    expect(reloaded.version).toBe(3);
+    expect(reloaded.version).toBe(4);
     expect(Array.from(reloaded.objectStoreNames)).toEqual([...ASSISTANT_STORES].sort());
     reloaded.close();
   });
@@ -89,7 +89,7 @@ describe("assistant IndexedDB repositories", () => {
     const repositories = await createIndexedDbRepositories({ factory, dbName: "surface-test" });
     expect(Object.keys(repositories).sort()).toEqual([
       "actions", "analysisVersions", "assistantSettings", "cache", "chunks", "cleanupJobs", "conversations", "documents", "events",
-      "beginAnalysisIngestion", "buildSearchIndex", "clearAssistantContent", "convertConversationToAnalysis", "copyDocumentCorpus", "deleteConversation", "deleteDocumentCorpus", "indexJobs", "messages", "modelProfiles", "replaceAnalysisCorpus", "searchTerms", "snapshots", "sources", "transferDocumentCorpus", "writeConversationBlock", "writeIngestionBlock", "writeModelConfiguration", "close",
+      "beginAnalysisIngestion", "buildSearchIndex", "cleanupAnalysis", "clearAssistantContent", "continueAnalysisPerson", "convertConversationToAnalysis", "copyDocumentCorpus", "deleteConversation", "deleteDocumentCorpus", "indexJobs", "messages", "modelProfiles", "replaceAnalysisCorpus", "resolveChatAction", "searchTerms", "snapshots", "sources", "syncAnalysisVersion", "transferDocumentCorpus", "updateActiveConversation", "writeConversationBlock", "writeIngestionBlock", "writeModelConfiguration", "close",
     ].sort());
     repositories.close();
   });

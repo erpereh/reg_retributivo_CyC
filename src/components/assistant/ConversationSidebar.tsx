@@ -15,6 +15,7 @@ export function ConversationSidebar({ conversations, selectedId, hasMore, transi
   onArchive(): void;
   onDelete(): void;
 }>) {
+  const selectedReadOnly = conversations.find((conversation) => conversation.id === selectedId)?.status !== "active";
   return (
     <nav aria-label="Conversaciones" className="flex h-full min-h-0 flex-col bg-white">
       <div className="border-b border-line p-3">
@@ -33,8 +34,8 @@ export function ConversationSidebar({ conversations, selectedId, hasMore, transi
       {hasMore ? <button type="button" className="mx-3 mb-2 min-h-11 rounded-xl text-sm font-bold text-primary hover:bg-blue-50" onClick={onLoadMore}>Cargar más conversaciones</button> : null}
       {selectedId ? (
         <div className="grid grid-cols-3 gap-1 border-t border-line p-2">
-          <button type="button" disabled={transitionPending} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl text-muted hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40" aria-label="Renombrar conversación" onClick={() => { const value = window.prompt("Nuevo nombre de la conversación"); if (value?.trim()) onRename(value); }}><Pencil aria-hidden="true" className="size-4" /></button>
-          <button type="button" disabled={transitionPending} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl text-muted hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40" aria-label="Archivar conversación" onClick={onArchive}><Archive aria-hidden="true" className="size-4" /></button>
+          <button type="button" disabled={selectedReadOnly || transitionPending} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl text-muted hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40" aria-label="Renombrar conversación" onClick={() => { const value = window.prompt("Nuevo nombre de la conversación"); if (value?.trim()) onRename(value); }}><Pencil aria-hidden="true" className="size-4" /></button>
+          <button type="button" disabled={selectedReadOnly || transitionPending} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl text-muted hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40" aria-label="Archivar conversación" onClick={onArchive}><Archive aria-hidden="true" className="size-4" /></button>
           <button type="button" disabled={transitionPending} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl text-danger hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40" aria-label="Eliminar conversación" onClick={onDelete}><Trash2 aria-hidden="true" className="size-4" /></button>
         </div>
       ) : null}

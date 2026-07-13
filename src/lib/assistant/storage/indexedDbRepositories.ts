@@ -1,15 +1,16 @@
-import { convertConversationToAnalysis as buildConversationAnalysisConversion, type AssistantSettings, type ChatAction, type ChatEvent, type ChatMessage, type Conversation, type ModelProfile, type PersistedDocumentMetadata, type SourceReference } from "@/lib/assistant/domain";
+import { convertConversationToAnalysis as buildConversationAnalysisConversion, type AnalysisVersionSnapshot, type AssistantSettings, type ChatAction, type ChatEvent, type ChatMessage, type Conversation, type ModelProfile, type PersistedDocumentMetadata, type SourceReference } from "@/lib/assistant/domain";
 import { openAssistantDatabase, type AssistantStoreName } from "@/lib/assistant/storage/database";
 import { assertSafeForPersistence } from "@/lib/assistant/privacy/assertions";
 import { DirectSearchIndex, type SearchFacets, type SearchIndexRecord } from "@/lib/assistant/search/directIndex";
 import type { DocumentScope } from "@/lib/assistant/domain";
-import { cleanupJobSchema, contextSnapshotSchema } from "@/lib/assistant/schemas";
+import { chatActionSchema, cleanupJobSchema, contextSnapshotSchema } from "@/lib/assistant/schemas";
 import type { z } from "zod";
 import type {
   AssistantCleanupRepository, AssistantDocumentRepository, AssistantRepositories, AssistantSettingsRepository, AssistantStoredRecord, BeginAnalysisIngestionInput, CleanupJob, ContextSnapshot,
-  ContextSnapshotRepository, ConversationRepository, ConversationWriteBlock, ConvertConversationInput, ConvertConversationResult, DeleteDocumentCorpusInput, DocumentCorpusSelection,
+  ContextSnapshotRepository, ContinueAnalysisPersonInput, ConversationRepository, ConversationWriteBlock, ConvertConversationInput, ConvertConversationResult, DeleteDocumentCorpusInput, DocumentCorpusSelection,
   ConversationCollectionRepository, DocumentIdMapping, DocumentIndexJob, EntityRepository, IngestionWriteBlock, MessageRepository,
-  ModelConfigurationWrite, ModelProfileRepository, Page, PageOptions, ReplaceAnalysisCorpusInput, SourceRepository,
+  ModelConfigurationWrite, ModelProfileRepository, Page, PageOptions, ReplaceAnalysisCorpusInput, ResolveChatActionInput, ResolveChatActionResult, SourceRepository, SyncAnalysisVersionInput, SyncAnalysisVersionResult,
+  CleanupPolicy,
 } from "@/lib/assistant/storage/repositories";
 
 export class AssistantStorageError extends Error {
@@ -75,6 +76,15 @@ class IndexedEntityRepository<T extends { id: string }> implements EntityReposit
 class ValidatedIndexedEntityRepository<T extends { id: string }> extends IndexedEntityRepository<T> {
   constructor(db: IDBDatabase, storeName: AssistantStoreName, private readonly schema: z.ZodType<T>) { super(db, storeName); }
   override async put(value: T): Promise<void> { await super.put(this.schema.parse(value)); }
+}
+
+class IndexedCleanupRepository extends ValidatedIndexedEntityRepository<CleanupJob> implements AssistantCleanupRepository {
+  constructor(db: IDBDatabase) { super(db, "cleanupJobs", cleanupJobSchema); }
+  async listByStatus(statuses: readonly CleanupJob["status"][]): Promise<CleanupJob[]> {
+    const all = await this.listAll();
+    const allowed = new Set(statuses);
+    return all.filter((job) => allowed.has(job.status)).sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
+  }
 }
 
 class IndexedConversationCollectionRepository<T extends { id: string; conversationId: string; createdAt: string }>
@@ -189,6 +199,7 @@ interface AnalysisIngestionGeneration extends AssistantStoredRecord {
 function analysisIngestionGenerationId(analysisId: string): string {
   return `analysis-ingestion-${analysisId}`;
 }
+function analysisCleanupTombstoneId(analysisId: string): string { return `analysis-cleaned-${analysisId}`; }
 
 async function readDocumentCorpus(transaction: IDBTransaction): Promise<DocumentCorpusRecords> {
   const [documents, chunks, searchTerms, indexJobs] = await Promise.all([
@@ -220,6 +231,10 @@ function deleteCorpusRecords(transaction: IDBTransaction, records: DocumentCorpu
   records.indexJobs.filter((record) => documentIds.has(record.documentId)).forEach((record) => transaction.objectStore("indexJobs").delete(record.id));
 }
 
+function samePersistedAction(left: ChatAction, right: ChatAction): boolean {
+  return JSON.stringify(chatActionSchema.parse(left)) === JSON.stringify(chatActionSchema.parse(right));
+}
+
 export async function createIndexedDbRepositories(options: IndexedDbRepositoriesOptions = {}): Promise<AssistantRepositories> {
   const db = await openAssistantDatabase(options.factory, options.dbName);
   const conversations = new IndexedConversationRepository(db);
@@ -232,11 +247,11 @@ export async function createIndexedDbRepositories(options: IndexedDbRepositories
   const searchTerms = new IndexedEntityRepository<AssistantStoredRecord>(db, "searchTerms");
   const snapshots = new ValidatedConversationCollectionRepository<ContextSnapshot>(db, "snapshots", contextSnapshotSchema) as ContextSnapshotRepository;
   const cache = new IndexedEntityRepository<AssistantStoredRecord>(db, "cache");
-  const analysisVersions = new IndexedEntityRepository<AssistantStoredRecord>(db, "analysisVersions");
+  const analysisVersions = new IndexedEntityRepository<AssistantStoredRecord | AnalysisVersionSnapshot>(db, "analysisVersions");
   const indexJobs = new IndexedEntityRepository<AssistantStoredRecord>(db, "indexJobs");
   const modelProfiles = new IndexedEntityRepository<ModelProfile>(db, "modelProfiles") as ModelProfileRepository;
   const assistantSettings = new IndexedEntityRepository<AssistantSettings>(db, "assistantSettings") as AssistantSettingsRepository;
-  const cleanupJobs = new ValidatedIndexedEntityRepository<CleanupJob>(db, "cleanupJobs", cleanupJobSchema) as AssistantCleanupRepository;
+  const cleanupJobs = new IndexedCleanupRepository(db);
 
   async function mutateDocumentCorpus(input: DocumentCorpusSelection, removeSource: boolean): Promise<readonly DocumentIdMapping[]> {
     const transaction = db.transaction(["documents", "chunks", "searchTerms", "indexJobs"], "readwrite");
@@ -300,10 +315,18 @@ export async function createIndexedDbRepositories(options: IndexedDbRepositories
     },
     async writeConversationBlock(block: ConversationWriteBlock): Promise<void> {
       assertSafeForPersistence(block);
-      const transaction = db.transaction(["conversations", "messages", "sources", "events"], "readwrite");
+      const transaction = db.transaction(["conversations", "messages", "sources", "events", "analysisVersions"], "readwrite");
       const done = transactionDone(transaction);
       try {
-        transaction.objectStore("conversations").put(block.conversation);
+        const authoritative = await requestResult(transaction.objectStore("conversations").get(block.conversation.id)) as Conversation | undefined;
+        if (authoritative?.status !== undefined && authoritative.status !== "active") throw new Error("La conversación no está activa.");
+        if (!authoritative && block.conversation.type === "analysis") {
+          const analysisId = block.conversation.analysisId;
+          if (!analysisId) throw new Error("El análisis no está disponible.");
+          const tombstone = await requestResult(transaction.objectStore("analysisVersions").get(analysisCleanupTombstoneId(analysisId)));
+          if (tombstone) throw new Error("El análisis ya no está disponible.");
+        }
+        transaction.objectStore("conversations").put(authoritative ? { ...authoritative, updatedAt: block.conversation.updatedAt } : block.conversation);
         for (const message of block.messages) transaction.objectStore("messages").put(message);
         for (const source of block.sources) transaction.objectStore("sources").put(source);
         for (const event of block.events ?? []) transaction.objectStore("events").put(event);
@@ -314,10 +337,135 @@ export async function createIndexedDbRepositories(options: IndexedDbRepositories
         throw safeStorageError(error);
       }
     },
-    async convertConversationToAnalysis(input: ConvertConversationInput): Promise<ConvertConversationResult | undefined> {
-      const transaction = db.transaction(["conversations", "messages", "events"], "readwrite");
+    async updateActiveConversation(conversationId: string, patch: Partial<Conversation>, updatedAt: string): Promise<Conversation | undefined> {
+      const transaction = db.transaction("conversations", "readwrite");
       const done = transactionDone(transaction);
       try {
+        const authoritative = await requestResult(transaction.objectStore("conversations").get(conversationId)) as Conversation | undefined;
+        if (!authoritative || authoritative.status !== "active") { await done; return undefined; }
+        const updated = { ...authoritative, ...patch, id: authoritative.id, status: patch.status ?? authoritative.status, updatedAt };
+        assertSafeForPersistence(updated);
+        transaction.objectStore("conversations").put(updated);
+        await done;
+        return updated;
+      } catch (error) {
+        try { transaction.abort(); } catch { /* completed */ }
+        await done.catch(() => undefined);
+        throw safeStorageError(error);
+      }
+    },
+    async continueAnalysisPerson(input: ContinueAnalysisPersonInput): Promise<Conversation | undefined> {
+      const transaction = db.transaction(["conversations", "analysisVersions"], "readwrite");
+      const done = transactionDone(transaction);
+      try {
+        const tombstone = await requestResult(transaction.objectStore("analysisVersions").get(analysisCleanupTombstoneId(input.analysisId)));
+        if (tombstone) { await done; return undefined; }
+        const all = await requestResult(transaction.objectStore("conversations").getAll()) as Conversation[];
+        const existing = all.find((item) => item.type === "analysis" && item.analysisId === input.analysisId && item.status === "active");
+        const base: Conversation = existing ?? { id: `analysis-conversation-${input.analysisId}-${crypto.randomUUID()}`, type: "analysis", analysisId: input.analysisId, title: `Análisis ${input.analysisId}`, associatedPersonIds: [], modelProfileId: input.modelProfileId, responseMode: "strict", contextStrategy: "automatic", analysisVersion: input.analysisVersion, status: "active", createdAt: input.updatedAt, updatedAt: input.updatedAt };
+        const selected = { ...base, analysisVersion: input.analysisVersion, associatedPersonIds: [...new Set([...base.associatedPersonIds, input.personId])], primaryPersonId: input.personId, updatedAt: input.updatedAt };
+        assertSafeForPersistence(selected); transaction.objectStore("conversations").put(selected);
+        await done; return selected;
+      } catch (error) {
+        try { transaction.abort(); } catch { /* completed */ }
+        await done.catch(() => undefined); throw safeStorageError(error);
+      }
+    },
+    async resolveChatAction(input: ResolveChatActionInput): Promise<ResolveChatActionResult> {
+      const stores: AssistantStoreName[] = ["actions", "events", "conversations", "messages", "sources", "documents", "chunks", "searchTerms", "indexJobs"];
+      const transaction = db.transaction(stores, "readwrite");
+      const done = transactionDone(transaction);
+      try {
+        const expected = chatActionSchema.parse(input.expected);
+        const stored = await requestResult(transaction.objectStore("actions").get(expected.id)) as ChatAction | undefined;
+        if (!stored || stored.status !== "pending" || expected.status !== "pending" || !samePersistedAction(stored, expected)) throw new Error("La identidad de la propuesta no coincide.");
+        const conversation = await requestResult(transaction.objectStore("conversations").get(stored.conversationId)) as Conversation | undefined;
+        const message = await requestResult(transaction.objectStore("messages").get(stored.messageId)) as ChatMessage | undefined;
+
+        let updatedConversation: Conversation | undefined;
+        let createdConversation: Conversation | undefined;
+        let documentMappings: readonly DocumentIdMapping[] | undefined;
+        if (input.status === "accepted") {
+          if (!conversation || conversation.status !== "active" || message?.conversationId !== conversation.id) throw new Error("La acción no está disponible.");
+          const payload = stored.action;
+          if (payload.type === "show_sources") {
+            for (const sourceId of payload.sourceIds) {
+              const source = await requestResult(transaction.objectStore("sources").get(sourceId)) as SourceReference | undefined;
+              if (!source || source.conversationId !== conversation.id || source.availability !== "available") throw new Error("La fuente no está disponible.");
+            }
+          } else if (payload.type === "add_person" || payload.type === "set_primary_person") {
+            const associatedPersonIds = [...new Set([...conversation.associatedPersonIds, payload.personId])];
+            updatedConversation = { ...conversation, associatedPersonIds, primaryPersonId: payload.type === "set_primary_person" ? payload.personId : conversation.primaryPersonId ?? payload.personId, updatedAt: input.resolvedAt };
+            transaction.objectStore("conversations").put(updatedConversation);
+          } else if (payload.type === "remove_person") {
+            const associatedPersonIds = conversation.associatedPersonIds.filter((id) => id !== payload.personId);
+            updatedConversation = { ...conversation, associatedPersonIds, primaryPersonId: conversation.primaryPersonId === payload.personId ? associatedPersonIds[0] : conversation.primaryPersonId, updatedAt: input.resolvedAt };
+            transaction.objectStore("conversations").put(updatedConversation);
+          } else if (payload.type === "create_conversation") {
+            if (payload.sourceConversationId !== conversation.id) throw new Error("La conversación de origen no es válida.");
+            createdConversation = { ...conversation, id: `conversation-${crypto.randomUUID()}`, title: "Nueva conversación", associatedPersonIds: [], primaryPersonId: undefined, createdAt: input.resolvedAt, updatedAt: input.resolvedAt };
+            transaction.objectStore("conversations").put(createdConversation);
+          } else if (payload.type === "copy_document_context") {
+            if (payload.sourceConversationId !== conversation.id || payload.sourceConversationId === payload.targetConversationId || !payload.documentIds.length) throw new Error("El scope documental de origen no es válido.");
+            const target = await requestResult(transaction.objectStore("conversations").get(payload.targetConversationId)) as Conversation | undefined;
+            if (!target || target.status !== "active") throw new Error("La conversación destino no está disponible.");
+            const records = await readDocumentCorpus(transaction);
+            const selected = selectedConversationDocuments(records, payload.sourceConversationId, payload.documentIds);
+            const mappings = selected.map((document) => ({ sourceDocumentId: document.id, targetDocumentId: `${document.id}-copy-${payload.targetConversationId}` }));
+            const documentMap = new Map(mappings.map((mapping) => [mapping.sourceDocumentId, mapping.targetDocumentId]));
+            if (records.documents.some((record) => mappings.some((mapping) => mapping.targetDocumentId === record.id))) throw new Error("El corpus documental de destino ya existe.");
+            const copiedDocuments = selected.map((document) => ({ ...document, id: documentMap.get(document.id)!, scope: { type: "conversation" as const, conversationId: payload.targetConversationId } }));
+            const copiedChunks = records.chunks.filter((chunk) => documentMap.has(chunk.documentId)).map((chunk) => ({ ...chunk, id: `${documentMap.get(chunk.documentId)!}-chunk-${chunk.sequence}`, documentId: documentMap.get(chunk.documentId)!, scope: { type: "conversation" as const, conversationId: payload.targetConversationId } }));
+            const chunkMap = new Map(records.chunks.filter((chunk) => documentMap.has(chunk.documentId)).map((chunk) => [chunk.id, `${documentMap.get(chunk.documentId)!}-chunk-${chunk.sequence}`]));
+            const copiedTerms = records.searchTerms.filter((term) => documentMap.has(term.documentId) && chunkMap.has(term.chunkId)).map((term) => ({ ...term, id: `${chunkMap.get(term.chunkId)!}-term-${term.term}`, documentId: documentMap.get(term.documentId)!, chunkId: chunkMap.get(term.chunkId)!, scope: { type: "conversation" as const, conversationId: payload.targetConversationId } }));
+            const copiedJobs = records.indexJobs.filter((job) => documentMap.has(job.documentId)).map((job) => ({ ...job, id: `${documentMap.get(job.documentId)!}-index`, documentId: documentMap.get(job.documentId)!, indexedChunkIds: job.indexedChunkIds.map((id) => chunkMap.get(id)).filter((id): id is string => Boolean(id)) }));
+            assertSafeForPersistence({ copiedDocuments, copiedChunks, copiedTerms, copiedJobs });
+            copiedDocuments.forEach((record) => transaction.objectStore("documents").put(record)); copiedChunks.forEach((record) => transaction.objectStore("chunks").put(record)); copiedTerms.forEach((record) => transaction.objectStore("searchTerms").put(record)); copiedJobs.forEach((record) => transaction.objectStore("indexJobs").put(record));
+            documentMappings = mappings;
+          }
+        }
+        const resolved = chatActionSchema.parse({ ...stored, status: input.status, resolvedAt: input.resolvedAt });
+        const event: ChatEvent = { id: `event-${stored.id}-${input.status}`, conversationId: stored.conversationId, event: { type: `action_${input.status}`, actionId: stored.id } as ChatEvent["event"], createdAt: input.resolvedAt };
+        assertSafeForPersistence({ resolved, event });
+        transaction.objectStore("actions").put(resolved); transaction.objectStore("events").put(event);
+        await done;
+        return { action: resolved, conversation: updatedConversation, createdConversation, documentMappings };
+      } catch (error) {
+        try { transaction.abort(); } catch { /* completed */ }
+        await done.catch(() => undefined);
+        throw safeStorageError(error);
+      }
+    },
+    async syncAnalysisVersion(input: SyncAnalysisVersionInput): Promise<SyncAnalysisVersionResult> {
+      const transaction = db.transaction(["analysisVersions", "conversations", "events"], "readwrite");
+      const done = transactionDone(transaction);
+      try {
+        assertSafeForPersistence(input.snapshot);
+        const tombstone = await requestResult(transaction.objectStore("analysisVersions").get(analysisCleanupTombstoneId(input.analysisId)));
+        if (tombstone) throw new Error("El análisis ya no está disponible.");
+        transaction.objectStore("analysisVersions").put(input.snapshot);
+        const all = await requestResult(transaction.objectStore("conversations").getAll()) as Conversation[];
+        const candidates = all.filter((item) => item.analysisId === input.analysisId && item.status === "active" && item.analysisVersion !== input.snapshot.analysisVersion);
+        for (const authoritative of candidates) {
+          const updated = { ...authoritative, analysisVersion: input.snapshot.analysisVersion, updatedAt: input.updatedAt };
+          const event: ChatEvent = { id: `analysis-updated-${authoritative.id}-${input.snapshot.analysisVersion}`, conversationId: authoritative.id, event: { type: "analysis_updated", previousVersion: authoritative.analysisVersion ?? "sin-version", analysisVersion: input.snapshot.analysisVersion }, createdAt: input.updatedAt };
+          assertSafeForPersistence({ updated, event });
+          transaction.objectStore("conversations").put(updated); transaction.objectStore("events").put(event);
+        }
+        await done;
+        return { changed: candidates.length > 0, updatedConversationIds: candidates.map((item) => item.id) };
+      } catch (error) {
+        try { transaction.abort(); } catch { /* completed */ }
+        await done.catch(() => undefined);
+        throw safeStorageError(error);
+      }
+    },
+    async convertConversationToAnalysis(input: ConvertConversationInput): Promise<ConvertConversationResult | undefined> {
+      const transaction = db.transaction(["conversations", "messages", "events", "analysisVersions"], "readwrite");
+      const done = transactionDone(transaction);
+      try {
+        const tombstone = await requestResult(transaction.objectStore("analysisVersions").get(analysisCleanupTombstoneId(input.analysisId)));
+        if (tombstone) { await done; return undefined; }
         const authoritative = await requestResult(transaction.objectStore("conversations").get(input.conversationId)) as Conversation | undefined;
         if (!authoritative || authoritative.type !== "general") {
           await done;
@@ -338,9 +486,13 @@ export async function createIndexedDbRepositories(options: IndexedDbRepositories
     },
     async writeIngestionBlock(block: IngestionWriteBlock): Promise<void> {
       assertSafeForPersistence(block);
-      const transaction = db.transaction(["documents", "chunks", "searchTerms", "indexJobs"], "readwrite");
+      const transaction = db.transaction(["documents", "chunks", "searchTerms", "indexJobs", "analysisVersions"], "readwrite");
       const done = transactionDone(transaction);
       try {
+        if (block.document.scope.type === "analysis") {
+          const tombstone = await requestResult(transaction.objectStore("analysisVersions").get(analysisCleanupTombstoneId(block.document.scope.analysisId)));
+          if (tombstone) throw new Error("El análisis ya no está disponible.");
+        }
         transaction.objectStore("documents").put(block.document);
         const availability = block.document.status === "ready" ? "available" : "historical_unavailable";
         for (const chunk of block.chunks) transaction.objectStore("chunks").put({ ...chunk, scope: block.document.scope, availability, facets: chunk.facets ?? { sourceType: [block.document.mediaType] } });
@@ -361,6 +513,8 @@ export async function createIndexedDbRepositories(options: IndexedDbRepositories
       const transaction = db.transaction("analysisVersions", "readwrite");
       const done = transactionDone(transaction);
       try {
+        const tombstone = await requestResult(transaction.objectStore("analysisVersions").get(analysisCleanupTombstoneId(input.analysisId)));
+        if (tombstone) throw new Error("El análisis ya no está disponible.");
         transaction.objectStore("analysisVersions").put(generation);
         await done;
       } catch (error) {
@@ -389,6 +543,8 @@ export async function createIndexedDbRepositories(options: IndexedDbRepositories
       const transaction = db.transaction(["analysisVersions", "documents", "chunks", "searchTerms", "indexJobs"], "readwrite");
       const done = transactionDone(transaction);
       try {
+        const tombstone = await requestResult(transaction.objectStore("analysisVersions").get(analysisCleanupTombstoneId(input.analysisId)));
+        if (tombstone) { await done; return false; }
         const generation = await requestResult(transaction.objectStore("analysisVersions").get(analysisIngestionGenerationId(input.analysisId))) as AnalysisIngestionGeneration | undefined;
         if (generation?.ingestionId !== input.ingestionId) {
           await done;
@@ -474,6 +630,59 @@ export async function createIndexedDbRepositories(options: IndexedDbRepositories
         await done;
       } catch (error) {
         try { transaction.abort(); } catch { /* already completed */ }
+        await done.catch(() => undefined);
+        throw safeStorageError(error);
+      }
+    },
+    async cleanupAnalysis(analysisId: string, policy: CleanupPolicy): Promise<void> {
+      const stores: AssistantStoreName[] = ["actions", "analysisVersions", "cache", "chunks", "conversations", "documents", "events", "indexJobs", "messages", "searchTerms", "snapshots", "sources"];
+      const transaction = db.transaction(stores, "readwrite");
+      const done = transactionDone(transaction);
+      try {
+        const records = new Map<AssistantStoreName, AssistantStoredRecord[]>();
+        await Promise.all(stores.map(async (store) => records.set(store, await requestResult(transaction.objectStore(store).getAll()) as AssistantStoredRecord[])));
+        const conversations = (records.get("conversations") ?? []).filter((record) => record.analysisId === analysisId);
+        const conversationIds = new Set(conversations.map((record) => record.id));
+        const retainedMessages = (records.get("messages") ?? [])
+          .filter((record) => typeof record.conversationId === "string" && conversationIds.has(record.conversationId));
+        const retainedMessageIds = new Set(retainedMessages.map((record) => record.id));
+        const referencedSourceIds = new Set(retainedMessages
+          .flatMap((record) => Array.isArray(record.sourceRefIds) ? record.sourceRefIds.filter((id): id is string => typeof id === "string") : []));
+        for (const source of records.get("sources") ?? []) {
+          if (typeof source.messageId === "string" && retainedMessageIds.has(source.messageId)) referencedSourceIds.add(source.id);
+        }
+        const documents = (records.get("documents") ?? []).filter((record) => {
+          const scope = record.scope as { type?: string; analysisId?: string; conversationId?: string } | undefined;
+          return (scope?.type === "analysis" && scope.analysisId === analysisId)
+            || (scope?.type === "conversation" && typeof scope.conversationId === "string" && conversationIds.has(scope.conversationId));
+        });
+        const documentIds = new Set(documents.map((record) => record.id));
+        const belongs = (record: AssistantStoredRecord): boolean => {
+          const scope = record.scope as { type?: string; analysisId?: string; conversationId?: string } | undefined;
+          return record.analysisId === analysisId
+            || (scope?.type === "analysis" && scope.analysisId === analysisId)
+            || (typeof record.conversationId === "string" && conversationIds.has(record.conversationId))
+            || (scope?.type === "conversation" && typeof scope.conversationId === "string" && conversationIds.has(scope.conversationId))
+            || (typeof record.documentId === "string" && documentIds.has(record.documentId));
+        };
+
+        for (const store of stores) {
+          for (const record of records.get(store) ?? []) {
+            if (!belongs(record) && !(store === "conversations" && conversationIds.has(record.id)) && !(store === "documents" && documentIds.has(record.id))) continue;
+            if (policy === "preserve_conversations" && conversationIds.has(String(record.conversationId ?? record.id))) {
+              if (store === "conversations") transaction.objectStore(store).put({ ...record, status: "archived_analysis_deleted", updatedAt: new Date().toISOString() });
+              else if (["messages", "events", "actions"].includes(store)) continue;
+              else if (store === "sources" && referencedSourceIds.has(record.id)) transaction.objectStore(store).put({ ...record, availability: "historical_unavailable" });
+              else transaction.objectStore(store).delete(record.id);
+            } else {
+              transaction.objectStore(store).delete(record.id);
+            }
+          }
+        }
+        transaction.objectStore("analysisVersions").put({ id: analysisCleanupTombstoneId(analysisId), analysisId, cleaned: true, createdAt: new Date().toISOString() });
+        await done;
+      } catch (error) {
+        try { transaction.abort(); } catch { /* completed */ }
         await done.catch(() => undefined);
         throw safeStorageError(error);
       }

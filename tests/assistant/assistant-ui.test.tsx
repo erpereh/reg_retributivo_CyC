@@ -150,7 +150,7 @@ describe("assistant conversation UI", () => {
     expect(screen.getByText("Texto local seguro")).toBeVisible();
   });
 
-  test("renders every persisted action status as non-focusable content", () => {
+  test("renders resolved statuses as content and pending actions as explicit controls", () => {
     const statuses: ChatAction["status"][] = ["pending", "accepted", "rejected", "failed"];
     render(<>{statuses.map((status) => <ActionProposal key={status} action={{
       id: `action-${status}`, conversationId: "conversation-ui", messageId: "message-assistant", label: `Acción ${status}`,
@@ -160,7 +160,8 @@ describe("assistant conversation UI", () => {
     expect(screen.getByText(/Acción accepted.*Estado: aceptada/i)).toBeVisible();
     expect(screen.getByText(/Acción rejected.*Estado: rechazada/i)).toBeVisible();
     expect(screen.getByText(/Acción failed.*Estado: fallida/i)).toBeVisible();
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByRole("button", { name: "Aceptar Acción pending" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Rechazar Acción pending" })).toBeVisible();
   });
 
   test("distinguishes source lifecycle states and expands context and token details", async () => {

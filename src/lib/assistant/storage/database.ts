@@ -1,5 +1,5 @@
 export const ASSISTANT_DB_NAME = "retributivo-assistant-v1";
-export const ASSISTANT_DB_VERSION = 3;
+export const ASSISTANT_DB_VERSION = 4;
 export const ASSISTANT_STORES = [
   "actions", "analysisVersions", "assistantSettings", "cache", "chunks", "cleanupJobs", "conversations", "documents",
   "events", "indexJobs", "messages", "modelProfiles", "searchTerms", "snapshots", "sources",
@@ -35,6 +35,10 @@ export function migrateAssistantDatabase(db: IDBDatabase, transaction: IDBTransa
     }
     if (name === "sources") ensureIndex(store, "availability", "availability");
     if (name === "searchTerms") ensureIndex(store, "term", "term");
+    if (name === "cleanupJobs") {
+      ensureIndex(store, "analysisId", "analysisId");
+      ensureIndex(store, "statusUpdatedAt", ["status", "updatedAt"]);
+    }
   }
 }
 

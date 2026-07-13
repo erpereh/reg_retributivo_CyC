@@ -244,13 +244,14 @@ describe("Phase 5 second-review regressions", () => {
     const getConversation = repositories.conversations.get.bind(repositories.conversations);
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
-    let delayNextGet = true;
+    let delayNextGet = false;
     repositories.conversations.get = async (id) => {
       if (delayNextGet) { delayNextGet = false; await gate; }
       return getConversation(id);
     };
     render(<AssistantProvider repositoriesFactory={async () => repositories}><ReliabilityProbe /></AssistantProvider>);
-    await screen.findByText("conversation-a");
+    await waitFor(() => expect(screen.getByTestId("selected")).toHaveTextContent("conversation-a"));
+    delayNextGet = true;
     fireEvent.click(screen.getByRole("button", { name: "Renombrar" }));
     fireEvent.click(screen.getByRole("button", { name: "Eliminar actual" }));
     release();

@@ -11,6 +11,7 @@ import { AssistantAiSettings } from "@/components/settings/AssistantAiSettings";
 import type { ChatMessage, Conversation, ModelProfile } from "@/lib/assistant/domain";
 import { createIndexedDbRepositories } from "@/lib/assistant/storage/indexedDbRepositories";
 import type { AssistantRepositories } from "@/lib/assistant/storage/repositories";
+import { createAnalysisVersionSnapshot } from "@/lib/assistant/integrations/analysisVersion";
 import type { AnalysisResult, StoredAnalysis } from "@/lib/types";
 
 const createdAt = "2026-07-13T10:00:00.000Z";
@@ -471,7 +472,8 @@ describe("Phase 5 fifth-review regressions", () => {
     expect(stored).toHaveLength(45);
     expect(stored.every((item) => item.contextOrigin === "general")).toBe(true);
     expect(stored.filter((item) => item.analysisVersion === "legacy-v1")).toHaveLength(history.filter((item) => item.analysisVersion === "legacy-v1").length);
-    expect(await persisted.conversations.get("conversation-a")).toMatchObject({ type: "analysis", analysisId: "analysis-1", analysisVersion: createdAt });
+    const expectedVersion = await createAnalysisVersionSnapshot(activeAnalysis.id, activeAnalysis, createdAt);
+    expect(await persisted.conversations.get("conversation-a")).toMatchObject({ type: "analysis", analysisId: "analysis-1", analysisVersion: expectedVersion.analysisVersion });
     expect(await persisted.events.listByConversation("conversation-a")).toEqual([
       expect.objectContaining({ conversationId: "conversation-a", event: { type: "context_added", contextId: "analysis-1", label: "Análisis activo" } }),
     ]);

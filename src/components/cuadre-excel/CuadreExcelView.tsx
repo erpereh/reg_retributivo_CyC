@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckCircle2, Copy, FileCheck2, Search, Sigma, Table2 } from "lucide-react";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { AiExplanationPanel } from "@/components/ai/AiExplanationPanel";
 import { useAppState } from "@/components/app/AppState";
 import { StatusBadge } from "@/components/common/StatusBadge";
@@ -354,12 +354,23 @@ function NormalizedVariablesTable({ rows }: Readonly<{ rows: readonly InternalEx
 }
 
 export function CuadreExcelView() {
-  const { result } = useAppState();
+  const { result, assistantNavigationIntent, consumeAssistantNavigationIntent } = useAppState();
   const [activeMode, setActiveMode] = useState<CuadreMode>("breakdown");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("Todos");
   const [selectedRow, setSelectedRow] = useState<InternalExcelCheckRow | undefined>();
   const activeDescription = MODES.find((mode) => mode.id === activeMode)?.description ?? MODES[0].description;
+
+  useEffect(() => {
+    if (assistantNavigationIntent?.type !== "open_cuadre") return;
+    const nextMode = assistantNavigationIntent.view === "normalized_variables" ? "normalizedVariables" : "breakdown";
+    setActiveMode(nextMode);
+    setQuery(assistantNavigationIntent.personId ?? "");
+    if (nextMode === "breakdown" && assistantNavigationIntent.personId) {
+      setSelectedRow(result?.internalExcelChecks.find((row) => row.employeeNumber === assistantNavigationIntent.personId));
+    }
+    consumeAssistantNavigationIntent();
+  }, [assistantNavigationIntent, consumeAssistantNavigationIntent, result?.internalExcelChecks]);
 
   const normalizedRows = result?.internalExcelNormalizedVariablesChecks;
   const normalizedLegacyMissing = activeMode === "normalizedVariables" && result && normalizedRows === undefined;

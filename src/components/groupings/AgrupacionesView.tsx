@@ -228,15 +228,19 @@ function headerStickyColumnClass(cell: GroupedExcelHeaderCell, stickyCount: numb
 }
 
 export function AgrupacionesView() {
-  const { result } = useAppState();
+  const { result, assistantNavigationIntent, consumeAssistantNavigationIntent } = useAppState();
   const groupedExcelSheets = result?.groupedExcelSheets;
   const [activeSheetName, setActiveSheetName] = useState<GroupedSheetName>(GROUPED_SHEETS[0].fullName);
   const [query, setQuery] = useState("");
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
-    setQuery("");
-  }, [activeSheetName]);
+    if (assistantNavigationIntent?.type !== "open_grouping" || !groupedExcelSheets) return;
+    const target = groupedExcelSheets.find((sheet) => sheet.rows.some((row) => rowMatchesQuery(row, sheet, assistantNavigationIntent.groupingId)));
+    if (target && GROUPED_SHEETS.some((sheet) => sheet.fullName === target.sheetName)) setActiveSheetName(target.sheetName as GroupedSheetName);
+    setQuery(assistantNavigationIntent.groupingId);
+    consumeAssistantNavigationIntent();
+  }, [assistantNavigationIntent, consumeAssistantNavigationIntent, groupedExcelSheets]);
 
   const activeSheet = useMemo(() => {
     return groupedExcelSheets?.find((sheet) => sheet.sheetName === activeSheetName) ?? placeholderSheet(activeSheetName);
@@ -251,6 +255,7 @@ export function AgrupacionesView() {
     const sheet = GROUPED_SHEETS[index];
     if (!sheet) return;
     setActiveSheetName(sheet.fullName);
+    setQuery("");
     tabRefs.current[index]?.focus();
   };
 

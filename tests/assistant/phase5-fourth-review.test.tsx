@@ -156,7 +156,7 @@ describe("Phase 5 fourth-review regressions", () => {
     };
     render(<AssistantProvider repositoriesFactory={async () => repositories}><AssistantView /><StateProbe /><AssistantAiSettings /></AssistantProvider>);
     await waitFor(() => expect(screen.getByTestId("probe-conversation-count")).toHaveTextContent("10"));
-    fireEvent.click(screen.getByRole("button", { name: "Cargar más conversaciones" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cargar más conversaciones" }));
     await pageStartedPromise;
     fireEvent.click(screen.getByRole("button", { name: "Borrar conversaciones y contexto" }));
     await waitFor(() => expect(screen.getByTestId("probe-conversation-count")).toHaveTextContent("0"));

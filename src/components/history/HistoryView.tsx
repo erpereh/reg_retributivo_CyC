@@ -1,6 +1,7 @@
 "use client";
 
 import { CalendarDays, Download, FileText, History, RotateCcw, Trash2 } from "lucide-react";
+import { useRef, useState } from "react";
 import { useAppState } from "@/components/app/AppState";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { Card } from "@/components/common/Card";
@@ -10,6 +11,8 @@ import type { StoredAnalysis } from "@/lib/types";
 import { displayText } from "@/lib/ui/displayText";
 import { cn } from "@/lib/utils/classNames";
 import { formatEuro } from "@/lib/utils/money";
+import { ModalShell } from "@/components/common/ModalShell";
+import type { CleanupPolicy } from "@/lib/assistant/storage/repositories";
 
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat("es-ES", {
@@ -96,9 +99,27 @@ function HistoryCard({
 
 export function HistoryView() {
   const { history, activeAnalysis, exporting, openStoredAnalysis, removeStoredAnalysis, clearStoredHistory, exportStoredAnalysis } = useAppState();
+  const [deleteTarget, setDeleteTarget] = useState<string | "all">();
+  const [deleting, setDeleting] = useState(false);
+  const [deletionError, setDeletionError] = useState<string>();
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  async function confirmDeletion(policy: CleanupPolicy) {
+    if (!deleteTarget || deleting) return;
+    setDeleting(true);
+    setDeletionError(undefined);
+    try {
+      if (deleteTarget === "all") await clearStoredHistory(policy);
+      else await removeStoredAnalysis(deleteTarget, policy);
+      setDeleteTarget(undefined);
+      window.setTimeout(() => rootRef.current?.focus(), 0);
+    } catch {
+      setDeletionError("No se pudo completar la eliminación. Puedes volver a intentarlo.");
+    } finally { setDeleting(false); }
+  }
 
   return (
-    <div className="space-y-6">
+    <div ref={rootRef} tabIndex={-1} aria-label="Historial de análisis" className="space-y-6 rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
       <SectionHeader
         title="Historial de análisis"
         subtitle="Recupera análisis anteriores guardados localmente, cambia el análisis activo o exporta comparativas ya generadas."
@@ -107,11 +128,7 @@ export function HistoryView() {
             <button
               type="button"
               className="btn-danger"
-              onClick={() => {
-                if (window.confirm("¿Seguro que quieres limpiar todo el historial?")) {
-                  void clearStoredHistory();
-                }
-              }}
+              onClick={() => { setDeletionError(undefined); setDeleteTarget("all"); }}
             >
               <Trash2 className="size-4" aria-hidden="true" />
               Limpiar historial
@@ -142,15 +159,24 @@ export function HistoryView() {
               exporting={exporting}
               onOpen={() => void openStoredAnalysis(analysis.id)}
               onExport={() => void exportStoredAnalysis(analysis)}
-              onDelete={() => {
-                if (window.confirm("¿Eliminar este análisis del historial?")) {
-                  void removeStoredAnalysis(analysis.id);
-                }
-              }}
+              onDelete={() => { setDeletionError(undefined); setDeleteTarget(analysis.id); }}
             />
           ))}
         </section>
       )}
+      {deleteTarget ? (
+        <ModalShell title={deleteTarget === "all" ? "Eliminar historial" : "Eliminar análisis"} eyebrow="Eliminación local" maxWidth="2xl" onClose={() => { if (!deleting) setDeleteTarget(undefined); }} footer={
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button type="button" className="btn-secondary" disabled={deleting} onClick={() => setDeleteTarget(undefined)}>Cancelar</button>
+            <button type="button" className="btn-danger" disabled={deleting} onClick={() => void confirmDeletion("delete_all")}>Eliminar análisis y conversaciones</button>
+            <button type="button" className="btn-secondary" disabled={deleting} onClick={() => void confirmDeletion("preserve_conversations")}>Eliminar análisis conservando conversaciones</button>
+          </div>
+        }>
+          <p className="text-sm leading-6 text-muted">Elige si las conversaciones asociadas deben eliminarse por completo o conservarse como evidencia histórica de solo lectura.</p>
+          {deletionError ? <p role="alert" className="mt-3 text-sm font-semibold text-danger">{deletionError}</p> : null}
+          {deleting ? <p role="status" className="mt-3 text-sm font-semibold text-ink">Eliminando contenido local…</p> : null}
+        </ModalShell>
+      ) : null}
     </div>
   );
 }

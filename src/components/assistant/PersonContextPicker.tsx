@@ -3,10 +3,11 @@
 import { Check, Users } from "lucide-react";
 import { useState } from "react";
 
-export function PersonContextPicker({ availableIds, associatedIds, primaryId, onAdd, onRemove, onPrimary }: Readonly<{
+export function PersonContextPicker({ availableIds, associatedIds, primaryId, disabled = false, onAdd, onRemove, onPrimary }: Readonly<{
   availableIds: readonly string[];
   associatedIds: readonly string[];
   primaryId?: string;
+  disabled?: boolean;
   onAdd(id: string): void;
   onRemove(id: string): void;
   onPrimary(id: string): void;
@@ -17,7 +18,7 @@ export function PersonContextPicker({ availableIds, associatedIds, primaryId, on
   if (!associatedIds.length) {
     return (
       <div className="space-y-2">
-        {availableIds.map((id) => <button key={id} type="button" className="btn-secondary w-full justify-start" onClick={() => onAdd(id)}>Asociar matrícula {id}</button>)}
+        {availableIds.map((id) => <button key={id} type="button" disabled={disabled} className="btn-secondary w-full justify-start" onClick={() => onAdd(id)}>Asociar matrícula {id}</button>)}
       </div>
     );
   }
@@ -37,9 +38,9 @@ export function PersonContextPicker({ availableIds, associatedIds, primaryId, on
             return (
               <div key={id} className="flex min-h-11 items-center gap-2">
                 <label className="flex min-h-11 min-w-0 flex-1 items-center gap-2 text-sm font-medium text-ink">
-                  <input type="checkbox" className="size-5" checked={checked} onChange={() => checked ? onRemove(id) : onAdd(id)} />Matrícula {id}
+                  <input type="checkbox" className="size-5" disabled={disabled} checked={checked} onChange={() => checked ? onRemove(id) : onAdd(id)} />Matrícula {id}
                 </label>
-                <button type="button" className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl text-primary hover:bg-blue-100 disabled:text-muted" disabled={id === primaryId} aria-label={`Marcar matrícula ${id} como principal`} onClick={() => onPrimary(id)}><Check aria-hidden="true" className="size-4" /></button>
+                <button type="button" className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl text-primary hover:bg-blue-100 disabled:text-muted" disabled={disabled || id === primaryId} aria-label={`Marcar matrícula ${id} como principal`} onClick={() => onPrimary(id)}><Check aria-hidden="true" className="size-4" /></button>
               </div>
             );
           })}

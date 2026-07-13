@@ -195,7 +195,7 @@ describe("Phase 5 reviewed provider behavior", () => {
     fireEvent.click(screen.getByRole("button", { name: /conversation-b/i }));
     releaseA?.();
     await waitFor(() => expect(screen.getByRole("heading", { name: "conversation-b" })).toBeVisible());
-    expect(screen.getByRole("textbox", { name: "Pregunta" })).toBeEnabled();
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Pregunta" })).toBeEnabled());
   });
 
   test("serializes concurrent person and preference writes against the latest persisted conversation", async () => {

@@ -20,7 +20,7 @@ export function ConversationTimeline({ assistant }: Readonly<{ assistant: Assist
           <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">Asistente retributivo</p>
           <h1 id="assistant-title" className="truncate text-lg font-bold text-ink">{conversation?.title ?? "Nueva conversación"}</h1>
         </div>
-        {conversation?.type === "general" ? <button type="button" className="btn-secondary ms-3 shrink-0" disabled={assistant.streaming || assistant.selectionLoading} onClick={() => void assistant.convertToActiveAnalysis()}>Convertir al análisis activo</button> : null}
+        {conversation?.type === "general" ? <button type="button" className="btn-secondary ms-3 shrink-0" disabled={conversation.status !== "active" || assistant.streaming || assistant.selectionLoading} onClick={() => void assistant.convertToActiveAnalysis()}>Convertir al análisis activo</button> : null}
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-5 sm:px-6">
         {!conversation ? (
@@ -38,19 +38,25 @@ export function ConversationTimeline({ assistant }: Readonly<{ assistant: Assist
                   key={message.id}
                   message={message}
                   sources={assistant.sources.filter((source) => message.sourceRefIds.includes(source.id))}
+                  revealedSourceIds={assistant.revealedSourceIds}
                   actions={assistant.actions.filter((action) => action.messageId === message.id)}
+                  actionOutputs={assistant.actionOutputs}
+                  resolvingActionIds={assistant.resolvingActionIds}
+                  actionsDisabled={conversation.status !== "active" || assistant.selectionLoading}
                   latestAssistant={message.id === latestAssistantId}
                   repeatable={repeatableIds.has(message.id)}
                   onCopy={(id) => void assistant.copyResponse(id)}
                   onRetry={(id) => void assistant.retryResponse(id)}
                   onRegenerate={(id) => void assistant.regenerateResponse(id)}
+                  onAcceptAction={(id) => void assistant.acceptAction(id)}
+                  onRejectAction={(id) => void assistant.rejectAction(id)}
                 />
               ); })())}
             </ul>
           </>
         )}
       </div>
-      {conversation ? <AssistantComposer streaming={assistant.streaming} disabled={assistant.selectionLoading} onSend={assistant.send} onStop={assistant.stop} /> : null}
+      {conversation ? <AssistantComposer streaming={assistant.streaming} disabled={assistant.selectionLoading || conversation.status !== "active"} onSend={assistant.send} onStop={assistant.stop} /> : null}
       <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">{assistant.announcement}</div>
       {assistant.error ? <p role="alert" className="border-t border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-danger">{assistant.error}</p> : null}
     </main>

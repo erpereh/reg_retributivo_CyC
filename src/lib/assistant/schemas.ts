@@ -70,7 +70,12 @@ export const sourceReferenceSchema = z.object({
 }).strict();
 
 export const contextSnapshotSchema = z.object({ id, conversationId: id, analysisId: id.optional(), summary: z.string().max(32_768), summarizedMessageIds: z.array(id), decisions: z.array(z.string().max(1_000)), figures: z.array(z.number().finite()), sourceIds: z.array(id), actionIds: z.array(id), personIds: z.array(id), analysisVersion: id, actualStrategy: z.enum(["automatic", "full", "optimized"]), actualResponseMode: z.enum(["strict", "flexible"]), createdAt: date }).strict();
-export const cleanupJobSchema = z.object({ id, scope: documentScopeSchema, status: z.enum(["pending", "running", "completed", "failed"]), documentIds: z.array(id), attempts: z.number().int().nonnegative(), createdAt: date, updatedAt: date }).strict();
+export const analysisVersionSnapshotSchema = z.object({ id, analysisId: id, analysisVersion: id, canonical: z.string().min(2).max(2_000_000), createdAt: date }).strict();
+export const cleanupJobSchema = z.object({
+  id, analysisId: id, scope: documentScopeSchema, policy: z.enum(["delete_all", "preserve_conversations"]),
+  stage: z.enum(["pending", "assistant_cleaned", "functional_deleted"]), status: z.enum(["pending", "running", "completed", "failed"]),
+  documentIds: z.array(id), attempts: z.number().int().nonnegative(), lastError: z.string().max(300).optional(), createdAt: date, updatedAt: date,
+}).strict();
 
 const analysisToolRequestSchema = z.object({
   type: z.literal("tool_request"),

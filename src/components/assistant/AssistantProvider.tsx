@@ -13,6 +13,10 @@ import { createIndexedDbRepositories } from "@/lib/assistant/storage/indexedDbRe
 import type { AssistantRepositories, AssistantStoredRecord, ContextSnapshot } from "@/lib/assistant/storage/repositories";
 import { executeAssistantToolRequest } from "@/lib/assistant/tools/personTools";
 import type { StoredAnalysis } from "@/lib/types";
+import { continuePersonInAssistant as continuePerson } from "@/lib/assistant/integrations/personIntegration";
+import { createAnalysisVersionSnapshot, syncAnalysisVersion } from "@/lib/assistant/integrations/analysisVersion";
+import { executeChatAction, rejectChatAction, type AppNavigationIntent } from "@/lib/assistant/integrations/actions";
+import { registerAnalysisCleanupListener } from "@/lib/assistant/integrations/analysisCleanupCoordinator";
 import { AssistantRunStoppedError, createRepositoryBoundAssistantOrchestrator, type AssistantOrchestrator } from "@/lib/assistant/orchestration/assistantOrchestrator";
 import type { AnalysisToolRegistry } from "@/lib/assistant/tools/registry";
 
@@ -44,8 +48,11 @@ export interface AssistantContextValue {
   repeatableMessageIds: readonly string[];
   hasMoreMessages: boolean;
   sources: SourceReference[];
+  revealedSourceIds: readonly string[];
   events: ChatEvent[];
   actions: ChatAction[];
+  actionOutputs: Readonly<Record<string, unknown>>;
+  resolvingActionIds: readonly string[];
   snapshots: ContextSnapshot[];
   documents: PersistedDocumentMetadata[];
   indexJobs: AssistantStoredRecord[];
@@ -67,8 +74,11 @@ export interface AssistantContextValue {
   retryResponse(messageId: string): Promise<void>;
   regenerateResponse(messageId: string): Promise<void>;
   copyResponse(messageId: string): Promise<void>;
+  acceptAction(actionId: string): Promise<void>;
+  rejectAction(actionId: string): Promise<void>;
   convertToActiveAnalysis(): Promise<void>;
   associatePerson(personId: string): Promise<void>;
+  continuePersonInAssistant(personId: string): Promise<void>;
   addPerson(personId: string): Promise<void>;
   removePerson(personId: string): Promise<void>;
   setPrimaryPerson(personId: string): Promise<void>;
@@ -97,9 +107,10 @@ type PendingFakeRequest = { readonly kind: "general"; readonly request: Paramete
 interface RunToken { readonly conversationId: string; readonly generation: number }
 interface SelectionIntent { readonly sequence: number }
 
-export function AssistantProvider({ children, activeAnalysis, factory, dbName, adapter, repositoriesFactory }: Readonly<{
+export function AssistantProvider({ children, activeAnalysis, factory, dbName, adapter, repositoriesFactory, onNavigate }: Readonly<{
   children: ReactNode; activeAnalysis?: StoredAnalysis; factory?: IDBFactory; dbName?: string; adapter?: AssistantAdapter;
   repositoriesFactory?: () => Promise<AssistantRepositories>;
+  onNavigate?: (intent: AppNavigationIntent) => void;
 }>) {
   const repositoriesRef = useRef<AssistantRepositories | undefined>(undefined);
   const orchestratorRef = useRef<AssistantOrchestrator | undefined>(undefined);
@@ -122,7 +133,10 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
   const deletedConversationsRef = useRef(new Set<string>());
   const activeRunTokenRef = useRef<RunToken | undefined>(undefined);
   const conversationRef = useRef<Conversation | undefined>(undefined);
+  const conversationsRef = useRef<Conversation[]>([]);
   const messagesRef = useRef<ChatMessage[]>([]);
+  const currentAnalysisVersionRef = useRef<{ analysisId: string; analysisVersion: string } | undefined>(undefined);
+  const resolvingActionIdsRef = useRef(new Set<string>());
   const mountedRef = useRef(true);
   const [ready, setReady] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -131,8 +145,11 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [messageCursor, setMessageCursor] = useState<string>();
   const [sources, setSources] = useState<SourceReference[]>([]);
+  const [revealedSourceIds, setRevealedSourceIds] = useState<string[]>([]);
   const [events, setEvents] = useState<ChatEvent[]>([]);
   const [actions, setActions] = useState<ChatAction[]>([]);
+  const [actionOutputs, setActionOutputs] = useState<Record<string, unknown>>({});
+  const [resolvingActionIds, setResolvingActionIds] = useState<string[]>([]);
   const [snapshots, setSnapshots] = useState<ContextSnapshot[]>([]);
   const [documents, setDocuments] = useState<PersistedDocumentMetadata[]>([]);
   const [indexJobs, setIndexJobs] = useState<AssistantStoredRecord[]>([]);
@@ -147,9 +164,60 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
   const [assistantSettings, setAssistantSettings] = useState<AssistantSettings>(DEFAULT_ASSISTANT_SETTINGS);
 
   useEffect(() => { conversationRef.current = conversation; }, [conversation]);
+  useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
 
-  const loadConversationData = useCallback(async (selected: Conversation, requestedIntent?: SelectionIntent) => {
+  useEffect(() => {
+    const repositories = repositoriesRef.current;
+    if (!ready || !repositories || !activeAnalysis) return;
+    let cancelled = false;
+    const operation = conversationMutationRef.current.then(() => syncAnalysisVersion(repositories, activeAnalysis.id, activeAnalysis, now()));
+    conversationMutationRef.current = operation.then(() => undefined, () => undefined);
+    void operation.then(({ snapshot, changed }) => {
+      if (cancelled) return;
+      currentAnalysisVersionRef.current = { analysisId: activeAnalysis.id, analysisVersion: snapshot.analysisVersion };
+      if (!changed) return;
+      setConversations((current) => current.map((item) => item.analysisId === activeAnalysis.id && item.status === "active" ? { ...item, analysisVersion: snapshot.analysisVersion } : item));
+      if (conversationRef.current?.analysisId === activeAnalysis.id && conversationRef.current.status === "active") {
+        const updated = { ...conversationRef.current, analysisVersion: snapshot.analysisVersion };
+        conversationRef.current = updated;
+        setConversation(updated);
+        setNotice("El análisis ha cambiado. Los mensajes anteriores conservan su versión original.");
+      }
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [activeAnalysis, ready]);
+
+  const ensureActiveAnalysisVersion = useCallback(async (): Promise<string | undefined> => {
+    if (!activeAnalysis) return undefined;
+    const snapshot = await createAnalysisVersionSnapshot(activeAnalysis.id, activeAnalysis, now());
+    try {
+      const repositories = repositoriesRef.current;
+      if (!repositories) return undefined;
+      await repositories.syncAnalysisVersion({ snapshot, analysisId: activeAnalysis.id, updatedAt: now() });
+    } catch {
+      return undefined;
+    }
+    currentAnalysisVersionRef.current = { analysisId: activeAnalysis.id, analysisVersion: snapshot.analysisVersion };
+    return snapshot.analysisVersion;
+  }, [activeAnalysis]);
+
+  const clearSelected = useCallback(() => {
+    selectionIntentRef.current = undefined;
+    createInFlightRef.current = undefined;
+    loadGenerationRef.current += 1; conversationRef.current = undefined; messagesRef.current = [];
+    setConversation(undefined); setMessages([]); setMessageCursor(undefined); setSources([]); setRevealedSourceIds([]); setEvents([]); setActions([]); setActionOutputs({}); setSnapshots([]); setDocuments([]); setIndexJobs([]); setSelectionLoading(false); setConversationTransitionPending(false);
+  }, []);
+
+  const removeCachedConversation = useCallback((conversationId: string) => {
+    const remaining = conversationsRef.current.filter((item) => item.id !== conversationId);
+    conversationsRef.current = remaining;
+    setConversations(remaining);
+    deletedConversationsRef.current.add(conversationId);
+    return remaining;
+  }, []);
+
+  const loadConversationData = useCallback(async (requested: Conversation, requestedIntent?: SelectionIntent) => {
     const selectionIntent = requestedIntent ?? { sequence: ++selectionIntentSequenceRef.current };
     if (!requestedIntent) selectionIntentRef.current = selectionIntent;
     const repositories = repositoriesRef.current;
@@ -161,6 +229,14 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     const generation = ++loadGenerationRef.current;
     setSelectionLoading(true);
     try {
+      let selected = await repositories.conversations.get(requested.id);
+      if (!selected) {
+        removeCachedConversation(requested.id);
+        if (conversationRef.current?.id === requested.id) clearSelected();
+        if (mountedRef.current && selectionIntentRef.current === selectionIntent) setError("La conversación ya no está disponible.");
+        return;
+      }
+      deletedConversationsRef.current.delete(selected.id);
       const [messagePage, selectedEvents, selectedActions, selectedSnapshots, allDocuments, allIndexJobs] = await Promise.all([
         repositories.messages.listByConversation(selected.id, { limit: MESSAGE_PAGE_SIZE }),
         repositories.events.listByConversation(selected.id),
@@ -169,18 +245,33 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
         repositories.documents.listAll(),
         repositories.indexJobs.listAll(),
       ]);
+      const confirmed = await repositories.conversations.get(selected.id);
+      if (!confirmed) {
+        removeCachedConversation(selected.id);
+        if (conversationRef.current?.id === selected.id) clearSelected();
+        if (mountedRef.current && selectionIntentRef.current === selectionIntent) setError("La conversación ya no está disponible.");
+        return;
+      }
+      selected = confirmed;
       const selectedDocuments = allDocuments.filter((document) => document.scope.type === "conversation" ? document.scope.conversationId === selected.id : selected.type === "analysis" && document.scope.analysisId === selected.analysisId);
       const selectedDocumentIds = new Set(selectedDocuments.map((document) => document.id));
       const selectedSources = await Promise.all([...new Set(messagePage.items.flatMap((item) => item.sourceRefIds))].map((id) => repositories.sources.get(id)));
       if (!mountedRef.current || selectionIntentRef.current !== selectionIntent || contentGeneration !== contentGenerationRef.current || generation !== loadGenerationRef.current || deletedConversationsRef.current.has(selected.id)) return;
+      const nextConversations = newestConversations(conversationsRef.current.some((item) => item.id === selected.id)
+        ? conversationsRef.current.map((item) => item.id === selected.id ? selected : item)
+        : [...conversationsRef.current, selected]);
+      conversationsRef.current = nextConversations;
+      setConversations(nextConversations);
       conversationRef.current = selected;
       messagesRef.current = messagePage.items;
       setConversation(selected);
       setMessages(messagePage.items);
       setMessageCursor(messagePage.nextCursor);
       setSources(selectedSources.filter((item): item is SourceReference => Boolean(item)));
+      setRevealedSourceIds([]);
       setEvents(selectedEvents);
       setActions(selectedActions);
+      setActionOutputs({});
       setSnapshots(selectedSnapshots);
       setDocuments(selectedDocuments);
       setIndexJobs(allIndexJobs.filter((job) => typeof job.documentId === "string" && selectedDocumentIds.has(job.documentId)));
@@ -192,7 +283,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     } finally {
       if (mountedRef.current && selectionIntentRef.current === selectionIntent && contentGeneration === contentGenerationRef.current && generation === loadGenerationRef.current) setSelectionLoading(false);
     }
-  }, []);
+  }, [clearSelected, removeCachedConversation]);
 
   useEffect(() => {
     let cancelled = false;
@@ -330,12 +421,49 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     assistantSettingsRef.current = next; if (mountedRef.current) setAssistantSettings(next);
   }), [serializeConfigurationMutation]);
 
-  const clearSelected = useCallback(() => {
-    selectionIntentRef.current = undefined;
-    createInFlightRef.current = undefined;
-    loadGenerationRef.current += 1; conversationRef.current = undefined; messagesRef.current = [];
-    setConversation(undefined); setMessages([]); setMessageCursor(undefined); setSources([]); setEvents([]); setActions([]); setSnapshots([]); setDocuments([]); setIndexJobs([]); setSelectionLoading(false); setConversationTransitionPending(false);
-  }, []);
+  useEffect(() => registerAnalysisCleanupListener({
+    before: async (analysisId) => {
+      const selected = conversationRef.current;
+      const affected = conversationsRef.current.filter((item) => item.analysisId === analysisId);
+      for (const item of affected) invalidateConversationRun(item.id);
+      if (selected?.analysisId === analysisId) {
+        pendingFakeRequestRef.current = undefined;
+        setStreaming(false);
+      }
+      if (affected.length === 0) return;
+      await conversationMutationRef.current;
+    },
+    after: async (analysisId) => {
+      const repositories = repositoriesRef.current;
+      const selected = conversationRef.current;
+      if (!repositories) return;
+      const cached = conversationsRef.current;
+      const affected = cached.filter((item) => item.analysisId === analysisId);
+      if (affected.length === 0) return;
+      const authoritativeEntries = await Promise.all(affected.map(async (item) => [item.id, await repositories.conversations.get(item.id)] as const));
+      const authoritativeById = new Map(authoritativeEntries);
+      for (const [conversationId, authoritative] of authoritativeEntries) {
+        if (authoritative) deletedConversationsRef.current.delete(conversationId);
+        else deletedConversationsRef.current.add(conversationId);
+      }
+      const reconciled = newestConversations(cached.flatMap((item) => {
+        if (item.analysisId !== analysisId) return [item];
+        const authoritative = authoritativeById.get(item.id);
+        return authoritative ? [authoritative] : [];
+      }));
+      conversationsRef.current = reconciled;
+      setConversations(reconciled);
+      if (selected?.analysisId !== analysisId) return;
+      const authoritativeSelected = authoritativeById.get(selected.id);
+      if (authoritativeSelected) {
+        await loadConversationData(authoritativeSelected);
+        return;
+      }
+      const fallback = reconciled[0];
+      if (fallback) await loadConversationData(fallback);
+      else clearSelected();
+    },
+  }), [clearSelected, invalidateConversationRun, loadConversationData]);
 
   const clearAssistantContent = useCallback(async () => {
     contentGenerationRef.current += 1;
@@ -402,7 +530,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       deletedConversationsRef.current.delete(created.id);
       setConversations((current) => newestConversations([created, ...current.filter((item) => item.id !== created.id)]));
       loadGenerationRef.current += 1; conversationRef.current = created; messagesRef.current = [];
-      setConversation(created); setMessages([]); setMessageCursor(undefined); setSources([]); setEvents([]); setActions([]); setSnapshots([]); setDocuments([]); setIndexJobs([]);
+      setConversation(created); setMessages([]); setMessageCursor(undefined); setSources([]); setRevealedSourceIds([]); setEvents([]); setActions([]); setActionOutputs({}); setSnapshots([]); setDocuments([]); setIndexJobs([]);
       setAnnouncement("Asistente preparado");
     } catch {
       if (mountedRef.current && selectionIntentRef.current === selectionIntent && contentGeneration === contentGenerationRef.current) {
@@ -447,24 +575,24 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
 
   const selectConversation = useCallback(async (id: string) => {
     if (createInFlightRef.current) return;
+    if (conversationRef.current?.id === id && activeRunTokenRef.current?.conversationId === id) return;
     const selectionIntent = { sequence: ++selectionIntentSequenceRef.current };
     selectionIntentRef.current = selectionIntent;
     const contentGeneration = contentGenerationRef.current;
     setSelectionLoading(true);
-    if (conversationRef.current?.id === id) {
-      loadGenerationRef.current += 1;
-      if (selectionIntentRef.current === selectionIntent) setSelectionLoading(false);
-      return;
-    }
     const previousId = conversationRef.current?.id;
-    if (previousId) invalidateConversationRun(previousId);
+    if (previousId && previousId !== id) invalidateConversationRun(previousId);
     pendingFakeRequestRef.current = undefined;
     setStreaming(false);
     try {
-      const selected = conversations.find((item) => item.id === id) ?? await repositoriesRef.current!.conversations.get(id);
+      const repositories = repositoriesRef.current;
+      const selected = repositories ? await repositories.conversations.get(id) : undefined;
       if (selected && mountedRef.current && selectionIntentRef.current === selectionIntent && contentGeneration === contentGenerationRef.current) {
         await loadConversationData(selected, selectionIntent);
       } else if (mountedRef.current && selectionIntentRef.current === selectionIntent && contentGeneration === contentGenerationRef.current) {
+        removeCachedConversation(id);
+        if (conversationRef.current?.id === id) clearSelected();
+        setError("La conversación ya no está disponible.");
         setSelectionLoading(false);
       }
     } catch {
@@ -473,21 +601,23 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
         setError("No se pudo cargar la conversación. Puedes volver a intentarlo.");
       }
     }
-  }, [conversations, invalidateConversationRun, loadConversationData]);
+  }, [clearSelected, invalidateConversationRun, loadConversationData, removeCachedConversation]);
 
   const updateSelectedConversation = useCallback((patch: Partial<Conversation> | ((current: Conversation) => Partial<Conversation>)): Promise<void> => {
     if (createInFlightRef.current) return Promise.resolve();
-    const selectedId = conversationRef.current?.id;
+    const selectedAtInvocation = conversationRef.current;
+    const selectedId = selectedAtInvocation?.id;
     const contentGeneration = contentGenerationRef.current;
-    if (!selectedId || deletedConversationsRef.current.has(selectedId)) return Promise.resolve();
+    if (!selectedId || selectedAtInvocation.status !== "active" || deletedConversationsRef.current.has(selectedId)) return Promise.resolve();
     const operation = conversationMutationRef.current.then(async () => {
       const repositories = repositoriesRef.current;
       if (!repositories || contentGeneration !== contentGenerationRef.current || deletedConversationsRef.current.has(selectedId)) return;
       const current = await repositories.conversations.get(selectedId);
-      if (!current || contentGeneration !== contentGenerationRef.current || deletedConversationsRef.current.has(selectedId)) return;
-      const updated = withoutUndefined({ ...current, ...(typeof patch === "function" ? patch(current) : patch), updatedAt: now() });
+      if (!current || current.status !== "active" || contentGeneration !== contentGenerationRef.current || deletedConversationsRef.current.has(selectedId)) return;
+      const requestedPatch = withoutUndefined(typeof patch === "function" ? patch(current) : patch);
       if (contentGeneration !== contentGenerationRef.current || deletedConversationsRef.current.has(selectedId)) return;
-      await repositories.conversations.put(updated);
+      const updated = await repositories.updateActiveConversation(selectedId, requestedPatch, now());
+      if (!updated) return;
       if (!mountedRef.current || contentGeneration !== contentGenerationRef.current || deletedConversationsRef.current.has(selectedId)) return;
       setConversations((items) => newestConversations(items.map((item) => item.id === updated.id ? updated : item)));
       if (conversationRef.current?.id === updated.id) { conversationRef.current = updated; setConversation(updated); }
@@ -553,7 +683,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       const repositories = repositoriesRef.current;
       if (!repositories || contentGeneration !== contentGenerationRef.current || !guard() || deletedConversationsRef.current.has(conversationId)) return false;
       const authoritative = await repositories.conversations.get(conversationId);
-      if (!authoritative || contentGeneration !== contentGenerationRef.current || !guard() || deletedConversationsRef.current.has(conversationId)) return false;
+      if (!authoritative || authoritative.status !== "active" || contentGeneration !== contentGenerationRef.current || !guard() || deletedConversationsRef.current.has(conversationId)) return false;
       const updatedConversation = { ...authoritative, updatedAt: now() };
       await repositories.writeConversationBlock({ conversation: updatedConversation, messages: nextMessages, sources: nextSources });
       if (contentGeneration !== contentGenerationRef.current || !guard() || deletedConversationsRef.current.has(conversationId) || conversationRef.current?.id !== conversationId) return false;
@@ -571,6 +701,12 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
 
   const send = useCallback(async (rawText: string) => {
     if (!conversation || !rawText.trim() || streaming || selectionLoading || deletedConversationsRef.current.has(conversation.id)) return;
+    const authoritative = await repositoriesRef.current?.conversations.get(conversation.id);
+    if (!authoritative || authoritative.status !== "active") {
+      if (authoritative) { conversationRef.current = authoritative; setConversation(authoritative); setNotice("Esta conversación es histórica y de solo lectura."); }
+      else setError("La conversación ya no está disponible.");
+      return;
+    }
     setError(undefined); setNotice(undefined);
     let content: string;
     try {
@@ -677,7 +813,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     const targetIndex = loadedMessages.findIndex((message) => message.id === messageId && message.role === "assistant");
     const target = targetIndex >= 0 ? loadedMessages[targetIndex] : undefined;
     const precedingUser = targetIndex > 0 ? loadedMessages[targetIndex - 1] : undefined;
-    if (!selected || !target || target.conversationId !== selected.id || precedingUser?.role !== "user"
+    if (!selected || selected.status !== "active" || !target || target.conversationId !== selected.id || precedingUser?.role !== "user"
       || precedingUser.conversationId !== selected.id || deletedConversationsRef.current.has(selected.id)) return undefined;
 
     const pending = repeatableRunsRef.current.get(target.id);
@@ -696,6 +832,8 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     const repeatTarget = resolveRepeatTarget(messageId);
     const orchestrator = orchestratorRef.current;
     if (!repeatTarget || !orchestrator || streaming || selectionLoading) return;
+    const authoritative = await repositoriesRef.current?.conversations.get(repeatTarget.selected.id);
+    if (!authoritative || authoritative.status !== "active") return;
     const { selected, target, precedingUser, modelProfileId, modelId, selectedProfile } = repeatTarget;
     const pending = repeatTarget.pending;
     let runPending: PendingFakeRequest | undefined;
@@ -785,17 +923,81 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     }
   }, [messages]);
 
+  const acceptAction = useCallback(async (actionId: string) => {
+    const repositories = repositoriesRef.current;
+    const selected = conversationRef.current;
+    const action = actions.find((item) => item.id === actionId);
+    if (!repositories || !selected || selected.status !== "active" || !action || action.status !== "pending") return;
+    if (resolvingActionIdsRef.current.has(actionId)) return;
+    resolvingActionIdsRef.current.add(actionId);
+    setResolvingActionIds((current) => current.includes(actionId) ? current : [...current, actionId]);
+    try {
+      const executed = await executeChatAction({
+        action,
+        repositories,
+        analysis: activeAnalysis ? { id: activeAnalysis.id, result: activeAnalysis.result } : undefined,
+        now: now(),
+      });
+      setActions((current) => current.map((item) => item.id === executed.id ? executed : item));
+      if (executed.output !== undefined) setActionOutputs((current) => ({ ...current, [executed.id]: executed.output }));
+      const refreshed = await repositories.conversations.get(selected.id);
+      if (refreshed && conversationRef.current?.id === refreshed.id) {
+        conversationRef.current = refreshed;
+        setConversation(refreshed);
+        setConversations((current) => newestConversations(current.map((item) => item.id === refreshed.id ? refreshed : item)));
+      }
+      if (executed.intent?.type === "assistant_conversation") {
+        const created = await repositories.conversations.get(executed.intent.conversationId);
+        if (created) await loadConversationData(created);
+      }
+      if (executed.intent?.type === "show_sources") setRevealedSourceIds(executed.intent.sourceIds);
+      if (executed.intent) onNavigate?.(executed.intent);
+      setAnnouncement(`Acción ${action.label} aceptada`);
+    } catch (caught) {
+      const stored = await repositories.actions.get(action.id);
+      if (stored) setActions((current) => current.map((item) => item.id === stored.id ? stored : item));
+      setError(caught instanceof Error ? caught.message : "No se pudo ejecutar la acción.");
+    } finally {
+      resolvingActionIdsRef.current.delete(actionId);
+      setResolvingActionIds((current) => current.filter((id) => id !== actionId));
+    }
+  }, [actions, activeAnalysis, loadConversationData, onNavigate]);
+
+  const rejectAction = useCallback(async (actionId: string) => {
+    const repositories = repositoriesRef.current;
+    const selected = conversationRef.current;
+    const action = actions.find((item) => item.id === actionId);
+    if (!repositories || !selected || selected.status !== "active" || !action || action.status !== "pending") return;
+    if (resolvingActionIdsRef.current.has(actionId)) return;
+    resolvingActionIdsRef.current.add(actionId);
+    setResolvingActionIds((current) => current.includes(actionId) ? current : [...current, actionId]);
+    try {
+      const rejected = await rejectChatAction({ action, repositories, now: now() });
+      setActions((current) => current.map((item) => item.id === rejected.id ? rejected : item));
+      setAnnouncement(`Acción ${action.label} rechazada`);
+    } catch {
+      const stored = await repositories.actions.get(action.id);
+      if (stored) setActions((current) => current.map((item) => item.id === stored.id ? stored : item));
+      setError("No se pudo rechazar la acción.");
+    } finally {
+      resolvingActionIdsRef.current.delete(actionId);
+      setResolvingActionIds((current) => current.filter((id) => id !== actionId));
+    }
+  }, [actions]);
+
   const convertToActiveAnalysis = useCallback(async () => {
     if (createInFlightRef.current) return;
     const selectedId = conversationRef.current?.id;
-    if (!selectedId || !activeAnalysis || deletedConversationsRef.current.has(selectedId)) return;
+    if (!selectedId || conversationRef.current?.status !== "active" || !activeAnalysis || deletedConversationsRef.current.has(selectedId)) return;
     const analysis = activeAnalysis;
+    const analysisVersion = await ensureActiveAnalysisVersion();
+    if (!analysisVersion) return;
     const contentGeneration = contentGenerationRef.current;
     const operation = conversationMutationRef.current.then(async () => {
       const repositories = repositoriesRef.current;
       if (!repositories || contentGeneration !== contentGenerationRef.current || deletedConversationsRef.current.has(selectedId)) return false;
       const converted = await repositories.convertConversationToAnalysis({
-        conversationId: selectedId, analysisId: analysis.id, analysisVersion: analysis.createdAt, convertedAt: now(),
+        conversationId: selectedId, analysisId: analysis.id, analysisVersion, convertedAt: now(),
       });
       if (!converted || contentGeneration !== contentGenerationRef.current || deletedConversationsRef.current.has(selectedId)) return false;
       if (mountedRef.current) {
@@ -815,7 +1017,27 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     });
     conversationMutationRef.current = operation.then(() => undefined, () => undefined);
     await operation;
-  }, [activeAnalysis]);
+  }, [activeAnalysis, ensureActiveAnalysisVersion]);
+
+  const continuePersonInAssistant = useCallback(async (personId: string) => {
+    const repositories = repositoriesRef.current;
+    if (!ready || !repositories || !activeAnalysis || !activeAnalysis.result.people.some((person) => person.employeeNumber === personId)) {
+      const message = "No se puede continuar en el Asistente porque el análisis o la matrícula ya no están disponibles.";
+      setError(message); throw new Error(message);
+    }
+    const analysisVersion = await ensureActiveAnalysisVersion();
+    if (!analysisVersion) { const message = "No se puede continuar en el Asistente porque el análisis ya no está disponible."; setError(message); throw new Error(message); }
+    const operation = conversationMutationRef.current.then(() => continuePerson({
+      repositories, analysisId: activeAnalysis.id, analysisVersion, personId,
+      modelProfileId: assistantSettingsRef.current.defaultAnalysisModelProfileId ?? FAKE_MODEL_ID, now: now(),
+    }));
+    conversationMutationRef.current = operation.then(() => undefined, () => undefined);
+    const selected = await operation;
+    setConversations((current) => newestConversations([selected, ...current.filter((item) => item.id !== selected.id)]));
+    await loadConversationData(selected);
+    setNotice(`Matrícula asociada: ${personId}`);
+    setAnnouncement(`Matrícula ${personId} asociada al Asistente`);
+  }, [activeAnalysis, ensureActiveAnalysisVersion, loadConversationData, ready]);
 
   const addPerson = useCallback(async (personId: string) => {
     await updateSelectedConversation((current) => current.type === "analysis" ? {
@@ -850,15 +1072,15 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
   )), [conversation, messages, modelProfiles, resolveRepeatTarget, selectionLoading, streaming]);
 
   const value = useMemo<AssistantContextValue>(() => ({
-    ready, conversations, hasMoreConversations: Boolean(conversationCursor), conversation, messages, repeatableMessageIds, hasMoreMessages: Boolean(messageCursor), sources, events, actions, snapshots, documents, indexJobs,
+    ready, conversations, hasMoreConversations: Boolean(conversationCursor), conversation, messages, repeatableMessageIds, hasMoreMessages: Boolean(messageCursor), sources, revealedSourceIds, events, actions, actionOutputs, resolvingActionIds, snapshots, documents, indexJobs,
     streaming, selectionLoading, conversationTransitionPending, announcement, notice, error, createGeneralConversation, loadMoreConversations, selectConversation, renameConversation, archiveConversation, deleteConversation,
-    loadMoreMessages, send, stop, retryResponse, regenerateResponse, copyResponse, convertToActiveAnalysis, associatePerson, addPerson, removePerson, setPrimaryPerson,
+    loadMoreMessages, send, stop, retryResponse, regenerateResponse, copyResponse, acceptAction, rejectAction, convertToActiveAnalysis, associatePerson, continuePersonInAssistant, addPerson, removePerson, setPrimaryPerson,
     requestPersonProfile, updateConversationPreferences, availablePersonIds, modelProfiles, assistantSettings, saveModelProfile, duplicateModelProfile,
     deleteModelProfile, updateAssistantSettings, clearAssistantContent, setKey: vaultRef.current.setKey, clearKey: vaultRef.current.clearKey, withKey: vaultRef.current.withKey,
-  }), [actions, addPerson, announcement, archiveConversation, assistantSettings, associatePerson, availablePersonIds, clearAssistantContent, conversation, conversationCursor, conversations, documents,
-    convertToActiveAnalysis, copyResponse, createGeneralConversation, deleteConversation, deleteModelProfile, duplicateModelProfile, error, events, loadMoreConversations,
+  }), [acceptAction, actionOutputs, actions, addPerson, announcement, archiveConversation, assistantSettings, associatePerson, availablePersonIds, clearAssistantContent, conversation, conversationCursor, conversations, documents,
+    convertToActiveAnalysis, continuePersonInAssistant, copyResponse, createGeneralConversation, deleteConversation, deleteModelProfile, duplicateModelProfile, error, events, loadMoreConversations,
     loadMoreMessages, messageCursor, messages, modelProfiles, notice, regenerateResponse, removePerson, renameConversation, repeatableMessageIds, requestPersonProfile, retryResponse,
-    conversationTransitionPending, indexJobs, saveModelProfile, selectConversation, selectionLoading, send, setPrimaryPerson, snapshots, sources, stop, streaming, updateAssistantSettings, updateConversationPreferences]);
+    conversationTransitionPending, indexJobs, rejectAction, revealedSourceIds, resolvingActionIds, saveModelProfile, selectConversation, selectionLoading, send, setPrimaryPerson, snapshots, sources, stop, streaming, updateAssistantSettings, updateConversationPreferences]);
 
   return <AssistantContext.Provider value={value}>{children}</AssistantContext.Provider>;
 }
@@ -867,4 +1089,8 @@ export function useAssistant(): AssistantContextValue {
   const value = useContext(AssistantContext);
   if (!value) throw new Error("useAssistant debe usarse dentro de AssistantProvider");
   return value;
+}
+
+export function useOptionalAssistant(): AssistantContextValue | undefined {
+  return useContext(AssistantContext);
 }

@@ -5,7 +5,6 @@ import type { ExportWorkbookMetadata } from "@/lib/export/exportExcel";
 import type { AnalysisConfig, AnalysisResult, AppView, ConceptMappingRule, StoredAnalysis } from "@/lib/types";
 import type { ToastItem, ToastKind } from "@/components/common/ToastViewport";
 import {
-  clearAnalyses,
   configFromSettings,
   countIncompatibleAnalyses,
   deleteAnalysis,
@@ -22,6 +21,10 @@ import {
 } from "@/lib/storage/analysisStorage";
 import { normalizeComparableText, normalizeEmployeeId } from "@/lib/utils/normalize";
 import { startAnalysisDocumentIngestion } from "@/lib/assistant/documents/ingestionService";
+import { createAnalysisCleanupJob, resumeAnalysisCleanupJobs, runAnalysisCleanupBatch, runAnalysisCleanupJob } from "@/lib/assistant/integrations/analysisCleanup";
+import { createIndexedDbRepositories } from "@/lib/assistant/storage/indexedDbRepositories";
+import type { CleanupPolicy } from "@/lib/assistant/storage/repositories";
+import type { AppNavigationIntent } from "@/lib/assistant/integrations/actions";
 
 export interface DashboardFilters {
   readonly query: string;
@@ -62,7 +65,10 @@ interface AppStateValue {
   readonly aiStatus?: AiStatus;
   readonly aiTesting: boolean;
   readonly aiTestMessage?: string;
+  readonly assistantNavigationIntent?: AppNavigationIntent;
   readonly setView: (view: AppView) => void;
+  readonly navigateAssistantIntent: (intent: AppNavigationIntent) => void;
+  readonly consumeAssistantNavigationIntent: () => void;
   readonly setPdfFiles: (files: readonly File[]) => void;
   readonly setRegistroFile: (file?: File) => void;
   readonly updateSettings: (settings: Partial<AppSettings>) => void;
@@ -76,8 +82,8 @@ interface AppStateValue {
   readonly exportStoredAnalysis: (analysis: StoredAnalysis) => Promise<void>;
   readonly resetForNewAnalysis: () => void;
   readonly openStoredAnalysis: (id: string) => Promise<void>;
-  readonly removeStoredAnalysis: (id: string) => Promise<void>;
-  readonly clearStoredHistory: () => Promise<void>;
+  readonly removeStoredAnalysis: (id: string, policy: CleanupPolicy) => Promise<void>;
+  readonly clearStoredHistory: (policy: CleanupPolicy) => Promise<void>;
   readonly refreshAiStatus: () => Promise<void>;
   readonly testAiConnection: () => Promise<void>;
 }
@@ -141,6 +147,7 @@ function buildExportMetadata(analysis: StoredAnalysis, settings: AppSettings, ex
 
 export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>) {
   const [view, setView] = useState<AppView>("dashboard");
+  const [assistantNavigationIntent, setAssistantNavigationIntent] = useState<AppNavigationIntent>();
   const [pdfFiles, setPdfFiles] = useState<readonly File[]>([]);
   const [registroFile, setRegistroFile] = useState<File | undefined>();
   const [activeAnalysis, setActiveAnalysis] = useState<StoredAnalysis | undefined>();
@@ -194,29 +201,42 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
     let cancelled = false;
 
     async function hydrate() {
-      const loadedSettings = loadSettings();
-      const activeId = loadActiveAnalysisId();
-      const incompatibleCount = await countIncompatibleAnalyses();
-      const analyses = await listAnalyses();
-      const active = activeId ? (await getAnalysis(activeId)) ?? analyses[0] : analyses[0];
+      try {
+        if (typeof indexedDB !== "undefined") {
+          let cleanupRepositories: Awaited<ReturnType<typeof createIndexedDbRepositories>> | undefined;
+          try {
+            cleanupRepositories = await createIndexedDbRepositories();
+            await resumeAnalysisCleanupJobs(cleanupRepositories, deleteAnalysis);
+          } catch {
+            if (!cancelled) setError("No se pudo recuperar parte del contenido local. Puedes volver a intentarlo.");
+          } finally {
+            cleanupRepositories?.close();
+          }
+        }
+        const loadedSettings = loadSettings();
+        const activeId = loadActiveAnalysisId();
+        const incompatibleCount = await countIncompatibleAnalyses();
+        const analyses = await listAnalyses();
+        const active = activeId ? (await getAnalysis(activeId)) ?? analyses[0] : analyses[0];
 
-      if (cancelled) {
-        return;
+        if (cancelled) return;
+        setSettings(loadedSettings);
+        setHistory(analyses);
+        setActiveAnalysis(active);
+        setStatus(active ? "Análisis activo cargado desde el historial" : "Pendiente de archivos");
+        if (incompatibleCount) {
+          const message = "Se ignoraron análisis guardados con formato anterior. Vuelve a analizar con la nueva lógica retributiva.";
+          setSuccess(message);
+          pushMessageToast("warning", "Historial actualizado", message);
+        } else {
+          setSuccess(undefined);
+        }
+        void refreshAiStatus();
+      } catch {
+        if (!cancelled) setError("No se pudo recuperar el contenido local. Puedes volver a intentarlo.");
+      } finally {
+        if (!cancelled) setHydrating(false);
       }
-
-      setSettings(loadedSettings);
-      setHistory(analyses);
-      setActiveAnalysis(active);
-      setStatus(active ? "Análisis activo cargado desde el historial" : "Pendiente de archivos");
-      if (incompatibleCount) {
-        const message = "Se ignoraron análisis guardados con formato anterior. Vuelve a analizar con la nueva lógica retributiva.";
-        setSuccess(message);
-        pushMessageToast("warning", "Historial actualizado", message);
-      } else {
-        setSuccess(undefined);
-      }
-      setHydrating(false);
-      void refreshAiStatus();
     }
 
     void hydrate();
@@ -416,8 +436,15 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
   }, [pushMessageToast]);
 
   const removeStoredAnalysis = useCallback(
-    async (id: string) => {
-      await deleteAnalysis(id);
+    async (id: string, policy: CleanupPolicy) => {
+      const repositories = await createIndexedDbRepositories();
+      try {
+        const fresh = createAnalysisCleanupJob(id, policy, new Date().toISOString());
+        const previous = await repositories.cleanupJobs.get(fresh.id);
+        const job = previous?.status === "failed" ? { ...previous, status: "pending" as const, updatedAt: fresh.updatedAt } : fresh;
+        await repositories.cleanupJobs.put(job);
+        await runAnalysisCleanupJob(repositories, job.id, deleteAnalysis);
+      } finally { repositories.close(); }
       if (activeAnalysis?.id === id) {
         setActiveAnalysis(undefined);
       }
@@ -428,13 +455,42 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
     [activeAnalysis?.id, pushMessageToast, refreshHistory],
   );
 
-  const clearStoredHistory = useCallback(async () => {
-    await clearAnalyses();
-    setActiveAnalysis(undefined);
-    setHistory([]);
+  const clearStoredHistory = useCallback(async (policy: CleanupPolicy) => {
+    const repositories = await createIndexedDbRepositories();
+    let failure: unknown;
+    try {
+      await runAnalysisCleanupBatch(repositories, history.map((analysis) => analysis.id), policy, deleteAnalysis);
+    } catch (caught) {
+      failure = caught;
+    } finally { repositories.close(); }
+    const remaining = await listAnalyses();
+    setHistory(remaining);
+    if (activeAnalysis && !remaining.some((analysis) => analysis.id === activeAnalysis.id)) setActiveAnalysis(undefined);
+    if (failure) {
+      pushMessageToast("error", "Limpieza incompleta", failure instanceof Error ? failure.message : "No se pudo completar la limpieza coordinada.");
+      throw failure;
+    }
     setSuccess("Historial eliminado.");
     pushMessageToast("info", "Historial eliminado", "Se eliminaron los análisis guardados.");
-  }, [pushMessageToast]);
+  }, [activeAnalysis, history, pushMessageToast]);
+
+  const navigateAssistantIntent = useCallback((intent: AppNavigationIntent) => {
+    if ("analysisId" in intent && activeAnalysis?.id !== intent.analysisId) return;
+    setAssistantNavigationIntent(intent);
+    if (intent.type === "open_person") {
+      setFilters((current) => ({ ...current, query: intent.personId }));
+      setView("personas");
+    } else if (intent.type === "open_cuadre") {
+      if (intent.personId) setFilters((current) => ({ ...current, query: intent.personId ?? "" }));
+      setView("cuadre-excel");
+    } else if (intent.type === "open_grouping") {
+      setFilters((current) => ({ ...current, query: intent.groupingId }));
+      setView("agrupaciones");
+    } else {
+      setView("asistente");
+    }
+  }, [activeAnalysis?.id]);
+  const consumeAssistantNavigationIntent = useCallback(() => setAssistantNavigationIntent(undefined), []);
 
   const testAiConnection = useCallback(async () => {
     setAiTesting(true);
@@ -479,7 +535,10 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       aiStatus,
       aiTesting,
       aiTestMessage,
+      assistantNavigationIntent,
       setView,
+      navigateAssistantIntent,
+      consumeAssistantNavigationIntent,
       setPdfFiles,
       setRegistroFile,
       updateSettings,
@@ -500,6 +559,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
     }),
     [
       activeAnalysis,
+      assistantNavigationIntent,
       aiStatus,
       aiTestMessage,
       aiTesting,
@@ -507,6 +567,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       saveConceptMapAndRefresh,
       saveExclusionsAndRefresh,
       clearStoredHistory,
+      consumeAssistantNavigationIntent,
       dismissToast,
       error,
       exportActiveAnalysis,
@@ -515,6 +576,7 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       exporting,
       filters,
       history,
+      navigateAssistantIntent,
       hydrating,
       openStoredAnalysis,
       pdfFiles,

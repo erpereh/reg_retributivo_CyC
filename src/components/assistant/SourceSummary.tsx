@@ -1,7 +1,7 @@
 "use client";
 
 import { BookOpen, CircleSlash2, History } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { SourceDetails } from "@/components/assistant/SourceDetails";
 import type { SourceReference } from "@/lib/assistant/domain";
 
@@ -11,8 +11,12 @@ const labels = {
   deleted: "Eliminada",
 } as const;
 
-export function SourceSummary({ sources }: Readonly<{ sources: readonly SourceReference[] }>) {
+export function SourceSummary({ sources, revealedSourceIds = [] }: Readonly<{ sources: readonly SourceReference[]; revealedSourceIds?: readonly string[] }>) {
   const [expanded, setExpanded] = useState<string>();
+  useEffect(() => {
+    const requested = revealedSourceIds.find((id) => sources.some((source) => source.id === id && source.availability === "available"));
+    if (requested) setExpanded(requested);
+  }, [revealedSourceIds, sources]);
   if (!sources.length) return null;
   return (
     <section aria-label="Fuentes" className="mt-4 border-t border-slate-200 pt-3">

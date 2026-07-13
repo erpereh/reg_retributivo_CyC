@@ -78,6 +78,14 @@ export interface ChatAction {
   action: ChatActionPayload; status: "pending" | "accepted" | "rejected" | "failed"; createdAt: string; resolvedAt?: string;
 }
 
+export interface AnalysisVersionSnapshot {
+  id: string;
+  analysisId: string;
+  analysisVersion: string;
+  canonical: string;
+  createdAt: string;
+}
+
 export interface ModelProfile {
   id: string; name: string; provider: "gemini" | "openai" | "openrouter" | "cerebras" | "groq" | "manual";
   baseUrl: string; modelId: string; enabled: boolean; generalChatCompatible: boolean; analysisCompatible: boolean;
