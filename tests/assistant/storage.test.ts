@@ -89,7 +89,7 @@ describe("assistant IndexedDB repositories", () => {
     const repositories = await createIndexedDbRepositories({ factory, dbName: "surface-test" });
     expect(Object.keys(repositories).sort()).toEqual([
       "actions", "analysisVersions", "assistantSettings", "cache", "chunks", "cleanupJobs", "conversations", "documents", "events",
-      "beginAnalysisIngestion", "copyDocumentCorpus", "deleteDocumentCorpus", "indexJobs", "messages", "modelProfiles", "replaceAnalysisCorpus", "searchTerms", "snapshots", "sources", "transferDocumentCorpus", "writeConversationBlock", "writeIngestionBlock", "close",
+      "beginAnalysisIngestion", "clearAssistantContent", "copyDocumentCorpus", "deleteDocumentCorpus", "indexJobs", "messages", "modelProfiles", "replaceAnalysisCorpus", "searchTerms", "snapshots", "sources", "transferDocumentCorpus", "writeConversationBlock", "writeIngestionBlock", "writeModelConfiguration", "close",
     ].sort());
     repositories.close();
   });

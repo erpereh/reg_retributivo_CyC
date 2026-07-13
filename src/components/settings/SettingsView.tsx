@@ -10,15 +10,17 @@ import { SectionTabs } from "@/components/common/SectionTabs";
 import { EmployeeExclusionsCard } from "@/components/settings/EmployeeExclusionsCard";
 import { ConceptMapEditor } from "@/components/settings/concept-map/ConceptMapEditor";
 import { NormalizedConceptsManager } from "@/components/settings/normalized-concepts/NormalizedConceptsManager";
+import { AssistantAiSettings } from "@/components/settings/AssistantAiSettings";
 import { clearAiExplanationCache } from "@/lib/ai/explainCache";
 
-type SettingsSection = "general" | "exclusions" | "concepts" | "privacy";
+type SettingsSection = "general" | "exclusions" | "concepts" | "ai" | "privacy";
 type ConceptSection = "non-normalized" | "normalized";
 
 const SETTINGS_SECTIONS = [
   { value: "general", label: "General", tabId: "settings-general-tab", panelId: "settings-general-panel" },
   { value: "exclusions", label: "Exclusiones", tabId: "settings-exclusions-tab", panelId: "settings-exclusions-panel" },
   { value: "concepts", label: "Conceptos", tabId: "settings-concepts-tab", panelId: "settings-concepts-panel" },
+  { value: "ai", label: "IA", tabId: "settings-ai-tab", panelId: "settings-ai-panel" },
   { value: "privacy", label: "Privacidad", tabId: "settings-privacy-tab", panelId: "settings-privacy-panel" },
 ] as const;
 
@@ -141,6 +143,8 @@ export function SettingsView() {
           </div>
         </SettingsPanel>
       ) : null}
+
+      {visited.has("ai") ? <SettingsPanel id="settings-ai-panel" labelledBy="settings-ai-tab" label="IA" active={activeSection === "ai"}><AssistantAiSettings /></SettingsPanel> : null}
 
       {visited.has("privacy") ? (
         <SettingsPanel id="settings-privacy-panel" labelledBy="settings-privacy-tab" label="Privacidad" active={activeSection === "privacy"}>

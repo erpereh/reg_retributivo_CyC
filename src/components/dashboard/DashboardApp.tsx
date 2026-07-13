@@ -12,7 +12,7 @@ import { SettingsView } from "@/components/settings/SettingsView";
 import { TablesView } from "@/components/tables/TablesView";
 
 function ActiveView() {
-  const { view, activeAnalysis } = useAppState();
+  const { view } = useAppState();
 
   switch (view) {
     case "personas":
@@ -24,7 +24,7 @@ function ActiveView() {
     case "historial":
       return <HistoryView />;
     case "asistente":
-      return <AssistantProvider activeAnalysis={activeAnalysis}><AssistantView /></AssistantProvider>;
+      return <AssistantView />;
     case "ajustes":
       return <SettingsView />;
     case "dashboard":
@@ -37,10 +37,13 @@ export function DashboardApp() {
   return (
     <MotionConfig reducedMotion="user">
       <AppStateProvider>
-        <AppShell>
-          <ActiveView />
-        </AppShell>
+        <AssistantAppScope />
       </AppStateProvider>
     </MotionConfig>
   );
+}
+
+function AssistantAppScope() {
+  const { activeAnalysis } = useAppState();
+  return <AssistantProvider activeAnalysis={activeAnalysis}><AppShell><ActiveView /></AppShell></AssistantProvider>;
 }

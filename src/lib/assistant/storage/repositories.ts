@@ -1,4 +1,4 @@
-import type { ChatAction, ChatEvent, ChatMessage, Conversation, ModelProfile, PersistedDocumentMetadata, SourceReference } from "@/lib/assistant/domain";
+import type { AssistantSettings, ChatAction, ChatEvent, ChatMessage, Conversation, ModelProfile, PersistedDocumentMetadata, SourceReference } from "@/lib/assistant/domain";
 
 export interface PageOptions { limit: number; cursor?: string }
 export interface Page<T> { items: T[]; nextCursor?: string }
@@ -9,7 +9,9 @@ export interface AssistantDocumentRepository extends EntityRepository<PersistedD
 export interface SourceRepository extends EntityRepository<SourceReference> {}
 export interface ContextSnapshot extends Record<string, unknown> { id: string }
 export interface ContextSnapshotRepository extends EntityRepository<ContextSnapshot> {}
-export interface ModelProfileRepository extends EntityRepository<ModelProfile> {}
+export interface CollectionRepository<T extends { id: string }> extends EntityRepository<T> { listAll(): Promise<T[]> }
+export interface ModelProfileRepository extends CollectionRepository<ModelProfile> {}
+export interface AssistantSettingsRepository extends EntityRepository<AssistantSettings> {}
 export interface CleanupJob extends Record<string, unknown> { id: string }
 export interface AssistantCleanupRepository extends EntityRepository<CleanupJob> {}
 export interface AssistantStoredRecord extends Record<string, unknown> { id: string }
@@ -49,6 +51,11 @@ export interface DeleteDocumentCorpusInput { readonly conversationId: string; re
 export interface DocumentIdMapping { readonly sourceDocumentId: string; readonly targetDocumentId: string }
 export interface BeginAnalysisIngestionInput { readonly analysisId: string; readonly ingestionId: string }
 export interface ReplaceAnalysisCorpusInput extends BeginAnalysisIngestionInput { readonly blocks: readonly IngestionWriteBlock[] }
+export interface ModelConfigurationWrite {
+  readonly profile?: ModelProfile;
+  readonly deleteProfileId?: string;
+  readonly settings: AssistantSettings;
+}
 
 export interface AssistantRepositories {
   conversations: ConversationRepository;
@@ -64,7 +71,7 @@ export interface AssistantRepositories {
   analysisVersions: EntityRepository<AssistantStoredRecord>;
   indexJobs: EntityRepository<AssistantStoredRecord>;
   modelProfiles: ModelProfileRepository;
-  assistantSettings: EntityRepository<AssistantStoredRecord>;
+  assistantSettings: AssistantSettingsRepository;
   cleanupJobs: AssistantCleanupRepository;
   writeConversationBlock(block: ConversationWriteBlock): Promise<void>;
   writeIngestionBlock(block: IngestionWriteBlock): Promise<void>;
@@ -73,5 +80,7 @@ export interface AssistantRepositories {
   copyDocumentCorpus(input: DocumentCorpusSelection): Promise<readonly DocumentIdMapping[]>;
   transferDocumentCorpus(input: DocumentCorpusSelection): Promise<readonly DocumentIdMapping[]>;
   deleteDocumentCorpus(input: DeleteDocumentCorpusInput): Promise<void>;
+  clearAssistantContent(): Promise<void>;
+  writeModelConfiguration(input: ModelConfigurationWrite): Promise<void>;
   close(): void;
 }

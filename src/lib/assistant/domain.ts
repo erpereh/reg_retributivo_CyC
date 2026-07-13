@@ -84,6 +84,17 @@ export interface ModelProfile {
   verifiedAt?: string; lastVerificationError?: string;
 }
 
+export interface AssistantSettings {
+  id: "assistant-settings";
+  defaultGeneralModelProfileId?: string;
+  defaultAnalysisModelProfileId?: string;
+  responseMode: ResponseMode;
+  contextStrategy: ContextStrategy;
+  safetyMarginPercent: number;
+  warningThresholdPercent: number;
+  compactionThresholdPercent: number;
+}
+
 export interface SourceReference {
   id: string; conversationId: string; messageId?: string; analysisId?: string; documentId?: string; personId?: string;
   sourceType: string; sanitizedSourceLabel: string; availability: SourceAvailability; page?: number; sheet?: string;

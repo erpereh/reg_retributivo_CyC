@@ -1,8 +1,30 @@
 import { z } from "zod";
+import type { AssistantSettings } from "@/lib/assistant/domain";
 
-const id = z.string().min(1);
+const id = z.string().min(1).max(256);
 const date = z.string().min(1);
 export const tokenUsageSchema = z.object({ inputTokens: z.number().int().nonnegative(), outputTokens: z.number().int().nonnegative(), totalTokens: z.number().int().nonnegative(), estimated: z.boolean() }).strict();
+
+export const modelProfileSchema = z.object({
+  id, name: z.string().min(1).max(200), provider: z.enum(["gemini", "openai", "openrouter", "cerebras", "groq", "manual"]),
+  baseUrl: z.string().max(2_048), modelId: z.string().min(1).max(256), enabled: z.boolean(), generalChatCompatible: z.boolean(), analysisCompatible: z.boolean(),
+  supportsStreaming: z.boolean(), supportsTools: z.boolean(), supportsStructuredOutput: z.boolean(), detectedContextWindow: z.number().int().positive().optional(),
+  manualContextWindow: z.number().int().positive().optional(), maxOutputTokens: z.number().int().positive().optional(), capabilitiesSource: z.enum(["detected", "manual"]),
+  verifiedAt: date.max(64).optional(), lastVerificationError: z.string().max(500).optional(),
+}).strict();
+
+export const assistantSettingsSchema = z.object({
+  id: z.literal("assistant-settings"), defaultGeneralModelProfileId: id.optional(), defaultAnalysisModelProfileId: id.optional(),
+  responseMode: z.enum(["strict", "flexible"]), contextStrategy: z.enum(["automatic", "full", "optimized"]),
+  safetyMarginPercent: z.number().min(0).max(50), warningThresholdPercent: z.number().min(1).max(99), compactionThresholdPercent: z.number().min(1).max(100),
+}).strict().superRefine((value, context) => {
+  if (value.warningThresholdPercent >= value.compactionThresholdPercent) context.addIssue({ code: z.ZodIssueCode.custom, path: ["warningThresholdPercent"], message: "El aviso debe ser anterior a la compactación." });
+});
+
+export const DEFAULT_ASSISTANT_SETTINGS: AssistantSettings = {
+  id: "assistant-settings", defaultGeneralModelProfileId: undefined, defaultAnalysisModelProfileId: undefined,
+  responseMode: "strict", contextStrategy: "automatic", safetyMarginPercent: 10, warningThresholdPercent: 75, compactionThresholdPercent: 85,
+};
 
 export const conversationSchema = z.object({
   id, type: z.enum(["general", "analysis"]), analysisId: id.optional(), title: z.string(), associatedPersonIds: z.array(id),

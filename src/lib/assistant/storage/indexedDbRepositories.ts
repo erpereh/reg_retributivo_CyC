@@ -1,11 +1,11 @@
-import type { ChatAction, ChatEvent, ChatMessage, Conversation, ModelProfile, PersistedDocumentMetadata, SourceReference } from "@/lib/assistant/domain";
+import type { AssistantSettings, ChatAction, ChatEvent, ChatMessage, Conversation, ModelProfile, PersistedDocumentMetadata, SourceReference } from "@/lib/assistant/domain";
 import { openAssistantDatabase, type AssistantStoreName } from "@/lib/assistant/storage/database";
 import { assertSafeForPersistence } from "@/lib/assistant/privacy/assertions";
 import type {
-  AssistantCleanupRepository, AssistantDocumentRepository, AssistantRepositories, AssistantStoredRecord, BeginAnalysisIngestionInput, CleanupJob, ContextSnapshot,
+  AssistantCleanupRepository, AssistantDocumentRepository, AssistantRepositories, AssistantSettingsRepository, AssistantStoredRecord, BeginAnalysisIngestionInput, CleanupJob, ContextSnapshot,
   ContextSnapshotRepository, ConversationRepository, ConversationWriteBlock, DeleteDocumentCorpusInput, DocumentCorpusSelection,
   DocumentIdMapping, DocumentIndexJob, EntityRepository, IngestionWriteBlock, MessageRepository,
-  ModelProfileRepository, Page, PageOptions, ReplaceAnalysisCorpusInput, SourceRepository,
+  ModelConfigurationWrite, ModelProfileRepository, Page, PageOptions, ReplaceAnalysisCorpusInput, SourceRepository,
 } from "@/lib/assistant/storage/repositories";
 
 export class AssistantStorageError extends Error {
@@ -58,6 +58,13 @@ class IndexedEntityRepository<T extends { id: string }> implements EntityReposit
     const transaction = this.db.transaction(this.storeName, "readwrite");
     transaction.objectStore(this.storeName).delete(id);
     await transactionDone(transaction);
+  }
+
+  async listAll(): Promise<T[]> {
+    const transaction = this.db.transaction(this.storeName, "readonly");
+    const values = await requestResult(transaction.objectStore(this.storeName).getAll());
+    await transactionDone(transaction);
+    return values as T[];
   }
 }
 
@@ -188,7 +195,7 @@ export async function createIndexedDbRepositories(options: IndexedDbRepositories
   const analysisVersions = new IndexedEntityRepository<AssistantStoredRecord>(db, "analysisVersions");
   const indexJobs = new IndexedEntityRepository<AssistantStoredRecord>(db, "indexJobs");
   const modelProfiles = new IndexedEntityRepository<ModelProfile>(db, "modelProfiles") as ModelProfileRepository;
-  const assistantSettings = new IndexedEntityRepository<AssistantStoredRecord>(db, "assistantSettings");
+  const assistantSettings = new IndexedEntityRepository<AssistantSettings>(db, "assistantSettings") as AssistantSettingsRepository;
   const cleanupJobs = new IndexedEntityRepository<CleanupJob>(db, "cleanupJobs") as AssistantCleanupRepository;
 
   async function mutateDocumentCorpus(input: DocumentCorpusSelection, removeSource: boolean): Promise<readonly DocumentIdMapping[]> {
@@ -346,6 +353,36 @@ export async function createIndexedDbRepositories(options: IndexedDbRepositories
         await done;
       } catch (error) {
         try { transaction.abort(); } catch { /* already completed or aborted */ }
+        await done.catch(() => undefined);
+        throw safeStorageError(error);
+      }
+    },
+    async clearAssistantContent(): Promise<void> {
+      const stores: AssistantStoreName[] = ["actions", "analysisVersions", "cache", "chunks", "cleanupJobs", "conversations", "documents", "events", "indexJobs", "messages", "searchTerms", "snapshots", "sources"];
+      const transaction = db.transaction(stores, "readwrite");
+      const done = transactionDone(transaction);
+      try {
+        stores.forEach((store) => transaction.objectStore(store).clear());
+        await done;
+      } catch (error) {
+        try { transaction.abort(); } catch { /* already completed */ }
+        await done.catch(() => undefined);
+        throw safeStorageError(error);
+      }
+    },
+    async writeModelConfiguration(input: ModelConfigurationWrite): Promise<void> {
+      if (input.profile && input.deleteProfileId) throw new AssistantStorageError("storage_error", "No se pudo guardar la configuración de modelos.");
+      assertSafeForPersistence(input.settings);
+      if (input.profile) assertSafeForPersistence(input.profile);
+      const transaction = db.transaction(["modelProfiles", "assistantSettings"], "readwrite");
+      const done = transactionDone(transaction);
+      try {
+        if (input.profile) transaction.objectStore("modelProfiles").put(input.profile);
+        if (input.deleteProfileId) transaction.objectStore("modelProfiles").delete(input.deleteProfileId);
+        transaction.objectStore("assistantSettings").put(input.settings);
+        await done;
+      } catch (error) {
+        try { transaction.abort(); } catch { /* already completed */ }
         await done.catch(() => undefined);
         throw safeStorageError(error);
       }
