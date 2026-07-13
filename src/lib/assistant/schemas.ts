@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { AssistantSettings } from "@/lib/assistant/domain";
+import { ANALYSIS_TOOL_NAMES, ANALYSIS_TOOL_SCHEMAS } from "@/lib/assistant/tools/registry";
 
 const id = z.string().min(1).max(256);
 const date = z.string().min(1);
@@ -39,7 +40,7 @@ export const conversationSchema = z.object({
 export const chatMessageSchema = z.object({
   id, conversationId: id, role: z.enum(["user", "assistant"]), content: z.string(),
   status: z.enum(["streaming", "completed", "stopped", "interrupted", "failed"]), contextOrigin: z.enum(["general", "analysis"]),
-  modelProfileId: id, responseMode: z.enum(["strict", "flexible"]), contextStrategy: z.enum(["automatic", "full", "optimized"]),
+  modelProfileId: id, modelId: id.optional(), responseMode: z.enum(["strict", "flexible"]), contextStrategy: z.enum(["automatic", "full", "optimized"]),
   analysisVersion: id.optional(), sourceRefIds: z.array(id), actionIds: z.array(id), usage: tokenUsageSchema.optional(), createdAt: date,
 }).strict();
 
@@ -63,28 +64,35 @@ export const chatActionSchema = z.object({ id, conversationId: id, messageId: id
 
 export const sourceReferenceSchema = z.object({
   id, conversationId: id, messageId: id.optional(), analysisId: id.optional(), documentId: id.optional(), personId: id.optional(),
-  sourceType: id, sanitizedSourceLabel: id, availability: z.enum(["available", "historical_unavailable", "deleted"]),
+  sourceType: id, sanitizedSourceLabel: z.string().min(1).max(256), availability: z.enum(["available", "historical_unavailable", "deleted"]),
   page: z.number().int().positive().optional(), sheet: z.string().optional(), rowRange: z.string().optional(), cellRange: z.string().optional(), period: z.string().optional(),
-  conceptIds: z.array(id), excerpt: z.string(), sanitizedHash: id,
+  conceptIds: z.array(id).max(100), excerpt: z.string().max(4_096), sanitizedHash: id,
 }).strict();
 
-const getPersonProfileToolRequestSchema = z.object({
+export const contextSnapshotSchema = z.object({ id, conversationId: id, analysisId: id.optional(), summary: z.string().max(32_768), summarizedMessageIds: z.array(id), decisions: z.array(z.string().max(1_000)), figures: z.array(z.number().finite()), sourceIds: z.array(id), actionIds: z.array(id), personIds: z.array(id), analysisVersion: id, actualStrategy: z.enum(["automatic", "full", "optimized"]), actualResponseMode: z.enum(["strict", "flexible"]), createdAt: date }).strict();
+export const cleanupJobSchema = z.object({ id, scope: documentScopeSchema, status: z.enum(["pending", "running", "completed", "failed"]), documentIds: z.array(id), attempts: z.number().int().nonnegative(), createdAt: date, updatedAt: date }).strict();
+
+const analysisToolRequestSchema = z.object({
   type: z.literal("tool_request"),
   roundId: id,
   requestId: id,
-  tool: z.literal("getPersonProfile"),
-  args: z.object({ analysisId: id, personId: id }).strict(),
+  tool: z.enum(ANALYSIS_TOOL_NAMES),
+  args: z.unknown(),
 }).strict();
 
 export const assistantStreamEventSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("status"), roundId: id, label: z.string() }).strict(),
-  getPersonProfileToolRequestSchema,
+  z.object({ type: z.literal("status"), roundId: id, label: z.string().min(1).max(256), code: z.enum(["context_warning", "context_compacted"]).optional(), snapshot: contextSnapshotSchema.optional() }).strict(),
+  analysisToolRequestSchema,
   z.object({ type: z.literal("tool_result_ack"), roundId: id, requestId: id }).strict(),
-  z.object({ type: z.literal("text_delta"), roundId: id, messageId: id, delta: z.string() }).strict(),
+  z.object({ type: z.literal("text_delta"), roundId: id, messageId: id, delta: z.string().max(16_384) }).strict(),
   z.object({ type: z.literal("source"), roundId: id, source: sourceReferenceSchema }).strict(),
   z.object({ type: z.literal("action"), roundId: id, action: chatActionSchema }).strict(),
   z.object({ type: z.literal("usage"), roundId: id, usage: tokenUsageSchema }).strict(),
-  z.object({ type: z.literal("done"), roundId: id, finishReason: z.string() }).strict(),
-  z.object({ type: z.literal("error"), roundId: id, code: id, message: z.string(), retryable: z.boolean() }).strict(),
-]);
+  z.object({ type: z.literal("done"), roundId: id, finishReason: z.string().min(1).max(128) }).strict(),
+  z.object({ type: z.literal("error"), roundId: id, code: id, classification: z.enum(["transient", "auth", "privacy", "incompatible", "context", "cancelled", "provider"]).optional(), message: z.string().min(1).max(500), retryable: z.boolean() }).strict(),
+]).superRefine((value, context) => {
+  if (value.type === "tool_request" && !ANALYSIS_TOOL_SCHEMAS[value.tool].input.safeParse(value.args).success) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["args"], message: "Argumentos de herramienta no válidos." });
+  }
+});
 export type AssistantStreamEvent = z.infer<typeof assistantStreamEventSchema>;

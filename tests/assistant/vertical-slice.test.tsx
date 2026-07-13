@@ -140,4 +140,14 @@ describe("assistant vertical slice", () => {
     expect((composer as HTMLTextAreaElement).disabled).toBe(false);
     expect(screen.getByRole("alert").textContent).not.toContain("private provider body");
   });
+
+  test("fails before the adapter when repository scope disappears", async () => {
+    const factory = new IDBFactory(); vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    const adapter = { streamGeneral: vi.fn(async function* () { yield new Uint8Array(); }), streamPersonProfile: vi.fn(async function* () { yield new Uint8Array(); }) };
+    render(<AssistantProvider activeAnalysis={activeAnalysis} factory={factory} dbName="scope-bridge-test" adapter={adapter}><AssistantView /></AssistantProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: /Crear conversación general/i })); await screen.findByText("Consulta general");
+    const db = await openAssistantDatabase(factory, "scope-bridge-test"); await new Promise<void>((resolve, reject) => { const transaction = db.transaction("conversations", "readwrite"); transaction.objectStore("conversations").clear(); transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error); }); db.close();
+    fireEvent.change(screen.getByRole("textbox", { name: /Pregunta/i }), { target: { value: "¿Qué es Cuadre Reg.?" } }); fireEvent.click(screen.getByRole("button", { name: /Enviar/i }));
+    await screen.findByRole("alert"); expect(adapter.streamGeneral).not.toHaveBeenCalled();
+  });
 });

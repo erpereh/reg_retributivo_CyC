@@ -16,6 +16,7 @@ import type { AnalysisStatus, InternalExcelCheckRow, InternalExcelNormalizedVari
 import { displayText } from "@/lib/ui/displayText";
 import { cn } from "@/lib/utils/classNames";
 import { formatEuro } from "@/lib/utils/money";
+import { selectBreakdownProjection, selectNormalizedProjection } from "@/lib/assistant/tools/sharedSelectors";
 
 type CuadreMode = "breakdown" | "normalizedVariables";
 type StatusFilter = "Todos" | Extract<AnalysisStatus, "OK" | "Revisar" | "Diferencia">;
@@ -99,18 +100,6 @@ function rowTone(status: string): string {
   }
 }
 
-function breakdownMaxDifference(row: InternalExcelCheckRow): number {
-  return Math.max(Math.abs(row.salaryDifference), Math.abs(row.salaryComplementDifference), Math.abs(row.extraSalaryDifference));
-}
-
-function breakdownTotalDifference(row: InternalExcelCheckRow): number {
-  return row.salaryDifference + row.salaryComplementDifference + row.extraSalaryDifference;
-}
-
-function normalizedMaxDifference(row: InternalExcelNormalizedVariablesCheckRow): number {
-  return Math.max(Math.abs(row.salaryDifference), Math.abs(row.salaryComplementDifference), Math.abs(row.extraSalaryDifference), Math.abs(row.totalDifference));
-}
-
 function matchesText(value: string | number | undefined, query: string): boolean {
   return displayText(value).toLocaleLowerCase("es").includes(query);
 }
@@ -138,7 +127,8 @@ function MoneyTriplet({ label, period, breakdown, diff }: Readonly<{ label: stri
 }
 
 function DetailModal({ row, onClose }: Readonly<{ row: InternalExcelCheckRow; onClose: () => void }>) {
-  const copySummary = `Cuadre Reg. ${row.employeeNumber}: ${row.status} - ${displayText(row.detail)}`;
+  const projection = selectBreakdownProjection(row);
+  const copySummary = `Cuadre Reg. ${projection.personId}: ${projection.status} - ${displayText(row.detail)}`;
   const aiPayload = buildInternalExcelExplainPayload(row);
 
   return (
@@ -149,17 +139,17 @@ function DetailModal({ row, onClose }: Readonly<{ row: InternalExcelCheckRow; on
       footer={<div className="flex justify-end"><button type="button" className="btn-secondary" onClick={() => void navigator.clipboard?.writeText(copySummary)}><Copy aria-hidden="true" />Copiar resumen</button></div>}
     >
         <div className="grid gap-4 md:grid-cols-4">
-          <ModalField label="Matrícula" value={row.employeeNumber} />
-          <ModalField label="Estado" value={row.status} />
+          <ModalField label="Matrícula" value={projection.personId} />
+          <ModalField label="Estado" value={projection.status} />
           <ModalField label="Centro" value={row.workplace} />
           <ModalField label="Puesto" value={row.position} />
           <ModalField label="Categoría" value={row.category} />
         </div>
 
         <div className="mt-6 grid gap-3 md:grid-cols-3">
-          <MoneyTriplet label="Salario" period={row.salaryPeriod} breakdown={row.salaryBreakdown} diff={row.salaryDifference} />
-          <MoneyTriplet label="C. Salarial" period={row.salaryComplementPeriod} breakdown={row.salaryComplementBreakdown} diff={row.salaryComplementDifference} />
-          <MoneyTriplet label="Extrasalarial" period={row.extraSalaryPeriod} breakdown={row.extraSalaryBreakdown} diff={row.extraSalaryDifference} />
+          <MoneyTriplet label="Salario" period={projection.salaryPeriod} breakdown={projection.salaryBreakdown} diff={projection.salaryDifference} />
+          <MoneyTriplet label="C. Salarial" period={projection.salaryComplementPeriod} breakdown={projection.salaryComplementBreakdown} diff={projection.salaryComplementDifference} />
+          <MoneyTriplet label="Extrasalarial" period={projection.extraSalaryPeriod} breakdown={projection.extraSalaryBreakdown} diff={projection.extraSalaryDifference} />
         </div>
 
         <div className="mt-6 rounded-2xl bg-slate-50 p-4">
@@ -251,35 +241,38 @@ function BreakdownTable({ rows, onSelectRow }: Readonly<{ rows: readonly Interna
         </tr>
       </thead>
       <tbody>
-        {rows.map((row) => (
+        {rows.map((row) => {
+          const projection = selectBreakdownProjection(row);
+          return (
           <tr
-            key={row.employeeNumber}
+            key={projection.personId}
             tabIndex={0}
             onClick={() => onSelectRow(row)}
             onKeyDown={(event) => {
               if (event.key === "Enter") onSelectRow(row);
             }}
-            className={cn("cursor-pointer transition", rowTone(row.status))}
+            className={cn("cursor-pointer transition", rowTone(projection.status))}
           >
             <td className="sticky left-0 z-10 min-w-[128px] border-b border-line/70 bg-inherit px-4 py-3 font-mono shadow-[10px_0_16px_-16px_rgba(15,23,42,0.55)]">
-              {displayText(row.employeeNumber)}
+              {displayText(projection.personId)}
             </td>
-            <td className="border-b border-line/70 px-4 py-3 text-right font-mono tabular-nums">{formatEuro(row.salaryPeriod)}</td>
-            <td className="border-b border-line/70 px-4 py-3 text-right font-mono tabular-nums">{formatEuro(row.salaryBreakdown)}</td>
-            <td className={cn("border-b border-line/70 px-4 py-3 text-right font-mono tabular-nums", diffClass(row.salaryDifference))}>{formatEuro(row.salaryDifference)}</td>
-            <td className="border-b border-line/70 px-4 py-3 text-right font-mono tabular-nums">{formatEuro(row.salaryComplementPeriod)}</td>
-            <td className="border-b border-line/70 px-4 py-3 text-right font-mono tabular-nums">{formatEuro(row.salaryComplementBreakdown)}</td>
-            <td className={cn("border-b border-line/70 px-4 py-3 text-right font-mono tabular-nums", diffClass(row.salaryComplementDifference))}>
-              {formatEuro(row.salaryComplementDifference)}
+            <td className="border-b border-line/70 px-4 py-3 text-right font-mono tabular-nums">{formatEuro(projection.salaryPeriod)}</td>
+            <td className="border-b border-line/70 px-4 py-3 text-right font-mono tabular-nums">{formatEuro(projection.salaryBreakdown)}</td>
+            <td className={cn("border-b border-line/70 px-4 py-3 text-right font-mono tabular-nums", diffClass(projection.salaryDifference))}>{formatEuro(projection.salaryDifference)}</td>
+            <td className="border-b border-line/70 px-4 py-3 text-right font-mono tabular-nums">{formatEuro(projection.salaryComplementPeriod)}</td>
+            <td className="border-b border-line/70 px-4 py-3 text-right font-mono tabular-nums">{formatEuro(projection.salaryComplementBreakdown)}</td>
+            <td className={cn("border-b border-line/70 px-4 py-3 text-right font-mono tabular-nums", diffClass(projection.salaryComplementDifference))}>
+              {formatEuro(projection.salaryComplementDifference)}
             </td>
-            <td className="border-b border-line/70 px-4 py-3 text-right font-mono tabular-nums">{formatEuro(row.extraSalaryPeriod)}</td>
-            <td className="border-b border-line/70 px-4 py-3 text-right font-mono tabular-nums">{formatEuro(row.extraSalaryBreakdown)}</td>
-            <td className={cn("border-b border-line/70 px-4 py-3 text-right font-mono tabular-nums", diffClass(row.extraSalaryDifference))}>{formatEuro(row.extraSalaryDifference)}</td>
+            <td className="border-b border-line/70 px-4 py-3 text-right font-mono tabular-nums">{formatEuro(projection.extraSalaryPeriod)}</td>
+            <td className="border-b border-line/70 px-4 py-3 text-right font-mono tabular-nums">{formatEuro(projection.extraSalaryBreakdown)}</td>
+            <td className={cn("border-b border-line/70 px-4 py-3 text-right font-mono tabular-nums", diffClass(projection.extraSalaryDifference))}>{formatEuro(projection.extraSalaryDifference)}</td>
             <td className="border-b border-line/70 px-4 py-3">
-<StatusBadge value={row.status} />
+<StatusBadge value={projection.status} />
             </td>
           </tr>
-        ))}
+          );
+        })}
       </tbody>
     </table>
   );
@@ -326,21 +319,23 @@ function NormalizedVariablesTable({ rows }: Readonly<{ rows: readonly InternalEx
         </tr>
       </thead>
       <tbody>
-        {rows.map((row) => (
-          <tr key={row.employeeNumber} className={cn("transition", rowTone(row.status))}>
+        {rows.map((row) => {
+          const projection = selectNormalizedProjection(row);
+          return (
+          <tr key={projection.personId} className={cn("transition", rowTone(projection.status))}>
             <td className="sticky left-0 z-10 min-w-[128px] border-b border-line/70 bg-inherit px-4 py-3 font-mono shadow-[10px_0_16px_-16px_rgba(15,23,42,0.55)]">
-              {displayText(row.employeeNumber)}
+              {displayText(projection.personId)}
             </td>
             <td className="border-b border-line/70 px-4 py-3">{displayText(row.person) || "Sin dato"}</td>
             <td className="border-b border-line/70 px-4 py-3">{displayText(row.workplace) || "Sin dato"}</td>
             <td className="border-b border-line/70 px-4 py-3">{displayText(row.position) || "Sin dato"}</td>
             <td className="border-b border-line/70 px-4 py-3">{displayText(row.category) || "Sin dato"}</td>
             {NORMALIZED_BLOCKS.map((block) => {
-              const period = row[block.period];
-              const normalized = row[block.normalized];
-              const difference = row[block.difference];
+              const period = projection[block.period];
+              const normalized = projection[block.normalized];
+              const difference = projection[block.difference];
               return (
-                <Fragment key={`${row.employeeNumber}-${block.label}`}>
+                <Fragment key={`${projection.personId}-${block.label}`}>
                   <td className="border-b border-line/70 px-4 py-3 text-right font-mono tabular-nums">{formatEuro(period)}</td>
                   <td className="border-b border-line/70 px-4 py-3 text-right font-mono tabular-nums">{formatEuro(normalized)}</td>
                   <td className={cn("border-b border-line/70 px-4 py-3 text-right font-mono tabular-nums", diffClass(difference))}>{formatEuro(difference)}</td>
@@ -348,10 +343,11 @@ function NormalizedVariablesTable({ rows }: Readonly<{ rows: readonly InternalEx
               );
             })}
             <td className="border-b border-line/70 px-4 py-3">
-<StatusBadge value={row.status} />
+<StatusBadge value={projection.status} />
             </td>
           </tr>
-        ))}
+          );
+        })}
       </tbody>
     </table>
   );
@@ -395,16 +391,16 @@ export function CuadreExcelView() {
       return buildMetrics({
         totalCount: normalizedRows?.length ?? 0,
         rows: filteredNormalizedRows,
-        maxDifference: filteredNormalizedRows.reduce((max, row) => Math.max(max, normalizedMaxDifference(row)), 0),
-        visibleTotalDifference: filteredNormalizedRows.reduce((sum, row) => sum + row.totalDifference, 0),
+        maxDifference: filteredNormalizedRows.reduce((max, row) => { const projected = selectNormalizedProjection(row); return Math.max(max, Math.abs(projected.salaryDifference), Math.abs(projected.salaryComplementDifference), Math.abs(projected.extraSalaryDifference), Math.abs(projected.totalDifference)); }, 0),
+        visibleTotalDifference: filteredNormalizedRows.reduce((sum, row) => sum + selectNormalizedProjection(row).totalDifference, 0),
       });
     }
 
     return buildMetrics({
       totalCount: result?.internalExcelChecks.length ?? 0,
       rows: filteredBreakdownRows,
-      maxDifference: filteredBreakdownRows.reduce((max, row) => Math.max(max, breakdownMaxDifference(row)), 0),
-      visibleTotalDifference: filteredBreakdownRows.reduce((sum, row) => sum + breakdownTotalDifference(row), 0),
+      maxDifference: filteredBreakdownRows.reduce((max, row) => { const projected = selectBreakdownProjection(row); return Math.max(max, Math.abs(projected.salaryDifference), Math.abs(projected.salaryComplementDifference), Math.abs(projected.extraSalaryDifference)); }, 0),
+      visibleTotalDifference: filteredBreakdownRows.reduce((sum, row) => { const projected = selectBreakdownProjection(row); return sum + projected.salaryDifference + projected.salaryComplementDifference + projected.extraSalaryDifference; }, 0),
     });
   }, [activeMode, filteredBreakdownRows, filteredNormalizedRows, normalizedRows?.length, result?.internalExcelChecks.length]);
 

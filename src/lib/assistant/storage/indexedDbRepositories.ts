@@ -1,6 +1,10 @@
 import type { AssistantSettings, ChatAction, ChatEvent, ChatMessage, Conversation, ModelProfile, PersistedDocumentMetadata, SourceReference } from "@/lib/assistant/domain";
 import { openAssistantDatabase, type AssistantStoreName } from "@/lib/assistant/storage/database";
 import { assertSafeForPersistence } from "@/lib/assistant/privacy/assertions";
+import { DirectSearchIndex, type SearchFacets, type SearchIndexRecord } from "@/lib/assistant/search/directIndex";
+import type { DocumentScope } from "@/lib/assistant/domain";
+import { cleanupJobSchema, contextSnapshotSchema } from "@/lib/assistant/schemas";
+import type { z } from "zod";
 import type {
   AssistantCleanupRepository, AssistantDocumentRepository, AssistantRepositories, AssistantSettingsRepository, AssistantStoredRecord, BeginAnalysisIngestionInput, CleanupJob, ContextSnapshot,
   ContextSnapshotRepository, ConversationRepository, ConversationWriteBlock, DeleteDocumentCorpusInput, DocumentCorpusSelection,
@@ -68,6 +72,11 @@ class IndexedEntityRepository<T extends { id: string }> implements EntityReposit
   }
 }
 
+class ValidatedIndexedEntityRepository<T extends { id: string }> extends IndexedEntityRepository<T> {
+  constructor(db: IDBDatabase, storeName: AssistantStoreName, private readonly schema: z.ZodType<T>) { super(db, storeName); }
+  override async put(value: T): Promise<void> { await super.put(this.schema.parse(value)); }
+}
+
 interface CursorPosition { indexKey: IDBValidKey; primaryKey: IDBValidKey }
 
 function encodeCursor(position: CursorPosition): string {
@@ -129,10 +138,10 @@ class IndexedMessageRepository extends IndexedEntityRepository<ChatMessage> impl
 export interface IndexedDbRepositoriesOptions { factory?: IDBFactory; dbName?: string }
 
 interface StoredChunkRecord extends AssistantStoredRecord {
-  documentId: string; sequence: number; content: string; snippet: string; sanitizedHash: string; terms: readonly string[];
+  documentId: string; sequence: number; content: string; snippet: string; sanitizedHash: string; terms: readonly string[]; scope?: DocumentScope; availability?: "available" | "historical_unavailable"; facets?: SearchFacets;
 }
 interface StoredSearchTermRecord extends AssistantStoredRecord {
-  documentId: string; chunkId: string; term: string; positions: readonly number[];
+  documentId: string; chunkId: string; term: string; positions: readonly number[]; scope?: DocumentScope; availability?: "available" | "historical_unavailable"; facets?: SearchFacets;
 }
 interface DocumentCorpusRecords {
   documents: PersistedDocumentMetadata[];
@@ -190,13 +199,13 @@ export async function createIndexedDbRepositories(options: IndexedDbRepositories
   const sources = new IndexedEntityRepository<SourceReference>(db, "sources") as SourceRepository;
   const chunks = new IndexedEntityRepository<AssistantStoredRecord>(db, "chunks");
   const searchTerms = new IndexedEntityRepository<AssistantStoredRecord>(db, "searchTerms");
-  const snapshots = new IndexedEntityRepository<ContextSnapshot>(db, "snapshots") as ContextSnapshotRepository;
+  const snapshots = new ValidatedIndexedEntityRepository<ContextSnapshot>(db, "snapshots", contextSnapshotSchema) as ContextSnapshotRepository;
   const cache = new IndexedEntityRepository<AssistantStoredRecord>(db, "cache");
   const analysisVersions = new IndexedEntityRepository<AssistantStoredRecord>(db, "analysisVersions");
   const indexJobs = new IndexedEntityRepository<AssistantStoredRecord>(db, "indexJobs");
   const modelProfiles = new IndexedEntityRepository<ModelProfile>(db, "modelProfiles") as ModelProfileRepository;
   const assistantSettings = new IndexedEntityRepository<AssistantSettings>(db, "assistantSettings") as AssistantSettingsRepository;
-  const cleanupJobs = new IndexedEntityRepository<CleanupJob>(db, "cleanupJobs") as AssistantCleanupRepository;
+  const cleanupJobs = new ValidatedIndexedEntityRepository<CleanupJob>(db, "cleanupJobs", cleanupJobSchema) as AssistantCleanupRepository;
 
   async function mutateDocumentCorpus(input: DocumentCorpusSelection, removeSource: boolean): Promise<readonly DocumentIdMapping[]> {
     const transaction = db.transaction(["documents", "chunks", "searchTerms", "indexJobs"], "readwrite");
@@ -218,6 +227,7 @@ export async function createIndexedDbRepositories(options: IndexedDbRepositories
         ...chunk,
         id: `${documentMap.get(chunk.documentId)!}-chunk-${chunk.sequence}`,
         documentId: documentMap.get(chunk.documentId)!,
+        scope: { type: "conversation" as const, conversationId: input.targetConversationId },
       }));
       const chunkMap = new Map(records.chunks.filter((chunk) => documentMap.has(chunk.documentId)).map((chunk) => [chunk.id, `${documentMap.get(chunk.documentId)!}-chunk-${chunk.sequence}`]));
       const copiedTerms = records.searchTerms.filter((term) => documentMap.has(term.documentId) && chunkMap.has(term.chunkId)).map((term) => ({
@@ -225,6 +235,7 @@ export async function createIndexedDbRepositories(options: IndexedDbRepositories
         id: `${chunkMap.get(term.chunkId)!}-term-${term.term}`,
         documentId: documentMap.get(term.documentId)!,
         chunkId: chunkMap.get(term.chunkId)!,
+        scope: { type: "conversation" as const, conversationId: input.targetConversationId },
       }));
       const copiedJobs = records.indexJobs.filter((job) => documentMap.has(job.documentId)).map((job) => ({
         ...job,
@@ -249,6 +260,13 @@ export async function createIndexedDbRepositories(options: IndexedDbRepositories
 
   return {
     conversations, messages, events, actions, documents, sources, chunks, searchTerms, snapshots, cache, analysisVersions, indexJobs, modelProfiles, assistantSettings, cleanupJobs,
+    async buildSearchIndex(scope) {
+      const transaction = db.transaction(["documents", "chunks"], "readonly");
+      const [storedDocuments, storedChunks] = await Promise.all([requestResult(transaction.objectStore("documents").getAll()), requestResult(transaction.objectStore("chunks").getAll())]); await transactionDone(transaction);
+      const documentMap = new Map((storedDocuments as PersistedDocumentMetadata[]).map((document) => [document.id, document]));
+      const records: SearchIndexRecord[] = (storedChunks as StoredChunkRecord[]).flatMap((chunk) => { const document = documentMap.get(chunk.documentId); if (!document) return []; const recordScope = document.scope; const same = recordScope.type === scope.type && (scope.type === "analysis" ? recordScope.type === "analysis" && recordScope.analysisId === scope.analysisId : recordScope.type === "conversation" && recordScope.conversationId === scope.conversationId); if (!same) return []; return [{ id: chunk.id, documentId: chunk.documentId, chunkId: chunk.id, scope: recordScope, availability: document.status === "ready" ? "available" : "historical_unavailable", sanitizedHash: chunk.sanitizedHash, sanitizedSourceLabel: document.sanitizedSourceLabel, content: chunk.content, facets: chunk.facets ?? { sourceType: [document.mediaType] } }]; });
+      return new DirectSearchIndex(records);
+    },
     async writeConversationBlock(block: ConversationWriteBlock): Promise<void> {
       assertSafeForPersistence(block);
       const transaction = db.transaction(["conversations", "messages", "sources", "events"], "readwrite");
@@ -271,8 +289,9 @@ export async function createIndexedDbRepositories(options: IndexedDbRepositories
       const done = transactionDone(transaction);
       try {
         transaction.objectStore("documents").put(block.document);
-        for (const chunk of block.chunks) transaction.objectStore("chunks").put(chunk);
-        for (const term of block.searchTerms) transaction.objectStore("searchTerms").put(term);
+        const availability = block.document.status === "ready" ? "available" : "historical_unavailable";
+        for (const chunk of block.chunks) transaction.objectStore("chunks").put({ ...chunk, scope: block.document.scope, availability, facets: chunk.facets ?? { sourceType: [block.document.mediaType] } });
+        for (const term of block.searchTerms) transaction.objectStore("searchTerms").put({ ...term, scope: block.document.scope, availability, facets: term.facets ?? { sourceType: [block.document.mediaType] } });
         transaction.objectStore("indexJobs").put(block.indexJob);
         await done;
       } catch (error) {
@@ -329,8 +348,9 @@ export async function createIndexedDbRepositories(options: IndexedDbRepositories
         deleteCorpusRecords(transaction, records, previousDocumentIds);
         for (const block of input.blocks) {
           transaction.objectStore("documents").put(block.document);
-          for (const chunk of block.chunks) transaction.objectStore("chunks").put(chunk);
-          for (const term of block.searchTerms) transaction.objectStore("searchTerms").put(term);
+          const availability = block.document.status === "ready" ? "available" : "historical_unavailable";
+          for (const chunk of block.chunks) transaction.objectStore("chunks").put({ ...chunk, scope: block.document.scope, availability, facets: chunk.facets ?? { sourceType: [block.document.mediaType] } });
+          for (const term of block.searchTerms) transaction.objectStore("searchTerms").put({ ...term, scope: block.document.scope, availability, facets: term.facets ?? { sourceType: [block.document.mediaType] } });
           transaction.objectStore("indexJobs").put(block.indexJob);
         }
         await done;

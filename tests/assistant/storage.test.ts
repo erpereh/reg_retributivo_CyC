@@ -33,12 +33,12 @@ describe("assistant IndexedDB repositories", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  test("creates the complete idempotent version 1 schema", async () => {
+  test("creates the complete idempotent version 2 schema", async () => {
     const db = await openAssistantDatabase(factory, "schema-test");
     expect(Array.from(db.objectStoreNames)).toEqual([...ASSISTANT_STORES].sort());
     db.close();
     const reloaded = await openAssistantDatabase(factory, "schema-test");
-    expect(reloaded.version).toBe(1);
+    expect(reloaded.version).toBe(2);
     expect(Array.from(reloaded.objectStoreNames)).toEqual([...ASSISTANT_STORES].sort());
     reloaded.close();
   });
@@ -89,7 +89,7 @@ describe("assistant IndexedDB repositories", () => {
     const repositories = await createIndexedDbRepositories({ factory, dbName: "surface-test" });
     expect(Object.keys(repositories).sort()).toEqual([
       "actions", "analysisVersions", "assistantSettings", "cache", "chunks", "cleanupJobs", "conversations", "documents", "events",
-      "beginAnalysisIngestion", "clearAssistantContent", "copyDocumentCorpus", "deleteDocumentCorpus", "indexJobs", "messages", "modelProfiles", "replaceAnalysisCorpus", "searchTerms", "snapshots", "sources", "transferDocumentCorpus", "writeConversationBlock", "writeIngestionBlock", "writeModelConfiguration", "close",
+      "beginAnalysisIngestion", "buildSearchIndex", "clearAssistantContent", "copyDocumentCorpus", "deleteDocumentCorpus", "indexJobs", "messages", "modelProfiles", "replaceAnalysisCorpus", "searchTerms", "snapshots", "sources", "transferDocumentCorpus", "writeConversationBlock", "writeIngestionBlock", "writeModelConfiguration", "close",
     ].sort());
     repositories.close();
   });
@@ -174,7 +174,8 @@ describe("assistant IndexedDB repositories", () => {
     const mappings = await repositories.copyDocumentCorpus({ sourceConversationId: "c1", targetConversationId: "c3", documentIds: ["d1-copy-special"] });
     expect(mappings).toEqual([{ sourceDocumentId: "d1-copy-special", targetDocumentId: "d1-copy-special-copy-c3" }]);
     expect(await repositories.documents.get("d1-copy-special-copy-c3")).toEqual(expect.objectContaining({ scope: { type: "conversation", conversationId: "c3" } }));
-    expect(await repositories.chunks.get("d1-copy-special-copy-c3-chunk-0")).toEqual(expect.objectContaining({ documentId: "d1-copy-special-copy-c3" }));
+    expect(await repositories.chunks.get("d1-copy-special-copy-c3-chunk-0")).toEqual(expect.objectContaining({ documentId: "d1-copy-special-copy-c3", scope: { type: "conversation", conversationId: "c3" } }));
+    expect(await repositories.searchTerms.get("d1-copy-special-copy-c3-chunk-0-term-texto")).toEqual(expect.objectContaining({ documentId: "d1-copy-special-copy-c3", chunkId: "d1-copy-special-copy-c3-chunk-0", scope: { type: "conversation", conversationId: "c3" } }));
     expect(await repositories.indexJobs.get("d1-copy-special-copy-c3-index")).toEqual(expect.objectContaining({ documentId: "d1-copy-special-copy-c3", indexedChunkIds: ["d1-copy-special-copy-c3-chunk-0"] }));
     expect(await repositories.documents.get("d2-copy-c3")).toBeUndefined();
     repositories.close();
@@ -275,6 +276,8 @@ describe("assistant IndexedDB repositories", () => {
     expect(await repositories.searchTerms.get("d1-term")).toBeUndefined();
     expect(await repositories.indexJobs.get("d1-job")).toBeUndefined();
     expect(await repositories.documents.get("d1-copy-c3")).toBeTruthy();
+    expect(await repositories.chunks.get("d1-copy-c3-chunk-0")).toEqual(expect.objectContaining({ scope: { type: "conversation", conversationId: "c3" } }));
+    expect(await repositories.searchTerms.get("d1-copy-c3-chunk-0-term-texto")).toEqual(expect.objectContaining({ scope: { type: "conversation", conversationId: "c3" } }));
     repositories.close();
   });
 

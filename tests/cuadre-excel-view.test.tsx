@@ -3,6 +3,8 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { CuadreExcelView } from "@/components/cuadre-excel/CuadreExcelView";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
 const appState = vi.hoisted(() => ({
   internalExcelChecksFixture: [
@@ -122,6 +124,15 @@ describe("CuadreExcelView", () => {
       internalExcelChecks: structuredClone(appState.internalExcelChecksFixture),
       internalExcelNormalizedVariablesChecks: structuredClone(appState.normalizedVariablesChecksFixture),
     };
+  });
+
+  test("renders all shared Cuadre fact fields through the shared projections", () => {
+    const source = readFileSync(path.join(process.cwd(), "src", "components", "cuadre-excel", "CuadreExcelView.tsx"), "utf8");
+    expect(source).not.toMatch(/row\.(?:salaryPeriod|salaryBreakdown|salaryDifference|salaryComplementPeriod|salaryComplementBreakdown|salaryComplementDifference|extraSalaryPeriod|extraSalaryBreakdown|extraSalaryDifference|salaryNormalizedPlusVariables|salaryComplementNormalizedPlusVariables|extraSalaryNormalizedPlusVariables|totalPeriod|totalNormalizedPlusVariables|totalDifference)/u);
+    render(<CuadreExcelView />);
+    fireEvent.click(screen.getByText("10050"));
+    const dialog = screen.getByRole("dialog", { name: /Detalle Cuadre Reg\./i });
+    ["Salario", "C. Salarial", "Extrasalarial"].forEach((label) => expect(within(dialog).getByText(label)).toBeTruthy());
   });
 
   test("renders Cuadre Reg. with submenu and opens No norm. / Desglose by default", () => {

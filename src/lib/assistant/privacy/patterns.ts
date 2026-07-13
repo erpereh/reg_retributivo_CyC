@@ -48,15 +48,21 @@ export const PROHIBITED_PERSISTENCE_KEYS = new Set([
   "apikey", "api_key", "token", "password", "secret", "authorization", "headers",
 ]);
 
+export function canonicalizePrivacyText(input: string): string {
+  if (/\p{Cf}/u.test(input)) throw new Error("El contenido contiene caracteres de formato Unicode no permitidos por privacidad.");
+  return input.normalize("NFKC").replace(/\p{White_Space}+/gu, " ").trim().toLocaleLowerCase("es");
+}
+
 export function normalizeSensitiveKey(key: string): string {
-  return key.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9_]/giu, "").toLowerCase();
+  return canonicalizePrivacyText(key).normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9_]/giu, "");
 }
 
 export function detectSensitivePatterns(input: string, logicalPath = "$"): SensitiveFinding[] {
   const findings: SensitiveFinding[] = [];
   const safeLogicalPath = /^\$(?:(?:\.field\[\d+\])|(?:\[\d+\]))*$/u.test(logicalPath) ? logicalPath : "$";
+  const canonical = canonicalizePrivacyText(input);
   for (const rule of RULES) {
-    if (rule.pattern.test(input)) findings.push({ category: rule.category, logicalPath: safeLogicalPath, ruleId: rule.id });
+    if (rule.pattern.test(canonical)) findings.push({ category: rule.category, logicalPath: safeLogicalPath, ruleId: rule.id });
   }
   return findings;
 }

@@ -10,6 +10,8 @@ import { createIndexedDbRepositories } from "@/lib/assistant/storage/indexedDbRe
 import type { AssistantRepositories } from "@/lib/assistant/storage/repositories";
 import { executeAssistantToolRequest } from "@/lib/assistant/tools/personTools";
 import type { StoredAnalysis } from "@/lib/types";
+import { createRepositoryBoundAssistantOrchestrator, type AssistantOrchestrator } from "@/lib/assistant/orchestration/assistantOrchestrator";
+import type { AnalysisToolRegistry } from "@/lib/assistant/tools/registry";
 
 const FAKE_MODEL_ID = "fake-retributivo-v1";
 const now = () => new Date().toISOString();
@@ -58,12 +60,15 @@ interface AssistantAdapter {
   streamGeneral(request: Parameters<FakeAssistantAdapter["streamGeneral"]>[0]): AsyncIterable<Uint8Array>;
   streamPersonProfile(request: Parameters<FakeAssistantAdapter["streamPersonProfile"]>[0]): AsyncIterable<Uint8Array>;
 }
+type PendingFakeRequest = { readonly kind: "general"; readonly request: Parameters<AssistantAdapter["streamGeneral"]>[0] } | { readonly kind: "profile"; readonly request: Parameters<AssistantAdapter["streamPersonProfile"]>[0] };
 
 export function AssistantProvider({ children, activeAnalysis, factory, dbName, adapter }: Readonly<{
   children: ReactNode; activeAnalysis?: StoredAnalysis; factory?: IDBFactory; dbName?: string; adapter?: AssistantAdapter;
 }>) {
   const repositoriesRef = useRef<AssistantRepositories | undefined>(undefined);
+  const orchestratorRef = useRef<AssistantOrchestrator | undefined>(undefined);
   const adapterRef = useRef<AssistantAdapter>(adapter ?? new FakeAssistantAdapter());
+  const pendingFakeRequestRef = useRef<PendingFakeRequest | undefined>(undefined);
   const vaultRef = useRef(createEphemeralKeyVault());
   const assistantSettingsRef = useRef<AssistantSettings>(DEFAULT_ASSISTANT_SETTINGS);
   const modelProfilesRef = useRef<ModelProfile[]>([]);
@@ -88,6 +93,14 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
         repositories = await createIndexedDbRepositories({ factory, dbName });
         if (cancelled) { repositories.close(); return; }
         repositoriesRef.current = repositories;
+        orchestratorRef.current = createRepositoryBoundAssistantOrchestrator({ transport: async (body, signal) => {
+          const pending = pendingFakeRequestRef.current; if (!pending) throw new Error("No hay una solicitud local preparada.");
+          const decoder = new IncrementalNdjsonDecoder(); const events: unknown[] = [];
+          const consume = (values: ReturnType<IncrementalNdjsonDecoder["push"]>) => values.forEach((event) => events.push({ ...event, roundId: String(body.roundId) }));
+          const stream = pending.kind === "general" ? adapterRef.current.streamGeneral(pending.request) : adapterRef.current.streamPersonProfile(pending.request);
+          for await (const chunk of stream) { if (signal?.aborted) throw signal.reason; consume(decoder.push(chunk)); }
+          consume(decoder.finish()); return new Response(events.map((event) => `${JSON.stringify(event)}\n`).join(""));
+        }, registry: { names: [], execute: async () => { throw new Error("Herramienta no disponible."); } } as unknown as AnalysisToolRegistry }, repositories);
         const restoredProfiles = (await repositories.modelProfiles.listAll()).flatMap((profile) => {
           const parsed = modelProfileSchema.safeParse(profile);
           return parsed.success ? [parsed.data] : [];
@@ -124,6 +137,8 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       mountedRef.current = false;
       repositoriesRef.current?.close();
       repositoriesRef.current = undefined;
+      orchestratorRef.current?.stop();
+      orchestratorRef.current = undefined;
       vaultRef.current.clearKey();
     };
   }, [dbName, factory]);
@@ -241,18 +256,16 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     };
     setStreaming(true);
     try {
-      let accumulated = "";
-      const decoder = new IncrementalNdjsonDecoder();
-      for await (const chunk of adapterRef.current.streamGeneral({ systemPrompt: GENERAL_RETRIBUTIVO_PROMPT, question: content, messageId: assistantMessage.id })) {
-        for (const event of decoder.push(chunk)) if (event.type === "text_delta") accumulated += event.delta;
-      }
-      decoder.finish();
+      pendingFakeRequestRef.current = { kind: "general", request: { systemPrompt: GENERAL_RETRIBUTIVO_PROMPT, question: content, messageId: assistantMessage.id } };
+      const result = await orchestratorRef.current!.send({ conversationId: conversation.id, ...(conversation.type === "analysis" ? { analysisId: conversation.analysisId } : {}), question: content, modelProfileId: conversation.modelProfileId, modelId: FAKE_MODEL_ID, responseMode: conversation.responseMode, contextStrategy: conversation.contextStrategy });
+      const accumulated = result.text;
       const completed = { ...assistantMessage, content: accumulated, status: "completed" as const };
       const updated = { ...conversation, updatedAt: now() };
       await persistRound(updated, [...messages, userMessage, completed], sources);
     } catch {
       setError("No se pudo completar la respuesta del Asistente.");
     } finally {
+      pendingFakeRequestRef.current = undefined;
       setStreaming(false);
     }
   }, [activeAnalysis, conversation, messages, persistRound, sources, streaming]);
@@ -281,17 +294,15 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     };
     setStreaming(true);
     try {
-      let accumulated = "";
-      const decoder = new IncrementalNdjsonDecoder();
-      for await (const chunk of adapterRef.current.streamPersonProfile({ messageId: assistantMessage.id, totals: profile.totals, source: profile.source })) {
-        for (const event of decoder.push(chunk)) if (event.type === "text_delta") accumulated += event.delta;
-      }
-      decoder.finish();
+      pendingFakeRequestRef.current = { kind: "profile", request: { messageId: assistantMessage.id, totals: profile.totals, source: profile.source } };
+      const result = await orchestratorRef.current!.send({ conversationId: conversation.id, analysisId: conversation.analysisId, question: `Perfil de la matrícula ${conversation.primaryPersonId}`, modelProfileId: conversation.modelProfileId, modelId: FAKE_MODEL_ID, responseMode: conversation.responseMode, contextStrategy: conversation.contextStrategy });
+      const accumulated = result.text;
       const completed = { ...assistantMessage, content: accumulated, status: "completed" as const };
       await persistRound({ ...conversation, updatedAt: now() }, [...messages, completed], [...sources, profile.source]);
     } catch {
       setError("No se pudo completar la respuesta del Asistente.");
     } finally {
+      pendingFakeRequestRef.current = undefined;
       setStreaming(false);
     }
   }, [activeAnalysis, conversation, messages, persistRound, sources]);

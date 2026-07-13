@@ -439,6 +439,16 @@ describe("TablesView", () => {
     expect(source).not.toContain("key={header}");
   });
 
+  test("renders every Persona economic fact through the shared profile projection", () => {
+    const source = readFileSync(path.join(process.cwd(), "src", "components", "tables", "TablesView.tsx"), "utf8");
+    expect(source).not.toMatch(/state\.row\.(?:salaryRegistro|salaryPdf|salaryDifference|salaryComplementRegistro|salaryComplementPdf|salaryComplementDifference|extraSalaryRegistro|extraSalaryPdf|extraSalaryDifference|registroTotal|pdfTotal|totalDifference)/u);
+    render(<TablesView mode="personas" />);
+    fireEvent.click(screen.getByText("10048"));
+    const economic = document.querySelector('[data-surface="economic-breakdown"]') as HTMLElement;
+    expect(economic).toBeTruthy();
+    ["Salario", "C. Salarial", "Extrasalarial", "Total"].forEach((label) => expect(within(economic).getByText(label)).toBeTruthy());
+  });
+
   test("renders repeated visible headers with unique React keys", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
 

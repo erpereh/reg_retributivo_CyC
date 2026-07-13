@@ -18,6 +18,7 @@ import { formatEuro } from "@/lib/utils/money";
 import { describeConceptCause, describePersonCause, type ProbableCause } from "@/lib/ui/probableCause";
 import { cn } from "@/lib/utils/classNames";
 import { displayText } from "@/lib/ui/displayText";
+import { selectPersonProfileFromRow } from "@/lib/assistant/tools/sharedSelectors";
 
 interface TableHeader {
   readonly key: string;
@@ -264,14 +265,15 @@ function MoneyTriplet({ label, registro, pdf, diff }: Readonly<{ label: string; 
 }
 
 function PersonSummarySection({ row }: Readonly<{ row: PersonComparisonRow }>) {
+  const profile = selectPersonProfileFromRow(row);
   return (
     <section data-surface="person-summary" className="mt-6 border-y border-line bg-slate-50/80 px-4 py-4" aria-label="Resumen">
       <h3 className="text-lg font-semibold text-ink">Resumen</h3>
       <div className="mt-4 grid gap-3 md:grid-cols-4">
-        <ModalField label="Total Reg. Retrib." value={formatEuro(row.registroTotal)} />
-        <ModalField label="Total Recibo" value={formatEuro(row.pdfTotal)} />
-        <ModalField label="Diferencia" value={formatEuro(row.totalDifference)} />
-        <ModalField label="Estado" value={row.status} />
+        <ModalField label="Total Reg. Retrib." value={formatEuro(profile.totals.registro)} />
+        <ModalField label="Total Recibo" value={formatEuro(profile.totals.payroll)} />
+        <ModalField label="Diferencia" value={formatEuro(profile.totals.difference)} />
+        <ModalField label="Estado" value={profile.status} />
       </div>
     </section>
   );
@@ -500,6 +502,7 @@ function DetailModal({
       : state.kind === "concept"
         ? buildConceptExplainPayload(state.row, cause)
         : buildNotIncludedConceptExplainPayload(state.row, cause);
+  const personProfile = state.kind === "person" ? selectPersonProfileFromRow(state.row) : undefined;
 
   return (
     <ModalShell
@@ -556,10 +559,10 @@ function DetailModal({
 
         {state.kind === "person" ? (
           <div data-surface="economic-breakdown" className="mt-6 divide-y divide-line border-y border-line">
-            <MoneyTriplet label="Salario" registro={state.row.salaryRegistro} pdf={state.row.salaryPdf} diff={state.row.salaryDifference} />
-            <MoneyTriplet label="C. Salarial" registro={state.row.salaryComplementRegistro} pdf={state.row.salaryComplementPdf} diff={state.row.salaryComplementDifference} />
-            <MoneyTriplet label="Extrasalarial" registro={state.row.extraSalaryRegistro} pdf={state.row.extraSalaryPdf} diff={state.row.extraSalaryDifference} />
-            <MoneyTriplet label="Total" registro={state.row.registroTotal} pdf={state.row.pdfTotal} diff={state.row.totalDifference} />
+            <MoneyTriplet label="Salario" registro={personProfile!.blocks.salary.registro} pdf={personProfile!.blocks.salary.payroll} diff={personProfile!.blocks.salary.difference} />
+            <MoneyTriplet label="C. Salarial" registro={personProfile!.blocks.salaryComplement.registro} pdf={personProfile!.blocks.salaryComplement.payroll} diff={personProfile!.blocks.salaryComplement.difference} />
+            <MoneyTriplet label="Extrasalarial" registro={personProfile!.blocks.extraSalary.registro} pdf={personProfile!.blocks.extraSalary.payroll} diff={personProfile!.blocks.extraSalary.difference} />
+            <MoneyTriplet label="Total" registro={personProfile!.totals.registro} pdf={personProfile!.totals.payroll} diff={personProfile!.totals.difference} />
           </div>
         ) : state.kind === "concept" ? (
           <div className="mt-6">

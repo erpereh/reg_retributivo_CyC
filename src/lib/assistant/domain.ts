@@ -38,6 +38,8 @@ export interface ChatMessage {
   status: MessageStatus;
   contextOrigin: ContextOrigin;
   modelProfileId: string;
+  /** Optional only for records written before schema v2; every new assistant message sets it. */
+  modelId?: string;
   responseMode: ResponseMode;
   contextStrategy: ContextStrategy;
   analysisVersion?: string;
