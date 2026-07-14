@@ -128,11 +128,6 @@ export interface ConversionResult { conversation: Conversation; messages: ChatMe
 
 export interface KnownPersonReference { employeeNumber: string; person?: string }
 const SENSITIVE_CHAT_CONTENT_ERROR = "El contenido contiene datos sensibles no permitidos.";
-const APPROVED_GENERAL_CHAT_PROMPTS = new Set([
-  "¿Qué es Retributivo?",
-  "¿Qué es Cuadre Reg.?",
-  "¿Qué compara el Registro Retributivo con los Recibos?",
-]);
 
 function escapeRegularExpression(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -140,14 +135,11 @@ function escapeRegularExpression(value: string): string {
 
 export function sanitizeChatContent(rawContent: string, knownPeople: readonly KnownPersonReference[], conversationType: ConversationType): string {
   let content = rawContent.trim();
-  if (conversationType === "general" && detectSensitivePatterns(content).length) {
-    if (APPROVED_GENERAL_CHAT_PROMPTS.has(content)) return content;
-    throw new Error(SENSITIVE_CHAT_CONTENT_ERROR);
-  }
-
-  for (const person of knownPeople) {
-    if (!person.person?.trim()) continue;
-    content = content.replace(new RegExp(escapeRegularExpression(person.person), "giu"), `matrícula ${person.employeeNumber}`);
+  if (conversationType === "analysis") {
+    for (const person of knownPeople) {
+      if (!person.person?.trim()) continue;
+      content = content.replace(new RegExp(escapeRegularExpression(person.person), "giu"), `matrícula ${person.employeeNumber}`);
+    }
   }
   const structuredMatch = /^(?:Revisa a|Consulta la) matrícula ([\p{L}\p{N}._-]+)$/u.exec(content);
   if (structuredMatch && knownPeople.some((person) => person.employeeNumber === structuredMatch[1])) return content;

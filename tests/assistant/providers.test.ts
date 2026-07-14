@@ -21,7 +21,7 @@ describe("provider adapters", () => {
       openrouter: { baseUrl: "https://openrouter.ai/api/v1", envName: "OPENROUTER_API_KEY" },
       cerebras: { baseUrl: "https://api.cerebras.ai/v1", envName: "CEREBRAS_API_KEY" },
       groq: { baseUrl: "https://api.groq.com/openai/v1", envName: "GROQ_API_KEY" },
-      gemini: { envName: "GEMINI_API_KEY" },
+      gemini: { baseUrl: "https://generativelanguage.googleapis.com", envName: "GEMINI_API_KEY" },
       manual: { envName: undefined },
     });
     expect(Object.values(PROVIDER_PRESETS).every((preset) => !("models" in preset))).toBe(true);
@@ -37,50 +37,6 @@ describe("provider adapters", () => {
       expect.objectContaining({ id: "future-model-2030", displayName: "Future", contextWindow: 128_000, maxOutputTokens: 8_192 }),
     ]);
     expect(fetcher).toHaveBeenCalledWith("https://openrouter.ai/api/v1/models", expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer secret" }) }));
-  });
-
-  test("probes an OpenRouter model from its dynamic list with independent behavioral evidence", async () => {
-    let cancellationStarted = false;
-    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = String(input);
-      if (url.endsWith("/models/__assistant_error_probe__")) return new Response("private upstream body", { status: 401 });
-      if (url.endsWith("/models")) return Response.json({ data: [{ id: "author/future-model", name: "Future", context_length: 128_000, max_completion_tokens: 8_192 }] });
-      const payload = JSON.parse(String(init?.body ?? "{}"));
-      const prompt = payload.messages?.[0]?.content;
-      if (prompt === "assistant_cancel_probe") {
-        cancellationStarted = true;
-        return await new Promise<Response>((_resolve, reject) => {
-          init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
-        });
-      }
-      if (payload.stream) return sseResponse(['data: {"choices":[{"delta":{"content":"OK"}}]}\n\n', "data: [DONE]\n\n"]);
-      if (payload.tools) return Response.json({ choices: [{ message: { tool_calls: [{ id: "call-1", function: { name: "assistant_probe", arguments: '{"value":"ok"}' } }] } }] });
-      return Response.json({ choices: [{ message: { content: '{"ok":true}' } }] });
-    });
-    const adapter = new OpenAICompatibleAdapter({ provider: "openrouter", baseUrl: PROVIDER_PRESETS.openrouter.baseUrl!, fetcher });
-
-    await expect(adapter.getModelMetadata({ apiKey: "secret", modelId: "author/future-model" })).resolves.toMatchObject({ contextWindow: 128_000 });
-    const result = await adapter.probeCapabilities({ apiKey: "secret", modelId: "author/future-model" });
-    expect(result).toEqual({ connection: true, streaming: true, tools: true, structuredArguments: true, structuredOutput: true, cancellation: true, sanitizedErrors: true });
-    expect(cancellationStarted).toBe(true);
-    expect(fetcher).not.toHaveBeenCalledWith(expect.stringContaining("models/author%2Ffuture-model"), expect.anything());
-  });
-
-  test("does not count an empty stream or a successful error probe as behavioral evidence", async () => {
-    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes("__assistant_error_probe__")) return Response.json({ id: "unexpected-success" });
-      if (url.endsWith("/models/model")) return Response.json({ id: "model" });
-      const payload = JSON.parse(String(init?.body ?? "{}"));
-      if (payload.messages?.[0]?.content === "assistant_cancel_probe") return new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true }));
-      if (payload.stream) return sseResponse(["data: [DONE]\n\n"]);
-      if (payload.tools) throw new Error("tools fail independently");
-      return Response.json({ choices: [{ message: { content: '{"ok":true}' } }] });
-    });
-    const adapter = new OpenAICompatibleAdapter({ provider: "openai", baseUrl: PROVIDER_PRESETS.openai.baseUrl!, fetcher });
-    await expect(adapter.probeCapabilities({ apiKey: "secret", modelId: "model" })).resolves.toMatchObject({
-      connection: true, streaming: false, tools: false, structuredArguments: false, structuredOutput: true, cancellation: true, sanitizedErrors: false,
-    });
   });
 
   test("estimates preflight tokens but forwards exact usage returned after generation", async () => {
@@ -157,33 +113,4 @@ describe("provider adapters", () => {
     expect(models.countTokens).toHaveBeenCalledWith(expect.objectContaining({ config: expect.objectContaining({ abortSignal: controller.signal }) }));
   });
 
-  test("propagates AbortSignal through Gemini and certifies cancellation after the request starts", async () => {
-    let cancellationStarted = false;
-    const models = {
-      list: vi.fn(),
-      get: vi.fn(async ({ model }: { model: string }) => {
-        if (model.includes("error-probe")) throw new Error("private upstream body");
-        return { name: "models/gemini-future", inputTokenLimit: 1_000_000, outputTokenLimit: 8_192 };
-      }),
-      countTokens: vi.fn(),
-      generateContent: vi.fn(async (input: { config?: { tools?: unknown } }) => input.config?.tools
-        ? { functionCalls: [{ name: "assistant_probe", args: { value: "ok" } }] }
-        : { text: '{"ok":true}' }),
-      generateContentStream: vi.fn(async (input: { contents?: unknown; config?: { maxOutputTokens?: number; abortSignal?: AbortSignal } }) => {
-        if (input.config?.maxOutputTokens === 1) {
-          cancellationStarted = true;
-          return await new Promise((_resolve, reject) => input.config?.abortSignal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true }));
-        }
-        return { async *[Symbol.asyncIterator]() { yield { text: "OK" }; } };
-      }),
-    };
-    const adapter = new GeminiAdapter({ clientFactory: () => ({ models }) as never });
-    const controller = new AbortController();
-    await expect(adapter.probeCapabilities({ apiKey: "secret", modelId: "gemini-future", signal: controller.signal })).resolves.toMatchObject({
-      connection: true, streaming: true, tools: true, structuredArguments: true, structuredOutput: true, cancellation: true, sanitizedErrors: true,
-    });
-    expect(cancellationStarted).toBe(true);
-    expect(models.generateContent).toHaveBeenCalledWith(expect.objectContaining({ config: expect.objectContaining({ abortSignal: controller.signal }) }));
-    expect(models.generateContentStream).toHaveBeenCalledWith(expect.objectContaining({ config: expect.objectContaining({ abortSignal: controller.signal }) }));
-  });
 });

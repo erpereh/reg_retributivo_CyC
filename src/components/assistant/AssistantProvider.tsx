@@ -6,7 +6,7 @@ import {
   type ContextStrategy, type Conversation, type ModelProfile, type PersistedDocumentMetadata, type ResponseMode, type SourceReference,
 } from "@/lib/assistant/domain";
 import { createEphemeralKeyVault, type EphemeralKeyScope } from "@/lib/assistant/providers/ephemeralKeyVault";
-import { FakeAssistantAdapter, GENERAL_RETRIBUTIVO_PROMPT } from "@/lib/assistant/providers/fakeAdapter";
+import { GENERAL_RETRIBUTIVO_PROMPT, type FakeAssistantAdapter } from "@/lib/assistant/providers/fakeAdapter";
 import { DEFAULT_ASSISTANT_SETTINGS, assistantSettingsSchema, modelProfileSchema } from "@/lib/assistant/schemas";
 import { localIterableResponse } from "@/lib/assistant/providers/localNdjsonTransport";
 import { createIndexedDbRepositories } from "@/lib/assistant/storage/indexedDbRepositories";
@@ -20,7 +20,8 @@ import { registerAnalysisCleanupListener } from "@/lib/assistant/integrations/an
 import { AssistantRunStoppedError, createRepositoryBoundAssistantOrchestrator, type AssistantOrchestrator } from "@/lib/assistant/orchestration/assistantOrchestrator";
 import type { AnalysisToolRegistry } from "@/lib/assistant/tools/registry";
 
-const FAKE_MODEL_ID = "fake-retributivo-v1";
+const TEST_MODEL_ID = "injected-test-model";
+const TEST_SYSTEM_PROMPT = GENERAL_RETRIBUTIVO_PROMPT;
 const CONVERSATION_PAGE_SIZE = 10;
 const MESSAGE_PAGE_SIZE = 40;
 const STREAM_BATCH_MS = 160;
@@ -83,6 +84,7 @@ export interface AssistantContextValue {
   removePerson(personId: string): Promise<void>;
   setPrimaryPerson(personId: string): Promise<void>;
   requestPersonProfile(): Promise<void>;
+  openModelSettings(): void;
   updateConversationPreferences(patch: { modelProfileId?: string; responseMode?: ResponseMode; contextStrategy?: ContextStrategy }): Promise<void>;
   availablePersonIds: string[];
   people: readonly { employeeNumber: string; person?: string; workplace?: string; position?: string; category?: string; status?: string; periods?: readonly string[] }[];
@@ -116,7 +118,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
 }>) {
   const repositoriesRef = useRef<AssistantRepositories | undefined>(undefined);
   const orchestratorRef = useRef<AssistantOrchestrator | undefined>(undefined);
-  const adapterRef = useRef<AssistantAdapter>(adapter ?? new FakeAssistantAdapter());
+  const adapterRef = useRef<AssistantAdapter | undefined>(adapter);
   const pendingFakeRequestRef = useRef<PendingFakeRequest | undefined>(undefined);
   const repeatableRunsRef = useRef(new Map<string, PendingFakeRequest>());
   const vaultRef = useRef(createEphemeralKeyVault());
@@ -298,8 +300,9 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
         repositoriesRef.current = repositories;
         orchestratorRef.current = createRepositoryBoundAssistantOrchestrator({
           transport: async (body, signal) => {
-            if (body.modelProfileId !== FAKE_MODEL_ID && !adapter) {
+            if (!adapterRef.current) {
               const profile = body.profile as ModelProfile | undefined;
+              if (!profile) throw new Error("No hay un perfil de modelo seleccionado.");
               const scope = { profileId: String(body.modelProfileId), endpoint: profile?.baseUrl ?? "" };
               return vaultRef.current.withKey(scope, (apiKey) => fetch("/api/assistant/chat", {
                 method: "POST", headers: { "content-type": "application/json" },
@@ -407,14 +410,16 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
   const deleteModelProfile = useCallback((id: string) => serializeConfigurationMutation(async () => {
     const profile = modelProfilesRef.current.find((item) => item.id === id);
     if (!profile) return;
-    if (profile.provider !== "manual") throw new Error("Solo se pueden eliminar perfiles Manual.");
     const repositories = repositoriesRef.current;
     if (!repositories) throw new Error("El almacenamiento local no está disponible.");
     const nextProfiles = modelProfilesRef.current.filter((item) => item.id !== id);
     const nextSettings = repairAssistantSettings(assistantSettingsRef.current, nextProfiles);
-    await repositories.writeModelConfiguration({ deleteProfileId: id, settings: withoutUndefined(nextSettings) });
+    await repositories.writeModelConfiguration({ deleteProfileId: id, clearConversationModelProfileId: id, settings: withoutUndefined(nextSettings) });
     modelProfilesRef.current = nextProfiles; assistantSettingsRef.current = nextSettings;
-    if (mountedRef.current) { setModelProfiles(nextProfiles); setAssistantSettings(nextSettings); }
+    const clearProfile = (item: Conversation) => item.modelProfileId === id ? { ...item, modelProfileId: undefined, updatedAt: now() } : item;
+    conversationsRef.current = conversationsRef.current.map(clearProfile);
+    if (conversationRef.current?.modelProfileId === id) conversationRef.current = clearProfile(conversationRef.current);
+    if (mountedRef.current) { setModelProfiles(nextProfiles); setAssistantSettings(nextSettings); setConversations(conversationsRef.current); setConversation(conversationRef.current); }
   }), [serializeConfigurationMutation]);
 
   const updateAssistantSettings = useCallback((patch: Partial<Omit<AssistantSettings, "id">>) => serializeConfigurationMutation(async () => {
@@ -520,7 +525,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     const createdAt = now();
     const defaultProfile = modelProfilesRef.current.find((profile) => profile.id === assistantSettingsRef.current.defaultGeneralModelProfileId && profile.enabled && profile.generalChatCompatible);
     const created: Conversation = {
-      id: createId("conversation"), type: "general", title: "Consulta general", associatedPersonIds: [], modelProfileId: defaultProfile?.id,
+      id: createId("conversation"), type: "general", title: "Consulta general", associatedPersonIds: [], ...(defaultProfile ? { modelProfileId: defaultProfile.id } : {}),
       responseMode: assistantSettingsRef.current.responseMode, contextStrategy: assistantSettingsRef.current.contextStrategy, status: "active", createdAt, updatedAt: createdAt,
     };
     const creation = conversationMutationRef.current.then(async () => {
@@ -728,8 +733,8 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       setError("No hay modelos configurados.");
       return;
     }
-    const modelProfileId = selectedProfile?.id ?? FAKE_MODEL_ID;
-    const modelId = selectedProfile?.modelId ?? FAKE_MODEL_ID;
+    const modelProfileId = selectedProfile?.id ?? TEST_MODEL_ID;
+    const modelId = selectedProfile?.modelId ?? TEST_MODEL_ID;
     const userMessage: ChatMessage = {
       id: createId("message"), conversationId: conversation.id, role: "user", content, status: "completed", contextOrigin: conversation.type,
       modelProfileId, modelId, responseMode: conversation.responseMode, contextStrategy: conversation.contextStrategy,
@@ -744,7 +749,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       nextSources = [...sources.filter((item) => item.id !== profile.source.id), profile.source];
       sourceRefIds = [profile.source.id];
     } else {
-      pendingFakeRequestRef.current = { kind: "general", request: { systemPrompt: GENERAL_RETRIBUTIVO_PROMPT, question: content, messageId: "pending" } };
+      pendingFakeRequestRef.current = { kind: "general", request: { systemPrompt: TEST_SYSTEM_PROMPT, question: content, messageId: "pending" } };
     }
     const assistantMessage: ChatMessage = {
       ...userMessage, id: createId("message"), role: "assistant", content: "", status: "streaming", sourceRefIds, createdAt: now(),
@@ -835,9 +840,9 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       || precedingUser.conversationId !== selected.id || deletedConversationsRef.current.has(selected.id)) return undefined;
 
     const pending = repeatableRunsRef.current.get(target.id);
-    if (target.modelProfileId === FAKE_MODEL_ID) {
+    if (target.modelProfileId === TEST_MODEL_ID) {
       if (!pending) return undefined;
-      return { selected, target, precedingUser, modelProfileId: FAKE_MODEL_ID, modelId: FAKE_MODEL_ID, pending };
+      return { selected, target, precedingUser, modelProfileId: TEST_MODEL_ID, modelId: TEST_MODEL_ID, pending };
     }
 
     const selectedProfile = modelProfilesRef.current.find((profile) => profile.id === target.modelProfileId && profile.enabled
@@ -864,7 +869,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     }
     const compatibleDefaultProfile = modelProfilesRef.current.find((profile) => profile.id === (selected.type === "analysis" ? assistantSettingsRef.current.defaultAnalysisModelProfileId : assistantSettingsRef.current.defaultGeneralModelProfileId));
     const canContinue = mode === "retry" && (target.status === "stopped" || target.status === "interrupted")
-      && target.content.trim().length > 0 && (modelProfileId !== FAKE_MODEL_ID || Boolean(adapter));
+      && target.content.trim().length > 0 && (modelProfileId !== TEST_MODEL_ID || Boolean(adapter));
     const runToken = beginConversationRun(selected.id);
     const runIsCurrent = () => isConversationRunCurrent(runToken);
     setStreaming(true); setError(undefined); setNotice(undefined);
@@ -1088,6 +1093,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       if (mountedRef.current) setEvents((items) => [...items, event]);
     }
   }, [updateSelectedConversation]);
+  const openModelSettings = useCallback(() => onNavigate?.({ type: "settings_ai" }), [onNavigate]);
 
   const availablePersonIds = useMemo(() => conversation?.type === "analysis" && activeAnalysis && activeAnalysis.id === conversation.analysisId
     ? activeAnalysis.result.people.map((person) => person.employeeNumber) : [], [activeAnalysis, conversation]);
@@ -1099,11 +1105,11 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     ready, conversations, hasMoreConversations: Boolean(conversationCursor), conversation, messages, repeatableMessageIds, hasMoreMessages: Boolean(messageCursor), sources, revealedSourceIds, events, actions, actionOutputs, resolvingActionIds, snapshots, documents, indexJobs,
     streaming, selectionLoading, conversationTransitionPending, announcement, notice, error, createGeneralConversation, loadMoreConversations, selectConversation, renameConversation, archiveConversation, deleteConversation,
     loadMoreMessages, send, stop, retryResponse, regenerateResponse, copyResponse, acceptAction, rejectAction, convertToActiveAnalysis, associatePerson, continuePersonInAssistant, addPerson, removePerson, setPrimaryPerson,
-    requestPersonProfile, updateConversationPreferences, availablePersonIds, people: activeAnalysis?.result.people ?? [], canSend: Boolean(adapter) || Boolean(conversation?.modelProfileId) || Boolean(conversation && modelProfiles.some((profile) => profile.enabled && (conversation.type === "analysis" ? profile.analysisCompatible : profile.generalChatCompatible))), modelProfiles, assistantSettings, saveModelProfile, duplicateModelProfile,
+    requestPersonProfile, openModelSettings, updateConversationPreferences, availablePersonIds, people: conversation?.type === "analysis" ? activeAnalysis?.result.people ?? [] : [], canSend: Boolean(adapter) || Boolean(conversation && modelProfiles.some((profile) => profile.id === conversation.modelProfileId && profile.enabled && (conversation.type === "analysis" ? profile.analysisCompatible : profile.generalChatCompatible))), modelProfiles, assistantSettings, saveModelProfile, duplicateModelProfile,
     deleteModelProfile, updateAssistantSettings, clearAssistantContent, setKey: vaultRef.current.setKey, clearKey: vaultRef.current.clearKey, withKey: vaultRef.current.withKey,
   }), [acceptAction, actionOutputs, actions, addPerson, announcement, archiveConversation, assistantSettings, associatePerson, availablePersonIds, clearAssistantContent, conversation, conversationCursor, conversations, documents,
     convertToActiveAnalysis, continuePersonInAssistant, copyResponse, createGeneralConversation, deleteConversation, deleteModelProfile, duplicateModelProfile, error, events, loadMoreConversations,
-    loadMoreMessages, messageCursor, messages, modelProfiles, notice, regenerateResponse, removePerson, renameConversation, repeatableMessageIds, requestPersonProfile, retryResponse,
+    loadMoreMessages, messageCursor, messages, modelProfiles, notice, openModelSettings, regenerateResponse, removePerson, renameConversation, repeatableMessageIds, requestPersonProfile, retryResponse,
     conversationTransitionPending, indexJobs, rejectAction, revealedSourceIds, resolvingActionIds, saveModelProfile, selectConversation, selectionLoading, send, setPrimaryPerson, snapshots, sources, stop, streaming, updateAssistantSettings, updateConversationPreferences]);
 
   return <AssistantContext.Provider value={value}>{children}</AssistantContext.Provider>;

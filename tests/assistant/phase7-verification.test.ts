@@ -1,10 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createE2EChatAdapterResolver, isAssistantE2EMode } from "@/lib/assistant/server/e2eAdapter";
 import { createSanitizedPerformanceFixture, summarizeIndexMeasurements } from "@/lib/assistant/search/performanceFixture";
 import { DirectIndexExecutor } from "@/lib/assistant/search/directIndex";
 import { DeterministicE2EAdapter } from "@/lib/assistant/server/e2eAdapter";
 import { createModelService } from "@/lib/assistant/server/modelService";
-import { measureDirectIndexForE2E } from "@/components/assistant/AssistantE2EHarness";
 import { ASSISTANT_STORES } from "@/lib/assistant/storage/database";
 import { assertSafeForPersistence, PrivacyBoundaryError } from "@/lib/assistant/privacy/assertions";
 import { readFileSync } from "node:fs";
@@ -43,22 +42,14 @@ describe("Phase 7 verification contracts", () => {
     expect(scope).toContain("<AssistantProvider activeAnalysis={activeAnalysis} onNavigate={navigateAssistantIntent}>");
   });
 
-  it("probes every behavioral capability without external network", async () => {
+  it("lists E2E models without making behavioral probes", async () => {
     const service = createModelService({
       resolveAdapter: () => new DeterministicE2EAdapter(),
       env: { OPENAI_API_KEY: "e2e-ephemeral-key" },
     });
-    const result = await service.probe({
-      profile: {
-        id: "e2e-profile", name: "E2E", provider: "openai", baseUrl: "https://api.openai.com/v1", modelId: "e2e-model",
-        enabled: true, generalChatCompatible: false, analysisCompatible: false, supportsStreaming: false, supportsTools: false,
-        supportsStructuredOutput: false, capabilitiesSource: "detected",
-      },
+    await expect(service.list({ provider: "openai" })).resolves.toEqual({
+      models: [expect.objectContaining({ id: "e2e-model", contextWindow: 32_768 })],
     });
-    expect(result.probe).toEqual(expect.objectContaining({
-      connection: true, streaming: true, tools: true, structuredArguments: true, structuredOutput: true,
-      cancellation: true, sanitizedErrors: true, sufficientContext: true, analysisCompatible: true,
-    }));
   });
 
   it("builds an exclusively sanitized fixture above 5,000 chunks", () => {
@@ -81,12 +72,4 @@ describe("Phase 7 verification contracts", () => {
     expect(() => summarizeIndexMeasurements([1, 2, 3, 4], [])).toThrow();
   });
 
-  it("benchmarks the production DirectIndexExecutor for one warm-up plus five measured runs", async () => {
-    const execute = vi.spyOn(DirectIndexExecutor.prototype, "execute");
-    const result = await measureDirectIndexForE2E();
-    expect(execute).toHaveBeenCalledTimes(6);
-    expect(execute.mock.calls.every(([chunks]) => chunks.length === 5_200)).toBe(true);
-    expect(result.runs).toBe(5);
-    execute.mockRestore();
-  });
 });

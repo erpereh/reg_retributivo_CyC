@@ -144,7 +144,7 @@ describe("Phase 5 third-review regressions", () => {
       streamPersonProfile: async function* () { yield new Uint8Array(); },
     };
     render(<AssistantProvider factory={factory} dbName={dbName} adapter={adapter}><ClearSettingsProbe /></AssistantProvider>);
-    await screen.findByText("conversation-a");
+    await waitFor(() => expect(screen.getByTestId("clear-selected")).toHaveTextContent("conversation-a"));
     fireEvent.click(screen.getByRole("button", { name: "Enviar suspendido" }));
     await waitFor(() => expect(screen.getByTestId("clear-streaming")).toHaveTextContent("true"));
     fireEvent.click(await screen.findByRole("button", { name: "Borrar conversaciones y contexto" }));
@@ -176,7 +176,7 @@ describe("Phase 5 third-review regressions", () => {
       return listMessages(conversationId, options);
     };
     render(<AssistantProvider repositoriesFactory={async () => repositories}><PageProbe /></AssistantProvider>);
-    await screen.findByText("conversation-a");
+    await waitFor(() => expect(screen.getByTestId("page-selected")).toHaveTextContent("conversation-a"));
     fireEvent.click(screen.getByRole("button", { name: "Cargar página A" }));
     fireEvent.click(screen.getByRole("button", { name: "Seleccionar B" }));
     await waitFor(() => expect(screen.getByTestId("page-selected")).toHaveTextContent("conversation-b"));
@@ -199,7 +199,7 @@ describe("Phase 5 third-review regressions", () => {
       streamPersonProfile: async function* () { yield new Uint8Array(); },
     };
     render(<AssistantProvider activeAnalysis={activeAnalysis} factory={factory} dbName={dbName} adapter={adapter}><MutationProbe /><AssistantView /></AssistantProvider>);
-    await screen.findByText("conversation-a");
+    await waitFor(() => expect(screen.getByTestId("mutation-conversation")).toHaveTextContent("conversation-a"));
     fireEvent.click(screen.getByRole("button", { name: "Enviar carrera" }));
     await startedPromise;
     expect(screen.getByRole("button", { name: "Convertir al análisis activo" })).toBeDisabled();

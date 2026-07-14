@@ -691,11 +691,17 @@ export async function createIndexedDbRepositories(options: IndexedDbRepositories
       if (input.profile && input.deleteProfileId) throw new AssistantStorageError("storage_error", "No se pudo guardar la configuración de modelos.");
       assertSafeForPersistence(input.settings);
       if (input.profile) assertSafeForPersistence(input.profile);
-      const transaction = db.transaction(["modelProfiles", "assistantSettings"], "readwrite");
+      const transaction = db.transaction(["modelProfiles", "assistantSettings", "conversations"], "readwrite");
       const done = transactionDone(transaction);
       try {
         if (input.profile) transaction.objectStore("modelProfiles").put(input.profile);
         if (input.deleteProfileId) transaction.objectStore("modelProfiles").delete(input.deleteProfileId);
+        if (input.clearConversationModelProfileId) {
+          const conversations = await requestResult(transaction.objectStore("conversations").getAll()) as Conversation[];
+          for (const conversation of conversations) {
+            if (conversation.modelProfileId === input.clearConversationModelProfileId) transaction.objectStore("conversations").put({ ...conversation, modelProfileId: undefined, updatedAt: new Date().toISOString() });
+          }
+        }
         transaction.objectStore("assistantSettings").put(input.settings);
         await done;
       } catch (error) {

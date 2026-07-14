@@ -44,7 +44,7 @@ function SettingsPanel({ id, labelledBy, label, active, children }: Readonly<{ i
 }
 
 export function SettingsView() {
-  const { settings, updateSettings, aiStatus, aiTesting, aiTestMessage, refreshAiStatus, testAiConnection } = useAppState();
+  const { settings, updateSettings, aiStatus, aiTesting, aiTestMessage, refreshAiStatus, testAiConnection, assistantNavigationIntent, consumeAssistantNavigationIntent } = useAppState();
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
   const [visited, setVisited] = useState<ReadonlySet<SettingsSection>>(() => new Set(["general"]));
   const [conceptView, setConceptView] = useState<ConceptSection>("non-normalized");
@@ -52,6 +52,12 @@ export function SettingsView() {
   const [aiCacheMessage, setAiCacheMessage] = useState<string | undefined>();
 
   useEffect(() => { void refreshAiStatus(); }, [refreshAiStatus]);
+  useEffect(() => {
+    if (assistantNavigationIntent?.type !== "settings_ai") return;
+    setVisited((current) => new Set(current).add("ai"));
+    setActiveSection("ai");
+    consumeAssistantNavigationIntent();
+  }, [assistantNavigationIntent, consumeAssistantNavigationIntent]);
 
   function selectSection(value: SettingsSection) {
     setVisited((current) => new Set(current).add(value));

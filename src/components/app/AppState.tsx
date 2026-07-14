@@ -477,7 +477,9 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
   const navigateAssistantIntent = useCallback((intent: AppNavigationIntent) => {
     if ("analysisId" in intent && activeAnalysis?.id !== intent.analysisId) return;
     setAssistantNavigationIntent(intent);
-    if (intent.type === "open_person") {
+    if (intent.type === "settings_ai") {
+      setView("ajustes");
+    } else if (intent.type === "open_person") {
       setFilters((current) => ({ ...current, query: intent.personId }));
       setView("personas");
     } else if (intent.type === "open_cuadre") {

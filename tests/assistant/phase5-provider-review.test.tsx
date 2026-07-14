@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { AssistantProvider, useAssistant } from "@/components/assistant/AssistantProvider";
 import { AssistantView } from "@/components/assistant/AssistantView";
 import type { Conversation, ModelProfile } from "@/lib/assistant/domain";
+import { FakeAssistantAdapter } from "@/lib/assistant/providers/fakeAdapter";
 import { createIndexedDbRepositories } from "@/lib/assistant/storage/indexedDbRepositories";
 import type { AssistantRepositories } from "@/lib/assistant/storage/repositories";
 
@@ -189,7 +190,7 @@ describe("Phase 5 reviewed provider behavior", () => {
         },
       } as AssistantRepositories;
     };
-    render(<AssistantProvider repositoriesFactory={repositoryFactory}><AssistantView /></AssistantProvider>);
+    render(<AssistantProvider adapter={new FakeAssistantAdapter()} repositoriesFactory={repositoryFactory}><AssistantView /></AssistantProvider>);
     await screen.findByRole("heading", { name: "conversation-b" });
     fireEvent.click(screen.getByRole("button", { name: /conversation-a/i }));
     fireEvent.click(screen.getByRole("button", { name: /conversation-b/i }));

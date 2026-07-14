@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
 import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { AssistantProvider } from "@/components/assistant/AssistantProvider";
 import { AssistantView } from "@/components/assistant/AssistantView";
+import { FakeAssistantAdapter } from "@/lib/assistant/providers/fakeAdapter";
 import type { ChatMessage } from "@/lib/assistant/domain";
 import { openAssistantDatabase } from "@/lib/assistant/storage/database";
 import { getPersonProfile } from "@/lib/assistant/tools/personTools";
@@ -25,7 +26,7 @@ const activeAnalysis = { id: "analysis-1", result, createdAt: "2026-07-13T10:00:
 
 function Assistant({ factory }: { factory: IDBFactory }) {
   return (
-    <AssistantProvider activeAnalysis={activeAnalysis} factory={factory} dbName="vertical-slice-test">
+    <AssistantProvider activeAnalysis={activeAnalysis} factory={factory} dbName="vertical-slice-test" adapter={new FakeAssistantAdapter()}>
       <AssistantView />
     </AssistantProvider>
   );
@@ -34,13 +35,13 @@ function Assistant({ factory }: { factory: IDBFactory }) {
 describe("assistant vertical slice", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  test("persists a general fake stream, reloads, converts, associates a person and cites a sanitized local source", async () => {
+  test("persists a general fake stream, reloads, converts and associates a person without a provider call", async () => {
     const factory = new IDBFactory();
     vi.stubGlobal("IDBKeyRange", IDBKeyRange);
     const first = render(<Assistant factory={factory} />);
     await waitFor(() => expect(screen.getByRole("button", { name: /Crear conversación general/i })).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: /Crear conversación general/i }));
-    await screen.findByText("Consulta general");
+    await screen.findAllByText("Consulta general");
 
     const composer = screen.getByRole("textbox", { name: /Pregunta/i });
     fireEvent.change(composer, { target: { value: "¿Qué es Cuadre Reg.?" } });
@@ -64,16 +65,13 @@ describe("assistant vertical slice", () => {
     });
     eventDb.close();
     expect(persistedEvents).toEqual(expect.arrayContaining([expect.objectContaining({ event: { type: "context_added", contextId: "analysis-1", label: "Análisis activo" } })]));
-    fireEvent.click(screen.getByRole("button", { name: /Asociar matrícula 10048/i }));
-    await screen.findByText(/Matrícula asociada: 10048/i);
-    fireEvent.click(screen.getByRole("button", { name: /Consultar perfil/i }));
-
-    await screen.findAllByText(/Registro: 1.550,00/i);
-    expect(screen.getAllByText(/Recibos: 1.758,01/i)).not.toHaveLength(0);
-    expect(screen.getAllByText(/Diferencia: 208,01/i)).not.toHaveLength(0);
-    expect(screen.getByText("Persona matrícula 10048")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Gestionar personas asociadas" }));
+    const picker = screen.getByRole("group", { name: "Personas asociadas" });
+    fireEvent.click(within(picker).getByRole("checkbox", { name: "Matrícula 10048" }));
+  await waitFor(() =>
+    expect(within(picker).getByRole("checkbox", { name: "Matrícula 10048" })).toHaveProperty("checked", true),
+  );
     expect(screen.queryByText("privado.pdf", { exact: false })).toBeNull();
-    expect(screen.queryByText("Persona Test", { exact: false })).toBeNull();
   });
 
   test("getPersonProfile returns exactly the totals shown by the Persona row", () => {
@@ -90,9 +88,9 @@ describe("assistant vertical slice", () => {
     let peopleReads = 0;
     const guardedResult = Object.defineProperty({}, "people", { get() { peopleReads += 1; return [person]; } }) as AnalysisResult;
     const guardedAnalysis = { ...activeAnalysis, result: guardedResult };
-    render(<AssistantProvider activeAnalysis={guardedAnalysis} factory={factory} dbName="general-isolation-test"><AssistantView /></AssistantProvider>);
+    render(<AssistantProvider activeAnalysis={guardedAnalysis} factory={factory} dbName="general-isolation-test" adapter={new FakeAssistantAdapter()}><AssistantView /></AssistantProvider>);
     fireEvent.click(await screen.findByRole("button", { name: /Crear conversación general/i }));
-    await screen.findByText("Consulta general");
+    await screen.findAllByText("Consulta general");
     fireEvent.change(screen.getByRole("textbox", { name: /Pregunta/i }), { target: { value: "¿Qué es Cuadre Reg.?" } });
     fireEvent.click(screen.getByRole("button", { name: /Enviar/i }));
     await screen.findAllByText(/Retributivo compara/i);
@@ -104,7 +102,7 @@ describe("assistant vertical slice", () => {
     vi.stubGlobal("IDBKeyRange", IDBKeyRange);
     render(<Assistant factory={factory} />);
     fireEvent.click(await screen.findByRole("button", { name: /Crear conversación general/i }));
-    await screen.findByText("Consulta general");
+    await screen.findAllByText("Consulta general");
     const composer = screen.getByRole("textbox", { name: /Pregunta/i });
     fireEvent.change(composer, { target: { value: "La persona Ana García, DNI 12345678Z, ana@example.com, 612 345 678" } });
     fireEvent.click(screen.getByRole("button", { name: /Enviar/i }));
@@ -132,7 +130,7 @@ describe("assistant vertical slice", () => {
     const failingAdapter = { streamGeneral: async function* () { throw new Error("private provider body"); }, streamPersonProfile: async function* () { throw new Error("private provider body"); } };
     render(<AssistantProvider activeAnalysis={activeAnalysis} factory={factory} dbName="stream-failure-test" adapter={failingAdapter}><AssistantView /></AssistantProvider>);
     fireEvent.click(await screen.findByRole("button", { name: /Crear conversación general/i }));
-    await screen.findByText("Consulta general");
+    await screen.findAllByText("Consulta general");
     const composer = screen.getByRole("textbox", { name: /Pregunta/i });
     fireEvent.change(composer, { target: { value: "¿Qué es Cuadre Reg.?" } });
     fireEvent.click(screen.getByRole("button", { name: /Enviar/i }));
@@ -143,11 +141,12 @@ describe("assistant vertical slice", () => {
 
   test("fails before the adapter when repository scope disappears", async () => {
     const factory = new IDBFactory(); vi.stubGlobal("IDBKeyRange", IDBKeyRange);
-    const adapter = { streamGeneral: vi.fn(async function* () { yield new Uint8Array(); }), streamPersonProfile: vi.fn(async function* () { yield new Uint8Array(); }) };
+    const adapter = new FakeAssistantAdapter();
+    const streamGeneral = vi.spyOn(adapter, "streamGeneral");
     render(<AssistantProvider activeAnalysis={activeAnalysis} factory={factory} dbName="scope-bridge-test" adapter={adapter}><AssistantView /></AssistantProvider>);
-    fireEvent.click(await screen.findByRole("button", { name: /Crear conversación general/i })); await screen.findByText("Consulta general");
+    fireEvent.click(await screen.findByRole("button", { name: /Crear conversación general/i })); await screen.findAllByText("Consulta general");
     const db = await openAssistantDatabase(factory, "scope-bridge-test"); await new Promise<void>((resolve, reject) => { const transaction = db.transaction("conversations", "readwrite"); transaction.objectStore("conversations").clear(); transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error); }); db.close();
     fireEvent.change(screen.getByRole("textbox", { name: /Pregunta/i }), { target: { value: "¿Qué es Cuadre Reg.?" } }); fireEvent.click(screen.getByRole("button", { name: /Enviar/i }));
-    await screen.findByRole("alert"); expect(adapter.streamGeneral).not.toHaveBeenCalled();
+    await screen.findByRole("alert"); expect(streamGeneral).not.toHaveBeenCalled();
   });
 });

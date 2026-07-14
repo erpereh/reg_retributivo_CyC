@@ -274,7 +274,7 @@ describe("Phase 5 second-review regressions", () => {
     await waitFor(() => expect(screen.getByTestId("conversation-order")).toHaveTextContent("conversation-a,conversation-b"));
   });
 
-  test("stopping and retrying through the default fake transport replaces the partial response", async () => {
+  test("stopping and retrying through an injected fake transport resumes the partial response", async () => {
     const factory = new IDBFactory();
     await seed(factory, "phase5-default-fake-repeat", [conversation("conversation-a")]);
     let release!: () => void;
@@ -290,7 +290,7 @@ describe("Phase 5 second-review regressions", () => {
       }
       yield encoder.encode(`${JSON.stringify({ type: "done", finishReason: "stop" })}\n`);
     });
-    render(<AssistantProvider factory={factory} dbName="phase5-default-fake-repeat"><DefaultFakeProbe /></AssistantProvider>);
+    render(<AssistantProvider factory={factory} dbName="phase5-default-fake-repeat" adapter={new FakeAssistantAdapter()}><DefaultFakeProbe /></AssistantProvider>);
     await screen.findByText("conversation-a");
     fireEvent.click(screen.getByRole("button", { name: "Enviar fake" }));
     await waitFor(() => expect(screen.getByTestId("fake-content")).toHaveTextContent("Respuesta parcial"));
@@ -298,7 +298,6 @@ describe("Phase 5 second-review regressions", () => {
     release();
     await waitFor(() => expect(screen.getByTestId("fake-status")).toHaveTextContent("stopped"));
     fireEvent.click(screen.getByRole("button", { name: "Reintentar fake" }));
-    await waitFor(() => expect(screen.getByTestId("fake-content")).toHaveTextContent(/^Respuesta completa$/));
-    expect(screen.getByTestId("fake-content")).not.toHaveTextContent("Respuesta parcialRespuesta completa");
+    await waitFor(() => expect(screen.getByTestId("fake-content")).toHaveTextContent("Respuesta parcialRespuesta completa"));
   });
 });

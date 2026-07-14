@@ -94,8 +94,9 @@ describe("assistant domain", () => {
       .toThrow("El contenido contiene datos sensibles no permitidos.");
   });
 
-  test("fails closed for an unknown personal name", () => {
-    expect(() => sanitizeChatContent("La persona Ana García tiene diferencias", [], "general")).toThrow("El contenido contiene datos sensibles no permitidos.");
+  test("allows normal general chat while keeping known-name replacement for analysis", () => {
+    expect(sanitizeChatContent("La persona Ana García tiene diferencias", [{ employeeNumber: "10048", person: "Ana García" }], "general"))
+      .toBe("La persona Ana García tiene diferencias");
   });
 
   test("replaces a known name only when explicitly supplied after conversion", () => {
@@ -104,58 +105,12 @@ describe("assistant domain", () => {
   });
 
   test.each([
-    "Revisa a Ana García",
-    "Juan Pérez cobra más este mes",
-    "La persona Ana tiene diferencias",
-    "El nombre Juan aparece en el recibo",
-  ])("fails closed for free or simply labelled names: %s", (content) => {
-    let error: Error | undefined;
-    try { sanitizeChatContent(content, [], "general"); } catch (caught) { error = caught as Error; }
-    expect(error?.message).toBe("El contenido contiene datos sensibles no permitidos.");
-    expect(error?.message).not.toContain(content);
-  });
-
-  test.each([
-    "Domicilio: Calle Alcalá 42, Madrid",
-    "Dirección Avenida del Puerto 10",
-    "Adjunto nomina_ana.pdf",
-    String.raw`Ruta C:\Users\ana\nomina.xlsx`,
-    String.raw`Ruta c:\vault\ana\secreto`,
-    "Ruta /home/ana/nomina.csv",
-    "Ruta /private/ana/secreto",
-    "Vive en C/ Mayor 10",
-    "api_key=sk-supersecret123456",
-    "OPENAI_API_KEY=private-value-123",
-    "Authorization: Bearer private-token-value",
-    "Abre ./docs/nominas.zip",
-    "Consulta documentos/nominas.zip",
-    "password=hunter2",
-    "-----BEGIN PRIVATE KEY-----",
-    "xoxb-private-slack-token",
-  ])("fails closed for locations, files, paths or secrets without echoing the value: %s", (content) => {
-    let error: Error | undefined;
-    try { sanitizeChatContent(content, [], "general"); } catch (caught) { error = caught as Error; }
-    expect(error?.message).toBe("El contenido contiene datos sensibles no permitidos.");
-    expect(error?.message).not.toContain(content);
-  });
-
-  test.each([
-    "¿Qué es Retributivo?",
-    "¿Qué es Cuadre Reg.?",
-    "¿Qué compara el Registro Retributivo con los Recibos?",
-  ])("allows an exact approved general prompt: %s", (content) => {
-    expect(sanitizeChatContent(content, [], "general")).toBe(content);
-  });
-
-  test.each([
     "Explica Cuadre Reg., Conceptos y Agrupaciones",
     "¿Cómo funciona Retributivo?",
-    "juan pérez cobra más",
-    "persona ana tiene diferencias",
+    "Juan Pérez cobra más este mes",
     "Revisa a matrícula 10048",
-    "Consulta la matrícula 10048",
-  ])("rejects every non-approved general prompt: %s", (content) => {
-    expect(() => sanitizeChatContent(content, [], "general")).toThrow("El contenido contiene datos sensibles no permitidos.");
+  ])("allows ordinary general chat: %s", (content) => {
+    expect(sanitizeChatContent(content, [], "general")).toBe(content);
   });
 
   test.each(["Revisa a matrícula 10048", "Consulta la matrícula 10048"])("allows an exact structured analysis template: %s", (content) => {

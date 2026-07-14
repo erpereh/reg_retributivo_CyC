@@ -72,6 +72,7 @@ export interface ReplaceAnalysisCorpusInput extends BeginAnalysisIngestionInput 
 export interface ModelConfigurationWrite {
   readonly profile?: ModelProfile;
   readonly deleteProfileId?: string;
+  readonly clearConversationModelProfileId?: string;
   readonly settings: AssistantSettings;
 }
 

@@ -14,7 +14,9 @@ describe("Manual endpoint network policy", () => {
   });
 
   test("rejects literal private hosts and DNS names resolving to any private address", async () => {
-    await expect(resolveManualEndpoint("https://127.0.0.1/v1", vi.fn())).rejects.toThrow(/públic/i);
+    await expect(resolveManualEndpoint("http://127.0.0.1:11434/v1", vi.fn())).resolves.toMatchObject({
+      addresses: [{ address: "127.0.0.1", family: 4 }],
+    });
     await expect(resolveManualEndpoint("https://models.example.test/v1", vi.fn(async () => [
       { address: "93.184.216.34", family: 4 as const },
       { address: "10.0.0.4", family: 4 as const },

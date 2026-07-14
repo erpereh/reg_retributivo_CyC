@@ -30,8 +30,8 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
   }, [view]);
 
   return (
-    <div data-slot="app-shell" data-surface="canvas" className="flex min-h-dvh flex-col bg-app-bg text-ink">
-      <div data-slot="app-content" data-surface="transparent" className="mx-auto flex min-h-dvh w-full max-w-[1560px] flex-1 flex-col">
+    <div data-slot="app-shell" data-surface="canvas" className={`flex flex-col bg-app-bg text-ink ${view === "asistente" ? "h-dvh overflow-hidden" : "min-h-dvh"}`}>
+      <div data-slot="app-content" data-surface="transparent" className={`mx-auto flex w-full max-w-[1560px] flex-1 flex-col ${view === "asistente" ? "min-h-0" : "min-h-dvh"}`}>
         <TopNav />
         <main ref={mainRef} className={`scroll-mt-24 px-3 pb-8 pt-4 outline-none sm:px-5 sm:pb-10 sm:pt-5 lg:px-7 xl:px-8 ${view === "asistente" ? "flex min-h-0 flex-1 flex-col overflow-hidden pb-3" : ""}`} tabIndex={-1}>
           {hydrating ? (

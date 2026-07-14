@@ -11,6 +11,7 @@ import { MarkdownRenderer } from "@/components/assistant/MarkdownRenderer";
 import { SafeMarkdown } from "@/components/assistant/SafeMarkdown";
 import type { ChatAction, ChatEvent, ChatMessage, Conversation, SourceReference } from "@/lib/assistant/domain";
 import { createIndexedDbRepositories } from "@/lib/assistant/storage/indexedDbRepositories";
+import { FakeAssistantAdapter } from "@/lib/assistant/providers/fakeAdapter";
 import type { AnalysisResult, StoredAnalysis } from "@/lib/types";
 
 const createdAt = "2026-07-13T10:00:00.000Z";
@@ -245,8 +246,11 @@ describe("assistant conversation UI", () => {
     await seedUi(factory, "conversation-controls", "analysis");
     const clipboard = { writeText: vi.fn().mockResolvedValue(undefined) };
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: clipboard });
-    render(<AssistantProvider activeAnalysis={activeAnalysis} factory={factory} dbName="conversation-controls"><AssistantView /></AssistantProvider>);
+    render(<AssistantProvider activeAnalysis={activeAnalysis} factory={factory} dbName="conversation-controls" adapter={new FakeAssistantAdapter()}><AssistantView /></AssistantProvider>);
     await screen.findByRole("heading", { name: "Revisión retributiva" });
+
+    expect(screen.getByRole("combobox", { name: "Modelo de conversación" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Configuración" })).toBeNull();
 
     expect(screen.getByText("+ 2")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Gestionar personas asociadas" }));
@@ -254,8 +258,7 @@ describe("assistant conversation UI", () => {
     const alreadyAssociated = within(picker).getByRole("checkbox", { name: "Matrícula 10001" });
     expect(alreadyAssociated).toBeChecked();
     fireEvent.click(within(picker).getByRole("checkbox", { name: "Matrícula 10006" }));
-    fireEvent.click(within(picker).getByRole("button", { name: "Marcar matrícula 10006 como principal" }));
-    await waitFor(() => expect(screen.getByText(/Principal: matrícula 10006/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
 
     fireEvent.change(screen.getByRole("combobox", { name: "Modo de respuesta" }), { target: { value: "flexible" } });
     fireEvent.change(screen.getByRole("combobox", { name: "Estrategia de contexto" }), { target: { value: "optimized" } });

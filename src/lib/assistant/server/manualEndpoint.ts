@@ -101,7 +101,8 @@ const defaultResolver: Resolver = async (hostname) => {
 export function validateManualEndpointUrl(input: string | URL): URL {
   let url: URL;
   try { url = new URL(input); } catch { throw new ManualEndpointPolicyError("La URL Manual no es válida."); }
-  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || !url.hostname) {
+  const local = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+  if ((!local && url.protocol !== "https:") || (local && url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password || url.search || url.hash || !url.hostname) {
     throw new ManualEndpointPolicyError("La URL Manual debe ser HTTPS y no incluir credenciales, consulta ni fragmento.");
   }
   return url;
@@ -110,6 +111,7 @@ export function validateManualEndpointUrl(input: string | URL): URL {
 export async function resolveManualEndpoint(input: string | URL, resolver: Resolver = defaultResolver): Promise<{ url: URL; addresses: readonly ResolvedAddress[] }> {
   const url = validateManualEndpointUrl(input);
   const hostname = url.hostname.replace(/^\[|\]$/g, "");
+  if (hostname === "localhost" || hostname === "127.0.0.1") return { url, addresses: [{ address: "127.0.0.1", family: 4 }] };
   const literalVersion = isIP(hostname);
   const addresses = literalVersion ? [{ address: hostname, family: literalVersion as 4 | 6 }] : await resolver(hostname);
   if (!addresses.length || addresses.some((record) => !isPublicIpAddress(record.address))) throw new ManualEndpointPolicyError();

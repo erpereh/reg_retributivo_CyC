@@ -1,14 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { createModelsPostHandler, MAX_MODELS_REQUEST_BYTES } from "@/lib/assistant/server/modelsRoute";
 import { createModelService } from "@/lib/assistant/server/modelService";
-import { CAPABILITY_PAYLOAD_VERSION } from "@/lib/assistant/server/capabilityPayload";
-import { ProviderAdapterError, type AIProviderAdapter, type ModelProfileInput } from "@/lib/assistant/providers/types";
-
-const profile = (patch: Partial<ModelProfileInput> = {}): ModelProfileInput => ({
-  id: "profile-1", name: "Perfil", provider: "manual", baseUrl: "https://models.example.test/v1", modelId: "future-model",
-  enabled: true, generalChatCompatible: false, analysisCompatible: false, supportsStreaming: false, supportsTools: false,
-  supportsStructuredOutput: false, capabilitiesSource: "detected", ...patch,
-});
+import { ProviderAdapterError, type AIProviderAdapter } from "@/lib/assistant/providers/types";
 
 function request(body: unknown): Request {
   return new Request("http://localhost/api/assistant/models", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -27,6 +20,23 @@ function adapter(overrides: Partial<AIProviderAdapter> = {}): AIProviderAdapter 
 }
 
 describe("POST /api/assistant/models", () => {
+  test.each([
+    ["gemini", "GEMINI_API_KEY", "https://generativelanguage.googleapis.com"],
+    ["openai", "OPENAI_API_KEY", "https://api.openai.com/v1"],
+    ["openrouter", "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1"],
+    ["cerebras", "CEREBRAS_API_KEY", "https://api.cerebras.ai/v1"],
+    ["groq", "GROQ_API_KEY", "https://api.groq.com/openai/v1"],
+  ] as const)("uses the configured %s models endpoint", async (provider, envName, baseUrl) => {
+    const fake = adapter();
+    const resolveAdapter = vi.fn(() => fake);
+    const service = createModelService({ resolveAdapter, env: { [envName]: "server-only" } });
+
+    await service.list({ provider });
+
+    expect(resolveAdapter).toHaveBeenCalledWith(provider, baseUrl);
+    expect(fake.listModels).toHaveBeenCalledWith(expect.objectContaining({ apiKey: "server-only" }));
+  });
+
   test("strictly lists models with a request-local manual key", async () => {
     const fake = adapter();
     const POST = createModelsPostHandler(createModelService({ resolveAdapter: () => fake, env: {} }));
@@ -39,6 +49,16 @@ describe("POST /api/assistant/models", () => {
     expect(invalid.status).toBe(400);
   });
 
+  test("allows a local Manual endpoint while keeping its key request-local", async () => {
+    const fake = adapter();
+    const POST = createModelsPostHandler(createModelService({ resolveAdapter: () => fake, env: {} }));
+
+    const response = await POST(request({ operation: "list", provider: "manual", baseUrl: "http://127.0.0.1:11434/v1", apiKey: "request-only" }));
+
+    expect(response.status).toBe(200);
+    expect(fake.listModels).toHaveBeenCalledWith(expect.objectContaining({ apiKey: "request-only" }));
+  });
+
   test("rejects oversized request bodies before parsing or calling a provider", async () => {
     const fake = adapter();
     const POST = createModelsPostHandler(createModelService({ resolveAdapter: () => fake, env: {} }));
@@ -49,60 +69,6 @@ describe("POST /api/assistant/models", () => {
     }));
     expect(response.status).toBe(413);
     expect(fake.listModels).not.toHaveBeenCalled();
-  });
-
-  test("requires every behavioral capability and enough measured context", async () => {
-    const fake = adapter();
-    const POST = createModelsPostHandler(createModelService({ resolveAdapter: () => fake, env: {} }));
-    const response = await POST(request({ operation: "probe", profile: profile({ manualContextWindow: 16_000 }), apiKey: "secret" }));
-    const body = await response.json();
-    expect(body.probe).toMatchObject({
-      connection: true, streaming: true, tools: true, structuredArguments: true, structuredOutput: true,
-      sufficientContext: true, cancellation: true, sanitizedErrors: true, requiredContextTokens: 3_387, analysisCompatible: true,
-    });
-    expect(body.profile).toMatchObject({ supportsStreaming: true, supportsTools: true, supportsStructuredOutput: true, analysisCompatible: true, detectedContextWindow: 16_000 });
-    expect(fake.countTokens).toHaveBeenCalledWith(expect.objectContaining({
-      text: expect.stringMatching(new RegExp(`${CAPABILITY_PAYLOAD_VERSION}.*getPersonProfile`, "s")),
-      signal: expect.any(AbortSignal),
-    }));
-    expect(fake.probeCapabilities).toHaveBeenCalledWith(expect.objectContaining({ signal: expect.any(AbortSignal) }));
-    expect(fake.getModelMetadata).toHaveBeenCalledWith(expect.objectContaining({ signal: expect.any(AbortSignal) }));
-  });
-
-  test("marks a 2xx model incompatible when behavior or context is insufficient", async () => {
-    const fake = adapter({
-      getModelMetadata: vi.fn(async () => ({ id: "future-model", displayName: "Future" })),
-      probeCapabilities: vi.fn(async () => ({ connection: true, streaming: true, tools: true, structuredArguments: false, structuredOutput: true, cancellation: true, sanitizedErrors: true })),
-    });
-    const POST = createModelsPostHandler(createModelService({ resolveAdapter: () => fake, env: {} }));
-    const response = await POST(request({ operation: "probe", profile: profile({ manualContextWindow: 3_000 }), apiKey: "secret" }));
-    const body = await response.json();
-    expect(body.probe).toMatchObject({ connection: true, structuredArguments: false, sufficientContext: false, analysisCompatible: false });
-  });
-
-  test("restores detected capabilities over manual overrides", async () => {
-    const fake = adapter();
-    const POST = createModelsPostHandler(createModelService({ resolveAdapter: () => fake, env: {} }));
-    const response = await POST(request({ operation: "restore_detected", profile: profile({ capabilitiesSource: "manual", supportsTools: false, manualContextWindow: 99_999 }), apiKey: "secret" }));
-    const body = await response.json();
-    expect(body.profile).toMatchObject({ capabilitiesSource: "detected", supportsTools: true, detectedContextWindow: 16_000 });
-    expect(body.profile.manualContextWindow).toBeUndefined();
-  });
-
-  test("does not use a manual context window while restoring detected metadata", async () => {
-    const fake = adapter({
-      getModelMetadata: vi.fn(async () => ({ id: "future-model", displayName: "Future" })),
-    });
-    const POST = createModelsPostHandler(createModelService({ resolveAdapter: () => fake, env: {} }));
-    const response = await POST(request({
-      operation: "restore_detected",
-      profile: profile({ capabilitiesSource: "manual", manualContextWindow: 99_999, analysisCompatible: true }),
-      apiKey: "secret",
-    }));
-    const body = await response.json();
-    expect(body.probe).toMatchObject({ contextWindowSource: "unknown", sufficientContext: false, analysisCompatible: false });
-    expect(body.profile).toMatchObject({ capabilitiesSource: "detected", analysisCompatible: false });
-    expect(body.profile.manualContextWindow).toBeUndefined();
   });
 
   test("uses server-only preset keys and sanitizes all upstream failures", async () => {
