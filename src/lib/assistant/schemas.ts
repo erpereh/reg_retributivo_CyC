@@ -11,7 +11,7 @@ export const modelProfileSchema = z.object({
   id, name: z.string().min(1).max(200), provider: z.enum(["gemini", "openai", "openrouter", "cerebras", "groq", "manual"]),
   baseUrl: z.string().max(2_048), modelId: z.string().min(1).max(256), enabled: z.boolean(), generalChatCompatible: z.boolean(), analysisCompatible: z.boolean(),
   supportsStreaming: z.boolean(), supportsTools: z.boolean(), supportsStructuredOutput: z.boolean(), detectedContextWindow: z.number().int().positive().optional(),
-  manualContextWindow: z.number().int().positive().optional(), maxOutputTokens: z.number().int().positive().optional(), capabilitiesSource: z.enum(["detected", "manual"]), selectedModelCatalogId: id.optional(),
+  manualContextWindow: z.number().int().positive().optional(), maxOutputTokens: z.number().int().positive().optional(), capabilitiesSource: z.enum(["detected", "manual"]), selectedModelCatalogId: id.optional(), providerModelName: z.string().min(1).max(512).optional(),
   detectedModels: z.array(detectedModelSchema).max(500).optional(), verifiedAt: date.max(64).optional(), lastVerificationError: z.string().max(500).optional(),
 }).strict();
 

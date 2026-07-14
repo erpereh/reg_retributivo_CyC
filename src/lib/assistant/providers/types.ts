@@ -40,7 +40,7 @@ export type ProviderStreamEvent =
   | { readonly type: "done"; readonly finishReason: string };
 
 export interface AdapterAuth { readonly apiKey: string; readonly signal?: AbortSignal }
-export interface ModelRequest extends AdapterAuth { readonly modelId: string }
+export interface ModelRequest extends AdapterAuth { readonly modelId: string; readonly providerModelName?: string }
 export interface TokenCountRequest extends ModelRequest { readonly text: string }
 export interface ToolPlanRequest extends ModelRequest { readonly messages: readonly ProviderMessage[]; readonly tools: readonly ProviderTool[] }
 export interface StreamResponseRequest extends ModelRequest {
@@ -83,6 +83,8 @@ const PUBLIC_MESSAGES_BY_CODE: Readonly<Record<string, string>> = {
   stream_parse: "No se pudo interpretar la respuesta del proveedor.",
   gemini_response_blocked: "Gemini bloqueó la respuesta.",
   gemini_stream_parse: "No se pudo interpretar la respuesta del proveedor.",
+  gemini_empty_candidates: "Gemini no devolvió candidatos de respuesta.",
+  gemini_empty_text: "Gemini no devolvió texto en la respuesta.",
 };
 
 export class ProviderAdapterError extends Error {

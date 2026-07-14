@@ -19,7 +19,7 @@ import { createAnalysisVersionSnapshot, syncAnalysisVersion } from "@/lib/assist
 import { executeChatAction, rejectChatAction, type AppNavigationIntent } from "@/lib/assistant/integrations/actions";
 import { registerAnalysisCleanupListener } from "@/lib/assistant/integrations/analysisCleanupCoordinator";
 import { AssistantRunStoppedError, createRepositoryBoundAssistantOrchestrator, type AssistantOrchestrator } from "@/lib/assistant/orchestration/assistantOrchestrator";
-import type { AnalysisToolRegistry } from "@/lib/assistant/tools/registry";
+import { ANALYSIS_TOOL_NAMES, createAnalysisToolRegistry, type AnalysisToolName, type AnalysisToolRegistry } from "@/lib/assistant/tools/registry";
 
 const TEST_MODEL_ID = "injected-test-model";
 const TEST_SYSTEM_PROMPT = GENERAL_RETRIBUTIVO_PROMPT;
@@ -125,6 +125,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
   const vaultRef = useRef(createEphemeralKeyVault());
   const assistantSettingsRef = useRef<AssistantSettings>(DEFAULT_ASSISTANT_SETTINGS);
   const modelProfilesRef = useRef<ModelProfile[]>([]);
+  const activeAnalysisRef = useRef(activeAnalysis);
   const configurationMutationRef = useRef<Promise<void>>(Promise.resolve());
   const conversationMutationRef = useRef<Promise<void>>(Promise.resolve());
   const selectionIntentSequenceRef = useRef(0);
@@ -168,6 +169,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
   const [assistantSettings, setAssistantSettings] = useState<AssistantSettings>(DEFAULT_ASSISTANT_SETTINGS);
 
+  useEffect(() => { activeAnalysisRef.current = activeAnalysis; }, [activeAnalysis]);
   useEffect(() => { conversationRef.current = conversation; }, [conversation]);
   useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
@@ -299,6 +301,19 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
         repositories = repositoriesFactory ? await repositoriesFactory() : await createIndexedDbRepositories({ factory, dbName });
         if (cancelled) { repositories.close(); return; }
         repositoriesRef.current = repositories;
+        const currentAnalysisRegistry = () => {
+          const currentConversation = conversationRef.current;
+          const currentAnalysis = activeAnalysisRef.current;
+          if (!currentConversation || currentConversation.type !== "analysis" || !currentConversation.analysisId || !currentAnalysis || currentAnalysis.id !== currentConversation.analysisId) throw new ProviderAdapterError("incompatible", "analysis_tools_unavailable");
+          return createAnalysisToolRegistry({ conversation: currentConversation, analysis: currentAnalysis, chunks: [] });
+        };
+        const registry = {
+          get names() { const current = conversationRef.current; const analysis = activeAnalysisRef.current; return !adapterRef.current && current?.type === "analysis" && current.analysisId === analysis?.id ? ANALYSIS_TOOL_NAMES : []; },
+          get privacyBlockedTerms() { if (adapterRef.current) return []; try { return currentAnalysisRegistry().privacyBlockedTerms; } catch { return []; } },
+          execute(name: AnalysisToolName, args: unknown) { return currentAnalysisRegistry().execute(name, args); },
+          executeEnvelope(name: AnalysisToolName, args: unknown, requestId?: string) { return currentAnalysisRegistry().executeEnvelope!(name, args, requestId); },
+          assertSafeOutput(value: unknown) { const current = conversationRef.current; const analysis = activeAnalysisRef.current; if (!adapterRef.current && current?.type === "analysis" && current.analysisId === analysis?.id) currentAnalysisRegistry().assertSafeOutput?.(value); },
+        } as unknown as AnalysisToolRegistry;
         orchestratorRef.current = createRepositoryBoundAssistantOrchestrator({
           transport: async (body, signal) => {
             if (!adapterRef.current) {
@@ -315,7 +330,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
             const stream = pending.kind === "general" ? adapterRef.current.streamGeneral(pending.request) : adapterRef.current.streamPersonProfile(pending.request);
             return localIterableResponse(stream, String(body.roundId), signal);
           },
-          registry: { names: [], execute: async () => { throw new Error("Herramienta no disponible."); } } as unknown as AnalysisToolRegistry,
+          registry,
         }, repositories);
         const [storedProfiles, storedSettings, conversationPage] = await Promise.all([
           repositories.modelProfiles.listAll(),
@@ -744,12 +759,12 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     let nextSources = sources;
     let sourceRefIds: string[] = [];
     const personMatch = /matrícula ([\p{L}\p{N}._-]+)/u.exec(content);
-    if (conversation.type === "analysis" && conversation.analysisId && activeAnalysis && personMatch) {
+    if (adapter && conversation.type === "analysis" && conversation.analysisId && activeAnalysis && personMatch) {
       const profile = executeAssistantToolRequest({ tool: "getPersonProfile", args: { analysisId: conversation.analysisId, personId: personMatch[1] } }, activeAnalysis, conversation.id);
       pendingFakeRequestRef.current = { kind: "profile", request: { messageId: "pending", totals: profile.totals, source: profile.source } };
       nextSources = [...sources.filter((item) => item.id !== profile.source.id), profile.source];
       sourceRefIds = [profile.source.id];
-    } else {
+    } else if (adapter) {
       pendingFakeRequestRef.current = { kind: "general", request: { systemPrompt: TEST_SYSTEM_PROMPT, question: content, messageId: "pending" } };
     }
     const assistantMessage: ChatMessage = {
@@ -778,12 +793,14 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       if (!partialTimer) partialTimer = setTimeout(flushPartial, STREAM_BATCH_MS);
     };
     try {
-      const pending = pendingFakeRequestRef.current!;
-      pendingFakeRequestRef.current = pending.kind === "general"
-        ? { kind: "general", request: { ...pending.request, messageId: assistantMessage.id } }
-        : { kind: "profile", request: { ...pending.request, messageId: assistantMessage.id } };
-      runPending = pendingFakeRequestRef.current;
-      repeatableRunsRef.current.set(assistantMessage.id, runPending);
+      if (adapter) {
+        const pending = pendingFakeRequestRef.current!;
+        pendingFakeRequestRef.current = pending.kind === "general"
+          ? { kind: "general", request: { ...pending.request, messageId: assistantMessage.id } }
+          : { kind: "profile", request: { ...pending.request, messageId: assistantMessage.id } };
+        runPending = pendingFakeRequestRef.current;
+        repeatableRunsRef.current.set(assistantMessage.id, runPending);
+      }
       const compatibleDefaultProfile = modelProfilesRef.current.find((profile) => profile.id === (conversation.type === "analysis" ? assistantSettingsRef.current.defaultAnalysisModelProfileId : assistantSettingsRef.current.defaultGeneralModelProfileId));
       const result = await orchestratorRef.current!.send({
         conversationId: conversation.id, ...(conversation.type === "analysis" ? { analysisId: conversation.analysisId } : {}), question: content, assistantMessageId: assistantMessage.id,
@@ -809,13 +826,14 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       if (!runIsCurrent()) return;
       flushPartial();
       const stopped = caught instanceof AssistantRunStoppedError;
-      const terminal = { ...assistantMessage, content: stopped ? caught.partialText : partialText, status: stopped ? "stopped" as const : "failed" as const };
+      const failureMessage = caught instanceof ProviderAdapterError ? caught.publicMessage : "No se pudo completar la respuesta del Asistente.";
+      const terminal = { ...assistantMessage, content: stopped ? caught.partialText : partialText || failureMessage, status: stopped ? "stopped" as const : "failed" as const };
       const persisted = await persistRunRound(conversation.id, [...baseMessages, userMessage, terminal], nextSources, runIsCurrent).catch(() => false);
       if (persisted && runIsCurrent()) {
         if (stopped) { setNotice("Respuesta detenida"); setAnnouncement(`Respuesta detenida: ${terminal.content}`); }
-        else { setError(caught instanceof ProviderAdapterError ? caught.publicMessage : "No se pudo completar la respuesta del Asistente."); setAnnouncement("La respuesta ha fallado"); }
+        else { setError(failureMessage); setAnnouncement("La respuesta ha fallado"); }
       } else if (!stopped && runIsCurrent()) {
-        setError(caught instanceof ProviderAdapterError ? caught.publicMessage : "No se pudo completar la respuesta del Asistente.");
+        setError(failureMessage);
         setAnnouncement("La respuesta ha fallado");
       }
     } finally {

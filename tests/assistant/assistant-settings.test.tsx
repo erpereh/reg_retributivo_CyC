@@ -16,7 +16,7 @@ describe("Assistant settings", () => {
     const factory = new IDBFactory();
     vi.stubGlobal("IDBKeyRange", IDBKeyRange);
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ models: [
-      { id: "manual-model", displayName: "Manual model", contextWindow: 32_000, maxOutputTokens: 4_096 },
+      { id: "manual-model", providerModelName: "models/manual-model", displayName: "Manual model", contextWindow: 32_000, maxOutputTokens: 4_096 },
     ] })));
     render(<StrictMode><AssistantProvider factory={factory} dbName="settings-ai-test"><AssistantAiSettings /></AssistantProvider></StrictMode>);
 
@@ -34,7 +34,7 @@ describe("Assistant settings", () => {
     const profiles = await new Promise<Record<string, unknown>[]>((resolve) => { request.onsuccess = () => resolve(request.result); });
     db.close();
     expect(profiles).toHaveLength(1);
-    expect(profiles[0]).toMatchObject({ modelId: "manual-model", detectedContextWindow: 32_000, detectedModels: [{ id: "manual-model", displayName: "Manual model", contextWindow: 32_000, maxOutputTokens: 4_096 }] });
+    expect(profiles[0]).toMatchObject({ modelId: "manual-model", providerModelName: "models/manual-model", detectedContextWindow: 32_000, detectedModels: [{ id: "manual-model", providerModelName: "models/manual-model", displayName: "Manual model", contextWindow: 32_000, maxOutputTokens: 4_096 }] });
     expect(profiles[0]?.verifiedAt).toEqual(expect.any(String));
     expect(JSON.stringify(profiles)).not.toContain("sk-never-store");
   });

@@ -29,7 +29,7 @@ interface GeminiResponseLike {
   readonly text?: string;
   readonly functionCalls?: readonly { readonly id?: string; readonly name?: string; readonly args?: unknown }[];
   readonly usageMetadata?: { readonly promptTokenCount?: number; readonly candidatesTokenCount?: number; readonly totalTokenCount?: number };
-  readonly candidates?: readonly { readonly finishReason?: string }[];
+  readonly candidates?: readonly { readonly finishReason?: string; readonly content?: { readonly parts?: readonly { readonly text?: string }[] } }[];
   readonly promptFeedback?: { readonly blockReason?: string };
 }
 interface GeminiClientLike {
@@ -46,6 +46,20 @@ function modelId(name?: string): string {
   return name?.replace(/^models\//, "") ?? "";
 }
 
+export interface GeminiModelIdentity {
+  readonly providerModelName: string;
+  readonly generationModelId: string;
+  readonly resourceName: string;
+}
+
+export function resolveGeminiModelIdentity(model: string, providerModelName?: string): GeminiModelIdentity {
+  const generationModelId = modelId(model);
+  if (!generationModelId) throw new ProviderAdapterError("provider", "gemini_invalid_model");
+  const resourceName = providerModelName?.replace(/^models\//, "") || generationModelId;
+  const normalizedProviderModelName = `models/${resourceName}`;
+  return { providerModelName: normalizedProviderModelName, generationModelId, resourceName: normalizedProviderModelName };
+}
+
 function asModel(model: GeminiModelLike): ProviderModel {
   const id = modelId(model.name);
   if (!id) throw new ProviderAdapterError("provider");
@@ -58,7 +72,7 @@ function supportsGenerateContent(methods: readonly string[]): boolean {
 }
 
 function geminiContents(messages: readonly { role: "system" | "user" | "assistant" | "tool"; content: string }[]) {
-  return messages.map((message) => {
+  return messages.filter((message) => message.role !== "system").map((message) => {
     if (message.role !== "tool") return { role: message.role === "assistant" ? "model" : "user", parts: [{ text: message.content }] };
     try {
       const results = JSON.parse(message.content) as unknown;
@@ -76,8 +90,23 @@ function geminiContents(messages: readonly { role: "system" | "user" | "assistan
   });
 }
 
+function geminiSystemInstruction(messages: readonly { role: "system" | "user" | "assistant" | "tool"; content: string }[]): string | undefined {
+  const content = messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n").trim();
+  return content || undefined;
+}
+
 function finishReasonCode(reason: string): string {
   return reason.trim().toLocaleLowerCase("en").replace(/[^a-z0-9]+/giu, "_").replace(/^_+|_+$/gu, "") || "unknown";
+}
+
+function responseText(response: GeminiResponseLike): string {
+  if (response.text?.trim()) return response.text;
+  return (response.candidates ?? []).flatMap((candidate) => candidate.content?.parts ?? []).map((part) => part.text ?? "").join("");
+}
+
+function sanitizeGeminiError(error: unknown): ProviderAdapterError {
+  const safe = sanitizeProviderError(error);
+  return safe.code.startsWith("provider_http_") ? new ProviderAdapterError(safe.classification, safe.code.replace(/^provider_/, "gemini_")) : safe;
 }
 
 type GeminiFetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -124,73 +153,73 @@ export class GeminiAdapter implements AIProviderAdapter {
         if (pageToken) seenTokens.add(pageToken);
       } while (pageToken);
       return result;
-    } catch (error) { throw sanitizeProviderError(error); }
+    } catch (error) { throw sanitizeGeminiError(error); }
   }
 
-  async getModelMetadata({ apiKey, modelId: id, signal }: { apiKey: string; modelId: string; signal?: AbortSignal }): Promise<ModelMetadata> {
+  async getModelMetadata({ apiKey, modelId: id, providerModelName, signal }: { apiKey: string; modelId: string; providerModelName?: string; signal?: AbortSignal }): Promise<ModelMetadata> {
     try {
       if (signal?.aborted) throw new ProviderAdapterError("cancelled");
-      return asModel(await this.client(apiKey).models.get({ model: id, config: { abortSignal: signal } }));
-    } catch (error) { throw sanitizeProviderError(error); }
+      return asModel(await this.client(apiKey).models.get({ model: resolveGeminiModelIdentity(id, providerModelName).generationModelId, config: { abortSignal: signal } }));
+    } catch (error) { throw sanitizeGeminiError(error); }
   }
 
-  async countTokens({ apiKey, modelId: id, text, signal }: TokenCountRequest): Promise<TokenCount> {
+  async countTokens({ apiKey, modelId: id, providerModelName, text, signal }: TokenCountRequest): Promise<TokenCount> {
     try {
       if (signal?.aborted) throw new ProviderAdapterError("cancelled");
-      const response = await this.client(apiKey).models.countTokens({ model: id, contents: text, config: { abortSignal: signal } });
+      const response = await this.client(apiKey).models.countTokens({ model: resolveGeminiModelIdentity(id, providerModelName).generationModelId, contents: text, config: { abortSignal: signal } });
       if (!Number.isInteger(response.totalTokens) || response.totalTokens! < 0) throw new ProviderAdapterError("provider");
       return { tokens: response.totalTokens!, estimated: false };
-    } catch (error) { throw sanitizeProviderError(error); }
+    } catch (error) { throw sanitizeGeminiError(error); }
   }
 
   async planTools(request: ToolPlanRequest): Promise<ToolPlan> {
     try {
       if (request.signal?.aborted) throw new ProviderAdapterError("cancelled");
       const response = await this.client(request.apiKey).models.generateContent({
-        model: request.modelId,
+        model: resolveGeminiModelIdentity(request.modelId, request.providerModelName).generationModelId,
         contents: geminiContents(request.messages),
         config: {
           abortSignal: request.signal,
+          ...(geminiSystemInstruction(request.messages) ? { systemInstruction: geminiSystemInstruction(request.messages) } : {}),
           tools: [{ functionDeclarations: request.tools.map((tool) => ({ name: tool.name, description: tool.description, parametersJsonSchema: tool.parameters })) }],
           toolConfig: { functionCallingConfig: { mode: "AUTO" } },
         },
       });
       if (response.promptFeedback?.blockReason) throw new ProviderAdapterError("provider", "gemini_response_blocked");
       return { toolCalls: (response.functionCalls ?? []).map((call, index) => ({ id: call.id ?? `gemini-call-${index}`, name: call.name ?? "", args: call.args })) };
-    } catch (error) { throw sanitizeProviderError(error); }
+    } catch (error) { throw sanitizeGeminiError(error); }
   }
 
   async *streamResponse(request: StreamResponseRequest): AsyncIterable<ProviderStreamEvent> {
     try {
       if (request.signal?.aborted) throw new ProviderAdapterError("cancelled");
-      const stream = await this.client(request.apiKey).models.generateContentStream({
-        model: request.modelId,
+      const response = await this.client(request.apiKey).models.generateContent({
+        model: resolveGeminiModelIdentity(request.modelId, request.providerModelName).generationModelId,
         contents: geminiContents(request.messages),
-        config: { maxOutputTokens: request.maxOutputTokens, abortSignal: request.signal },
+        config: { maxOutputTokens: request.maxOutputTokens, abortSignal: request.signal, ...(geminiSystemInstruction(request.messages) ? { systemInstruction: geminiSystemInstruction(request.messages) } : {}) },
       });
-      let finishReason = "stop";
-      let sawText = false;
-      for await (const chunk of stream) {
-        if (request.signal?.aborted) throw new ProviderAdapterError("cancelled");
-        if (chunk.promptFeedback?.blockReason) throw new ProviderAdapterError("provider", "gemini_response_blocked");
-        if (chunk.text) { sawText = true; yield { type: "text_delta", delta: chunk.text }; }
-        const usage = chunk.usageMetadata;
-        if (usage?.totalTokenCount !== undefined) yield { type: "usage", usage: { inputTokens: usage.promptTokenCount ?? 0, outputTokens: usage.candidatesTokenCount ?? 0, totalTokens: usage.totalTokenCount, estimated: false } };
-        finishReason = chunk.candidates?.[0]?.finishReason ?? finishReason;
-      }
-      if (!sawText && finishReason !== "stop") throw new ProviderAdapterError("provider", `gemini_finish_${finishReasonCode(finishReason)}`);
-      if (!sawText) throw new ProviderAdapterError("provider", "empty_response");
+      if (request.signal?.aborted) throw new ProviderAdapterError("cancelled");
+      if (response.promptFeedback?.blockReason) throw new ProviderAdapterError("provider", "gemini_response_blocked");
+      if (!response.candidates?.length) throw new ProviderAdapterError("provider", "gemini_empty_candidates");
+      const finishReason = response.candidates[0]?.finishReason ?? "stop";
+      const normalizedFinishReason = finishReasonCode(finishReason);
+      const text = responseText(response);
+      if (!text.trim() && normalizedFinishReason !== "stop") throw new ProviderAdapterError("provider", `gemini_finish_${normalizedFinishReason}`);
+      if (!text.trim()) throw new ProviderAdapterError("provider", "gemini_empty_text");
+      yield { type: "text_delta", delta: text };
+      const usage = response.usageMetadata;
+      if (usage?.totalTokenCount !== undefined) yield { type: "usage", usage: { inputTokens: usage.promptTokenCount ?? 0, outputTokens: usage.candidatesTokenCount ?? 0, totalTokens: usage.totalTokenCount, estimated: false } };
       yield { type: "done", finishReason };
     } catch (error) {
       if (error instanceof SyntaxError) throw new ProviderAdapterError("provider", "gemini_stream_parse");
-      throw sanitizeProviderError(error);
+      throw sanitizeGeminiError(error);
     }
   }
 
   private async structuredOutput(apiKey: string, id: string, signal?: AbortSignal): Promise<boolean> {
     if (signal?.aborted) return false;
     const response = await this.client(apiKey).models.generateContent({
-      model: id, contents: "Devuelve un objeto con ok=true.",
+      model: resolveGeminiModelIdentity(id).generationModelId, contents: "Devuelve un objeto con ok=true.",
       config: { abortSignal: signal, responseMimeType: "application/json", responseJsonSchema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"], additionalProperties: false } },
     });
     try { return z.object({ ok: z.literal(true) }).strict().safeParse(JSON.parse(response.text ?? "")).success; } catch { return false; }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createChatPostHandler } from "@/lib/assistant/server/chatService";
+import { createChatPostHandler, createChatService } from "@/lib/assistant/server/chatService";
 import { assistantStreamEventSchema } from "@/lib/assistant/schemas";
 
 function request(body: unknown, signal?: AbortSignal) {
@@ -8,6 +8,34 @@ function request(body: unknown, signal?: AbortSignal) {
 const base = { conversationId: "c1", analysisId: "a1", roundId: "r1", roundNumber: 1, modelProfileId: "p1", modelId: "fake-model", responseMode: "strict", contextStrategy: "automatic" } as const;
 
 describe("POST /api/assistant/chat", () => {
+  it("skips tool planning for a general request with no available tools", async () => {
+    const planTools = vi.fn();
+    const streamResponse = vi.fn(async function* () {
+      yield { type: "text_delta", delta: "Hola" } as const;
+      yield { type: "done", finishReason: "STOP" } as const;
+    });
+    const adapter = { countTokens: vi.fn(async () => ({ tokens: 1, estimated: true })), planTools, streamResponse };
+    const service = createChatService(async () => ({ adapter: adapter as never, apiKey: "server-only" }));
+    const profile = { id: "p1", name: "Gemini", provider: "gemini", baseUrl: "https://generativelanguage.googleapis.com", modelId: "gemini-2.5-flash", enabled: true, generalChatCompatible: true, analysisCompatible: true, supportsStreaming: true, supportsTools: true, supportsStructuredOutput: false, detectedContextWindow: 1_048_576, capabilitiesSource: "detected" as const };
+    const events = [];
+    for await (const event of service.execute({ ...base, phase: "plan", question: "hola", tools: [], profile }, new AbortController().signal)) events.push(event);
+    expect(planTools).not.toHaveBeenCalled();
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "text_delta", delta: "Hola" }),
+      expect.objectContaining({ type: "done", finishReason: "STOP" }),
+    ]));
+  });
+
+  it("instructs an analysis request to use the available local tool before answering", async () => {
+    const planTools = vi.fn(async () => ({ toolCalls: [] }));
+    const adapter = { countTokens: vi.fn(async () => ({ tokens: 1, estimated: true })), planTools, streamResponse: vi.fn(async function* () { yield { type: "text_delta", delta: "Respuesta" } as const; yield { type: "done", finishReason: "STOP" } as const; }) };
+    const service = createChatService(async () => ({ adapter: adapter as never, apiKey: "server-only" }));
+    const profile = { id: "p1", name: "Gemini", provider: "gemini", baseUrl: "https://generativelanguage.googleapis.com", modelId: "gemini-2.5-flash", enabled: true, generalChatCompatible: true, analysisCompatible: true, supportsStreaming: true, supportsTools: true, supportsStructuredOutput: false, detectedContextWindow: 1_048_576, capabilitiesSource: "detected" as const };
+
+    for await (const _ of service.execute({ ...base, phase: "plan", question: "Matrícula 10048", tools: ["getPersonProfile"], profile }, new AbortController().signal)) { /* consume */ }
+    expect(planTools).toHaveBeenCalledWith(expect.objectContaining({ tools: [expect.objectContaining({ name: "getPersonProfile", description: expect.stringContaining("ficha retributiva") })], messages: expect.arrayContaining([expect.objectContaining({ role: "system", content: expect.stringContaining("matrícula concreta") })]) }));
+  });
+
   it.each(["plan", "respond", "continue"] as const)("accepts strict %s and emits only validated NDJSON", async (phase) => {
     const execute = vi.fn(async function* () {
       yield { type: "status", roundId: "r1", label: "Procesando" } as const;

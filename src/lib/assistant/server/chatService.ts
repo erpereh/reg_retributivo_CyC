@@ -102,9 +102,17 @@ export function createProductionChatAdapterResolver(options: { env?: ServerEnv; 
   };
 }
 
-export function providerTools(names: readonly AnalysisToolName[]): ProviderTool[] { return names.map((name) => ({ name, description: `Consulta local ${name}`, parameters: ANALYSIS_TOOL_SCHEMAS[name].provider })); }
+export function providerTools(names: readonly AnalysisToolName[]): ProviderTool[] {
+  return names.map((name) => ({
+    name,
+    description: name === "getPersonProfile"
+      ? "Obtiene la ficha retributiva anonimizada de una matrícula concreta del análisis actual. Úsala antes de responder a una consulta sobre esa matrícula."
+      : `Consulta local ${name}`,
+    parameters: ANALYSIS_TOOL_SCHEMAS[name].provider,
+  }));
+}
 
-async function counted(adapter: AIProviderAdapter, input: ChatRequest, apiKey: string, text: string, signal: AbortSignal): Promise<number> { const count = await adapter.countTokens({ apiKey, modelId: input.modelId, text, signal }); if (!Number.isInteger(count.tokens) || count.tokens < 0) throw new ProviderAdapterError("provider", "invalid_token_count"); return count.tokens; }
+async function counted(adapter: AIProviderAdapter, input: ChatRequest, apiKey: string, text: string, signal: AbortSignal): Promise<number> { const count = await adapter.countTokens({ apiKey, modelId: input.modelId, providerModelName: input.profile?.providerModelName, text, signal }); if (!Number.isInteger(count.tokens) || count.tokens < 0) throw new ProviderAdapterError("provider", "invalid_token_count"); return count.tokens; }
 async function messagesFor(input: ChatRequest, adapter: AIProviderAdapter, apiKey: string, tools: readonly ProviderTool[], signal: AbortSignal) {
   const instruction = responseModeInstructions(input.responseMode); const continuationInstruction = "Continúa exactamente desde el contenido parcial anterior, sin repetirlo ni reiniciar la respuesta."; const question = input.phase === "continue" ? continuationInstruction : input.question;
   const promptTokens = await counted(adapter, input, apiKey, `${instruction}\n${question}`, signal); const toolSchemaTokens = await counted(adapter, input, apiKey, JSON.stringify(tools), signal);
@@ -126,7 +134,10 @@ async function messagesFor(input: ChatRequest, adapter: AIProviderAdapter, apiKe
     statuses.push({ type: "status", roundId: input.roundId, code: "context_compacted", label: "El contexto fue compactado automáticamente.", snapshot });
   }
   const context = contextItems.join("\n\n");
-  const messages: ProviderMessage[] = [{ role: "system", content: `${instruction}${context ? `\n\nContexto sanitizado:\n${context}` : ""}` }];
+  const toolInstruction = tools.length
+    ? "\n\nPara consultas sobre datos del análisis, debes usar primero la herramienta local adecuada y responder únicamente con los resultados devueltos. Para una matrícula concreta, no respondas todavía: solicita primero su ficha mediante una herramienta."
+    : "";
+  const messages: ProviderMessage[] = [{ role: "system", content: `${instruction}${toolInstruction}${context ? `\n\nContexto sanitizado:\n${context}` : ""}` }];
   if (input.phase === "respond") { messages.push({ role: "user", content: input.question }); messages.push({ role: "tool", content: JSON.stringify(input.toolResults.map((entry) => ({ requestId: entry.requestId, tool: entry.tool, data: entry.data ?? entry.result, sources: entry.sources ?? [] }))) }); }
   else if (input.phase === "continue") { messages.push({ role: "assistant", content: input.continuationContext }); messages.push({ role: "user", content: continuationInstruction }); if (input.toolResults?.length) messages.push({ role: "tool", content: JSON.stringify(input.toolResults.map((entry) => ({ requestId: entry.requestId, tool: entry.tool, data: entry.data ?? entry.result, sources: entry.sources ?? [] }))) }); }
   else messages.push({ role: "user", content: input.question });
@@ -137,10 +148,12 @@ async function messagesFor(input: ChatRequest, adapter: AIProviderAdapter, apiKe
 export function createChatService(resolveAdapter: ChatAdapterResolver = createProductionChatAdapterResolver()): ChatExecutionService {
   return { async *execute(input, signal) { assertRequestSafe(input); const { adapter, apiKey } = await resolveAdapter(input); const toolNames = input.phase === "plan" ? input.tools : input.tools ?? ANALYSIS_TOOL_NAMES; const tools = providerTools(toolNames); const prepared = await messagesFor(input, adapter, apiKey, tools, signal); const { messages } = prepared; for (const status of prepared.statuses) yield status;
     for (const result of input.phase === "plan" ? [] : input.toolResults ?? []) yield { type: "tool_result_ack", roundId: input.roundId, requestId: result.requestId };
-    yield { type: "status", roundId: input.roundId, label: "Planificando herramientas" };
-    const result = await adapter.planTools({ apiKey, signal, modelId: input.modelId, messages, tools });
-    if (result.toolCalls.length) { for (const call of result.toolCalls) { if (!ANALYSIS_TOOL_NAMES.includes(call.name as AnalysisToolName)) throw new ProviderAdapterError("provider", "tool_not_allowed"); const tool = call.name as AnalysisToolName; ANALYSIS_TOOL_SCHEMAS[tool].input.parse(call.args); assertSafeForProvider(call.args); yield { type: "tool_request", roundId: input.roundId, requestId: call.id, tool, args: call.args }; } yield { type: "done", roundId: input.roundId, finishReason: "tool_request" }; return; }
-    for await (const event of adapter.streamResponse({ apiKey, signal, modelId: input.modelId, messages, maxOutputTokens: Math.min(2_048, input.profile?.maxOutputTokens ?? 2_048) })) { const converted = providerEvent(input, event); if (converted) yield converted; }
+    if (tools.length) {
+      yield { type: "status", roundId: input.roundId, label: "Planificando herramientas" };
+      const result = await adapter.planTools({ apiKey, signal, modelId: input.modelId, providerModelName: input.profile?.providerModelName, messages, tools });
+      if (result.toolCalls.length) { for (const call of result.toolCalls) { if (!ANALYSIS_TOOL_NAMES.includes(call.name as AnalysisToolName)) throw new ProviderAdapterError("provider", "tool_not_allowed"); const tool = call.name as AnalysisToolName; ANALYSIS_TOOL_SCHEMAS[tool].input.parse(call.args); assertSafeForProvider(call.args); yield { type: "tool_request", roundId: input.roundId, requestId: call.id, tool, args: call.args }; } yield { type: "done", roundId: input.roundId, finishReason: "tool_request" }; return; }
+    }
+    for await (const event of adapter.streamResponse({ apiKey, signal, modelId: input.modelId, providerModelName: input.profile?.providerModelName, messages, maxOutputTokens: Math.min(2_048, input.profile?.maxOutputTokens ?? 2_048) })) { const converted = providerEvent(input, event); if (converted) yield converted; }
   } };
 }
 function providerEvent(input: ChatRequest, event: ProviderStreamEvent): AssistantStreamEvent | undefined { if (event.type === "text_delta") return { type: "text_delta", roundId: input.roundId, messageId: `${input.executionId ?? "legacy"}:message:${input.roundNumber}`, delta: event.delta }; if (event.type === "usage") return { type: "usage", roundId: input.roundId, usage: event.usage }; return { type: "done", roundId: input.roundId, finishReason: event.finishReason }; }

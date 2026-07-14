@@ -29,7 +29,7 @@ describe("phase 4 rereview integrated regressions", () => {
     const response = await createChatPostHandler(createChatService(async () => ({ adapter: fake, apiKey: "key" })))(new Request("http://local/chat", { method: "POST", body: JSON.stringify(body) }));
     const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line));
     expect(events).toEqual(expect.arrayContaining([expect.objectContaining({ type: "status", code: "context_warning" }), expect.objectContaining({ type: "status", code: "context_compacted", snapshot: expect.objectContaining({ summarizedMessageIds: ["old"] }) })]));
-    expect(planTools).toHaveBeenCalledOnce();
+    expect(planTools).not.toHaveBeenCalled();
   });
 
   it("namespaces two sends with distinct execution/round/message ids even when upstream ids repeat", async () => {
