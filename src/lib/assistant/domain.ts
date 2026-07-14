@@ -1,3 +1,5 @@
+import { detectSensitivePatterns } from "@/lib/assistant/privacy/patterns";
+
 export type ConversationType = "general" | "analysis";
 export type ConversationStatus = "active" | "archived" | "archived_analysis_deleted";
 export type MessageStatus = "streaming" | "completed" | "stopped" | "interrupted" | "failed";
@@ -21,7 +23,7 @@ export interface Conversation {
   title: string;
   associatedPersonIds: string[];
   primaryPersonId?: string;
-  modelProfileId: string;
+  modelProfileId?: string;
   responseMode: ResponseMode;
   contextStrategy: ContextStrategy;
   analysisVersion?: string;
@@ -138,7 +140,7 @@ function escapeRegularExpression(value: string): string {
 
 export function sanitizeChatContent(rawContent: string, knownPeople: readonly KnownPersonReference[], conversationType: ConversationType): string {
   let content = rawContent.trim();
-  if (conversationType === "general") {
+  if (conversationType === "general" && detectSensitivePatterns(content).length) {
     if (APPROVED_GENERAL_CHAT_PROMPTS.has(content)) return content;
     throw new Error(SENSITIVE_CHAT_CONTENT_ERROR);
   }
@@ -149,7 +151,8 @@ export function sanitizeChatContent(rawContent: string, knownPeople: readonly Kn
   }
   const structuredMatch = /^(?:Revisa a|Consulta la) matrícula ([\p{L}\p{N}._-]+)$/u.exec(content);
   if (structuredMatch && knownPeople.some((person) => person.employeeNumber === structuredMatch[1])) return content;
-  throw new Error(SENSITIVE_CHAT_CONTENT_ERROR);
+  if (detectSensitivePatterns(content).length) throw new Error(SENSITIVE_CHAT_CONTENT_ERROR);
+  return content;
 }
 
 export function convertConversationToAnalysis(

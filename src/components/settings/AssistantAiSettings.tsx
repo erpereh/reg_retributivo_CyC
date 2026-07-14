@@ -39,6 +39,7 @@ export function AssistantAiSettings() {
     setKey, clearKey, withKey, clearAssistantContent,
   } = useAssistant();
   const [draft, setDraft] = useState<ModelProfile>();
+  const [providerToAdd, setProviderToAdd] = useState<ProviderId>("manual");
   const [message, setMessage] = useState<string>();
   const [storageUsage, setStorageUsage] = useState<string>();
   const [busyProfileId, setBusyProfileId] = useState<string>();
@@ -160,7 +161,11 @@ export function AssistantAiSettings() {
             <span className="flex size-11 items-center justify-center rounded-xl bg-blue-50 text-primary"><BrainCircuit aria-hidden="true" /></span>
             <div><h2 className="text-lg font-semibold text-ink">Proveedores y modelos</h2><p className="mt-1 text-sm text-muted">Perfiles configurables sin una lista cerrada de modelos.</p></div>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <select className="filter-control w-36" aria-label="Proveedor para añadir" value={providerToAdd} onChange={(event) => setProviderToAdd(event.target.value as ProviderId)}>{providers.map((provider) => <option key={provider} value={provider}>{PROVIDER_PRESETS[provider].label}</option>)}</select>
+            <button type="button" className="btn-secondary" aria-label={`Añadir proveedor ${PROVIDER_PRESETS[providerToAdd].label}`} onClick={() => { setDraft(emptyProfile(providerToAdd)); clearKey(); }}><Plus aria-hidden="true" />Añadir perfil</button>
+          </div>
+          <div className="hidden" aria-hidden="true">
             {providers.map((provider) => <button key={provider} type="button" className="btn-secondary" onClick={() => { setDraft(emptyProfile(provider)); clearKey(); }} aria-label={`Añadir proveedor ${PROVIDER_PRESETS[provider].label}`}><Plus aria-hidden="true" />{PROVIDER_PRESETS[provider].label}</button>)}
           </div>
         </div>
@@ -168,7 +173,7 @@ export function AssistantAiSettings() {
         {draft ? (
           <form className="mt-5 grid gap-4 rounded-2xl border border-line bg-slate-50/70 p-4 md:grid-cols-2" onSubmit={(event) => void submitProfile(event)}>
             <label className="text-sm font-semibold text-ink">Nombre del perfil<input className="filter-control mt-2" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
-            <label className="text-sm font-semibold text-ink">Proveedor<input className="filter-control mt-2" value={PROVIDER_PRESETS[draft.provider].label} disabled /></label>
+            <label className="text-sm font-semibold text-ink">Proveedor<select className="filter-control mt-2" value={draft.provider} onChange={(event) => { clearKey(); setDraft(emptyProfile(event.target.value as ProviderId)); }}>{providers.map((provider) => <option key={provider} value={provider}>{PROVIDER_PRESETS[provider].label}</option>)}</select></label>
             <label className="text-sm font-semibold text-ink">URL base HTTPS<input className="filter-control mt-2" value={draft.baseUrl} disabled={draft.provider !== "manual"} onChange={(event) => { clearKey(); setDraft({ ...draft, baseUrl: event.target.value }); }} /></label>
             <label className="text-sm font-semibold text-ink">Modelo<input className="filter-control mt-2" value={draft.modelId} onChange={(event) => setDraft({ ...draft, modelId: event.target.value })} /></label>
             {draft.provider === "manual" ? <label className="text-sm font-semibold text-ink">Clave efímera<input ref={keyInput} aria-label="Clave efímera" className="filter-control mt-2" type="password" autoComplete="off" onChange={(event) => setKey(keyScope(draft), event.target.value)} /><span className="mt-2 block font-normal text-muted">Solo vive en memoria hasta recargar o desmontar.</span></label> : <p className="text-sm text-muted">Variable server-only: <code>{PROVIDER_PRESETS[draft.provider].envName}</code></p>}

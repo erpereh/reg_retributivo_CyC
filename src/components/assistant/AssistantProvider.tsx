@@ -85,6 +85,8 @@ export interface AssistantContextValue {
   requestPersonProfile(): Promise<void>;
   updateConversationPreferences(patch: { modelProfileId?: string; responseMode?: ResponseMode; contextStrategy?: ContextStrategy }): Promise<void>;
   availablePersonIds: string[];
+  people: readonly { employeeNumber: string; person?: string; workplace?: string; position?: string; category?: string; status?: string; periods?: readonly string[] }[];
+  canSend: boolean;
   modelProfiles: ModelProfile[];
   assistantSettings: AssistantSettings;
   saveModelProfile(profile: ModelProfile): Promise<void>;
@@ -322,12 +324,15 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
         });
         const parsedSettings = assistantSettingsSchema.safeParse({ ...DEFAULT_ASSISTANT_SETTINGS, ...storedSettings });
         const repairedSettings = repairAssistantSettings(parsedSettings.success ? parsedSettings.data : DEFAULT_ASSISTANT_SETTINGS, restoredProfiles);
+        const restoredConversations = await Promise.all(conversationPage.items.map(async (item) => item.status === "archived"
+          ? (await repositories!.updateActiveConversation(item.id, { status: "active" }, now())) ?? { ...item, status: "active" as const }
+          : item));
         if (cancelled) return;
         modelProfilesRef.current = restoredProfiles;
         assistantSettingsRef.current = repairedSettings;
         setModelProfiles(restoredProfiles);
         setAssistantSettings(repairedSettings);
-        setConversations(conversationPage.items);
+        setConversations(restoredConversations);
         setConversationCursor(conversationPage.nextCursor);
         if (conversationPage.items[0]) await loadConversationData(conversationPage.items[0]);
         if (!cancelled) setReady(true);
@@ -515,7 +520,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     const createdAt = now();
     const defaultProfile = modelProfilesRef.current.find((profile) => profile.id === assistantSettingsRef.current.defaultGeneralModelProfileId && profile.enabled && profile.generalChatCompatible);
     const created: Conversation = {
-      id: createId("conversation"), type: "general", title: "Consulta general", associatedPersonIds: [], modelProfileId: defaultProfile?.id ?? FAKE_MODEL_ID,
+      id: createId("conversation"), type: "general", title: "Consulta general", associatedPersonIds: [], modelProfileId: defaultProfile?.id,
       responseMode: assistantSettingsRef.current.responseMode, contextStrategy: assistantSettingsRef.current.contextStrategy, status: "active", createdAt, updatedAt: createdAt,
     };
     const creation = conversationMutationRef.current.then(async () => {
@@ -719,6 +724,10 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     const createdAt = now();
     const selectedProfile = modelProfilesRef.current.find((profile) => profile.id === conversation.modelProfileId && profile.enabled
       && (conversation.type === "analysis" ? profile.analysisCompatible : profile.generalChatCompatible));
+    if (!selectedProfile && !adapter) {
+      setError("No hay modelos configurados.");
+      return;
+    }
     const modelProfileId = selectedProfile?.id ?? FAKE_MODEL_ID;
     const modelId = selectedProfile?.modelId ?? FAKE_MODEL_ID;
     const userMessage: ChatMessage = {
@@ -1038,7 +1047,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     if (!analysisVersion) { const message = "No se puede continuar en el Asistente porque el análisis ya no está disponible."; setError(message); throw new Error(message); }
     const operation = conversationMutationRef.current.then(() => continuePerson({
       repositories, analysisId: activeAnalysis.id, analysisVersion, personId,
-      modelProfileId: assistantSettingsRef.current.defaultAnalysisModelProfileId ?? FAKE_MODEL_ID, now: now(),
+      modelProfileId: assistantSettingsRef.current.defaultAnalysisModelProfileId ?? "", now: now(),
     }));
     conversationMutationRef.current = operation.then(() => undefined, () => undefined);
     const selected = await operation;
@@ -1071,7 +1080,13 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
   }, [conversation, send]);
 
   const updateConversationPreferences = useCallback(async (patch: { modelProfileId?: string; responseMode?: ResponseMode; contextStrategy?: ContextStrategy }) => {
+    const previousModelProfileId = conversationRef.current?.modelProfileId;
     await updateSelectedConversation(patch);
+    if (patch.modelProfileId && previousModelProfileId && patch.modelProfileId !== previousModelProfileId && conversationRef.current?.id) {
+      const event: ChatEvent = { id: createId("event"), conversationId: conversationRef.current.id, event: { type: "model_changed", previousModelProfileId, modelProfileId: patch.modelProfileId }, createdAt: now() };
+      await repositoriesRef.current?.events.put(event);
+      if (mountedRef.current) setEvents((items) => [...items, event]);
+    }
   }, [updateSelectedConversation]);
 
   const availablePersonIds = useMemo(() => conversation?.type === "analysis" && activeAnalysis && activeAnalysis.id === conversation.analysisId
@@ -1084,7 +1099,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     ready, conversations, hasMoreConversations: Boolean(conversationCursor), conversation, messages, repeatableMessageIds, hasMoreMessages: Boolean(messageCursor), sources, revealedSourceIds, events, actions, actionOutputs, resolvingActionIds, snapshots, documents, indexJobs,
     streaming, selectionLoading, conversationTransitionPending, announcement, notice, error, createGeneralConversation, loadMoreConversations, selectConversation, renameConversation, archiveConversation, deleteConversation,
     loadMoreMessages, send, stop, retryResponse, regenerateResponse, copyResponse, acceptAction, rejectAction, convertToActiveAnalysis, associatePerson, continuePersonInAssistant, addPerson, removePerson, setPrimaryPerson,
-    requestPersonProfile, updateConversationPreferences, availablePersonIds, modelProfiles, assistantSettings, saveModelProfile, duplicateModelProfile,
+    requestPersonProfile, updateConversationPreferences, availablePersonIds, people: activeAnalysis?.result.people ?? [], canSend: Boolean(adapter) || Boolean(conversation?.modelProfileId) || Boolean(conversation && modelProfiles.some((profile) => profile.enabled && (conversation.type === "analysis" ? profile.analysisCompatible : profile.generalChatCompatible))), modelProfiles, assistantSettings, saveModelProfile, duplicateModelProfile,
     deleteModelProfile, updateAssistantSettings, clearAssistantContent, setKey: vaultRef.current.setKey, clearKey: vaultRef.current.clearKey, withKey: vaultRef.current.withKey,
   }), [acceptAction, actionOutputs, actions, addPerson, announcement, archiveConversation, assistantSettings, associatePerson, availablePersonIds, clearAssistantContent, conversation, conversationCursor, conversations, documents,
     convertToActiveAnalysis, continuePersonInAssistant, copyResponse, createGeneralConversation, deleteConversation, deleteModelProfile, duplicateModelProfile, error, events, loadMoreConversations,

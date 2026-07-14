@@ -66,7 +66,7 @@ describe("assistant responsive layout", () => {
   test.each([1600, 1440, 1280, 1024, 768, 390] as const)("uses a hydration-stable CSS grid at %ipx", async (width) => {
     const shell = await renderAssistant(width, `layout-${width}`);
     expect(shell).not.toHaveAttribute("data-layout");
-    expect(shell).toHaveClass("min-h-[calc(100dvh-7rem)]");
+    expect(shell).toHaveClass("flex", "min-h-0", "flex-1", "overflow-hidden");
     const grid = shell.querySelector(".grid");
     expect(grid).toHaveClass("grid-cols-1", "lg:grid-cols-[minmax(0,1fr)_19rem]", "xl:grid-cols-[17rem_minmax(0,1fr)_19rem]");
     expect(screen.getByRole("button", { name: "Abrir conversaciones" })).toHaveClass("min-h-11", "min-w-11");

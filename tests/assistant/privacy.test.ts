@@ -2,10 +2,23 @@ import { describe, expect, test } from "vitest";
 import { assertSafeForPersistence, assertSafeForProvider, PrivacyBoundaryError } from "@/lib/assistant/privacy/assertions";
 import { detectSensitivePatterns } from "@/lib/assistant/privacy/patterns";
 import { redactKnownPersonValues, sanitizeForAI } from "@/lib/assistant/privacy/sanitize";
+import { sanitizeChatContent } from "@/lib/assistant/domain";
 
 const people = [{ employeeNumber: "10048", person: "Ana García López" }] as const;
 
 describe("deterministic assistant privacy boundary", () => {
+  test.each(["hola", "Buenos días", "¿Qué puedes hacer?", "Explícame qué es un registro retributivo"])("allows ordinary general chat: %s", (content) => {
+    expect(sanitizeChatContent(content, people, "general")).toBe(content);
+  });
+
+  test("replaces a known analysis person before the message crosses the boundary", () => {
+    expect(sanitizeChatContent("Revisa a Ana García López", people, "analysis")).toBe("Revisa a matrícula 10048");
+  });
+
+  test.each(["DNI 12345678Z", "ES91 2100 0418 4502 0005 1332", "ana@example.com"])("blocks sensitive chat content: %s", (content) => {
+    expect(() => sanitizeChatContent(content, people, "general")).toThrow("El contenido contiene datos sensibles no permitidos.");
+  });
+
   test("replaces known person values with their safe employee reference recursively", () => {
     expect(redactKnownPersonValues({ note: "Ana García López", nested: ["ANA GARCÍA LÓPEZ"] }, people)).toEqual({
       note: "matrícula 10048",

@@ -30,10 +30,10 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
   }, [view]);
 
   return (
-    <div data-slot="app-shell" data-surface="canvas" className="min-h-dvh bg-app-bg text-ink">
-      <div data-slot="app-content" data-surface="transparent" className="mx-auto min-h-dvh w-full max-w-[1560px]">
+    <div data-slot="app-shell" data-surface="canvas" className="flex min-h-dvh flex-col bg-app-bg text-ink">
+      <div data-slot="app-content" data-surface="transparent" className="mx-auto flex min-h-dvh w-full max-w-[1560px] flex-1 flex-col">
         <TopNav />
-        <main ref={mainRef} className="scroll-mt-24 px-3 pb-8 pt-4 outline-none sm:px-5 sm:pb-10 sm:pt-5 lg:px-7 xl:px-8" tabIndex={-1}>
+        <main ref={mainRef} className={`scroll-mt-24 px-3 pb-8 pt-4 outline-none sm:px-5 sm:pb-10 sm:pt-5 lg:px-7 xl:px-8 ${view === "asistente" ? "flex min-h-0 flex-1 flex-col overflow-hidden pb-3" : ""}`} tabIndex={-1}>
           {hydrating ? (
             <DashboardSkeleton />
           ) : (
@@ -42,6 +42,7 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
               initial={reduceMotion ? false : { opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: reduceMotion ? 0 : 0.16, ease: "easeOut" }}
+              className={view === "asistente" ? "flex min-h-0 flex-1 flex-col" : undefined}
             >
               {children}
             </motion.div>

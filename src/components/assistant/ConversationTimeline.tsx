@@ -56,7 +56,7 @@ export function ConversationTimeline({ assistant }: Readonly<{ assistant: Assist
           </>
         )}
       </div>
-      {conversation ? <AssistantComposer streaming={assistant.streaming} disabled={assistant.selectionLoading || conversation.status !== "active"} onSend={assistant.send} onStop={assistant.stop} /> : null}
+      {conversation ? <AssistantComposer streaming={assistant.streaming} disabled={assistant.selectionLoading || conversation.status !== "active" || !assistant.canSend} onSend={assistant.send} onStop={assistant.stop} /> : null}
       <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">{assistant.announcement}</div>
       {assistant.error ? <p role="alert" className="border-t border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-danger">{assistant.error}</p> : null}
     </main>

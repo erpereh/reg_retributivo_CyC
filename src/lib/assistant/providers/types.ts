@@ -11,7 +11,7 @@ export interface ProviderPreset {
 }
 
 export const PROVIDER_PRESETS: Readonly<Record<ProviderId, ProviderPreset>> = {
-  gemini: { label: "Gemini", envName: "GEMINI_API_KEY" },
+  gemini: { label: "Gemini", baseUrl: "https://generativelanguage.googleapis.com", envName: "GEMINI_API_KEY" },
   openai: { label: "OpenAI", baseUrl: "https://api.openai.com/v1", envName: "OPENAI_API_KEY" },
   openrouter: { label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", envName: "OPENROUTER_API_KEY" },
   cerebras: { label: "Cerebras", baseUrl: "https://api.cerebras.ai/v1", envName: "CEREBRAS_API_KEY" },

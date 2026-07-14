@@ -29,7 +29,7 @@ export const DEFAULT_ASSISTANT_SETTINGS: AssistantSettings = {
 
 export const conversationSchema = z.object({
   id, type: z.enum(["general", "analysis"]), analysisId: id.optional(), title: z.string(), associatedPersonIds: z.array(id),
-  primaryPersonId: id.optional(), modelProfileId: id, responseMode: z.enum(["strict", "flexible"]),
+  primaryPersonId: id.optional(), modelProfileId: id.optional(), responseMode: z.enum(["strict", "flexible"]),
   contextStrategy: z.enum(["automatic", "full", "optimized"]), analysisVersion: id.optional(),
   status: z.enum(["active", "archived", "archived_analysis_deleted"]), createdAt: date, updatedAt: date,
 }).strict().superRefine((value, context) => {
