@@ -93,7 +93,14 @@ export interface ModelProfile {
   baseUrl: string; modelId: string; enabled: boolean; generalChatCompatible: boolean; analysisCompatible: boolean;
   supportsStreaming: boolean; supportsTools: boolean; supportsStructuredOutput: boolean; detectedContextWindow?: number;
   manualContextWindow?: number; maxOutputTokens?: number; capabilitiesSource: "detected" | "manual";
-  verifiedAt?: string; lastVerificationError?: string;
+  detectedModels?: DetectedModel[]; verifiedAt?: string; lastVerificationError?: string;
+}
+
+export interface DetectedModel {
+  id: string;
+  displayName: string;
+  contextWindow?: number;
+  maxOutputTokens?: number;
 }
 
 export interface AssistantSettings {

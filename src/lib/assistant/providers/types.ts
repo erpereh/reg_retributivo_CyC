@@ -1,4 +1,4 @@
-import type { ModelProfile, TokenUsage } from "@/lib/assistant/domain";
+import type { DetectedModel, ModelProfile, TokenUsage } from "@/lib/assistant/domain";
 
 export type ProviderId = ModelProfile["provider"];
 export type ModelProfileInput = ModelProfile;
@@ -19,11 +19,7 @@ export const PROVIDER_PRESETS: Readonly<Record<ProviderId, ProviderPreset>> = {
   manual: { label: "Manual", envName: undefined },
 };
 
-export interface ProviderModel {
-  readonly id: string;
-  readonly displayName: string;
-  readonly contextWindow?: number;
-  readonly maxOutputTokens?: number;
+export interface ProviderModel extends DetectedModel {
   readonly supportedParameters?: readonly string[];
 }
 

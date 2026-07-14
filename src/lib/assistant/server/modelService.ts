@@ -31,7 +31,7 @@ function baseUrlFor(provider: ProviderId, requested?: string): string {
 
 function keyFor(provider: ProviderId, requestKey: string | undefined, env: ServerEnv): string {
   const key = provider === "manual" ? requestKey : env[PROVIDER_PRESETS[provider].envName ?? ""];
-  if (!key) throw new ModelServiceInputError("El proveedor no tiene una clave disponible.");
+  if (!key) throw new ModelServiceInputError(provider === "manual" ? "Introduce una clave API para el proveedor Manual." : `${PROVIDER_PRESETS[provider].envName} no está configurada.`);
   return key;
 }
 

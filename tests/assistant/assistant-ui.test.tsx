@@ -249,7 +249,11 @@ describe("assistant conversation UI", () => {
     render(<AssistantProvider activeAnalysis={activeAnalysis} factory={factory} dbName="conversation-controls" adapter={new FakeAssistantAdapter()}><AssistantView /></AssistantProvider>);
     await screen.findByRole("heading", { name: "Revisión retributiva" });
 
-    expect(screen.getByRole("combobox", { name: "Modelo de conversación" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Modelo de conversación:/ })).toBeTruthy();
+    expect(screen.queryByText("Añadir contexto")).toBeNull();
+    expect(screen.getByTestId("assistant-composer-controls")).not.toHaveClass("overflow-x-auto");
+    expect(screen.getByRole("button", { name: "Enviar" })).toHaveClass("shrink-0");
+    expect(screen.getByRole("button", { name: "Abrir detalle del contexto" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Configuración" })).toBeNull();
 
     expect(screen.getByText("+ 2")).toBeTruthy();
@@ -260,8 +264,10 @@ describe("assistant conversation UI", () => {
     fireEvent.click(within(picker).getByRole("checkbox", { name: "Matrícula 10006" }));
     fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Modo de respuesta" }), { target: { value: "flexible" } });
-    fireEvent.change(screen.getByRole("combobox", { name: "Estrategia de contexto" }), { target: { value: "optimized" } });
+    fireEvent.click(screen.getByRole("button", { name: /Modo de respuesta: Estricto/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Flexible" }));
+    fireEvent.click(screen.getByRole("button", { name: /Estrategia de contexto: Automática/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Optimizada" }));
     const composer = screen.getByRole("textbox", { name: "Pregunta" }) as HTMLTextAreaElement;
     fireEvent.change(composer, { target: { value: "Consulta la matrícula 10006" } });
     fireEvent.keyDown(composer, { key: "Enter", shiftKey: true });

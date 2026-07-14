@@ -7,7 +7,7 @@ import { PersonContextPicker } from "@/components/assistant/PersonContextPicker"
 import { ModalShell } from "@/components/common/ModalShell";
 import type { AssistantContextValue } from "@/components/assistant/AssistantProvider";
 
-export function ContextSidebar({ assistant, peoplePickerOpen, onPeoplePickerOpenChange }: Readonly<{ assistant: AssistantContextValue; peoplePickerOpen?: boolean; onPeoplePickerOpenChange?(open: boolean): void }>) {
+export function ContextSidebar({ assistant, peoplePickerOpen, onPeoplePickerOpenChange, contextUsageOpen, onContextUsageOpenChange }: Readonly<{ assistant: AssistantContextValue; peoplePickerOpen?: boolean; onPeoplePickerOpenChange?(open: boolean): void; contextUsageOpen?: boolean; onContextUsageOpenChange?(open: boolean): void }>) {
   const [personId, setPersonId] = useState<string>();
   const conversation = assistant.conversation;
   const readOnly = conversation?.status !== "active";
@@ -16,7 +16,7 @@ export function ContextSidebar({ assistant, peoplePickerOpen, onPeoplePickerOpen
     <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
       {conversation ? <>
         {conversation.type === "analysis" ? <section className="border-t border-line pt-4" aria-labelledby="people-context-title"><h3 id="people-context-title" className="mb-3 text-sm font-bold text-ink">Personas asociadas</h3><PersonContextPicker availableIds={assistant.availablePersonIds} associatedIds={conversation.associatedPersonIds} primaryId={conversation.primaryPersonId} disabled={readOnly} people={assistant.people} open={peoplePickerOpen} onOpenChange={onPeoplePickerOpenChange} onAdd={(id) => void assistant.addPerson(id)} onRemove={(id) => void assistant.removePerson(id)} onPrimary={(id) => void assistant.setPrimaryPerson(id)} onOpen={setPersonId} /></section> : <p className="border-t border-line pt-4 text-sm text-muted">Convierte la conversación al análisis activo para asociar personas.</p>}
-        <ContextUsageDetails messages={assistant.messages} snapshots={assistant.snapshots} events={assistant.events} documents={assistant.documents} indexJobs={assistant.indexJobs} />
+        <ContextUsageDetails messages={assistant.messages} snapshots={assistant.snapshots} events={assistant.events} documents={assistant.documents} indexJobs={assistant.indexJobs} open={contextUsageOpen} onOpenChange={onContextUsageOpenChange} />
       </> : <p className="text-sm text-muted">Crea una conversacion para configurar su contexto.</p>}
     </div>
     {personId ? <PersonDialog person={assistant.people.find((person) => person.employeeNumber === personId)} onClose={() => setPersonId(undefined)} /> : null}

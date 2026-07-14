@@ -4,6 +4,7 @@ import { ANALYSIS_TOOL_NAMES, ANALYSIS_TOOL_SCHEMAS } from "@/lib/assistant/tool
 
 const id = z.string().min(1).max(256);
 const date = z.string().min(1);
+const detectedModelSchema = z.object({ id: z.string().min(1).max(256), displayName: z.string().min(1).max(256), contextWindow: z.number().int().positive().optional(), maxOutputTokens: z.number().int().positive().optional() }).strict();
 export const tokenUsageSchema = z.object({ inputTokens: z.number().int().nonnegative(), outputTokens: z.number().int().nonnegative(), totalTokens: z.number().int().nonnegative(), estimated: z.boolean() }).strict();
 
 export const modelProfileSchema = z.object({
@@ -11,7 +12,7 @@ export const modelProfileSchema = z.object({
   baseUrl: z.string().max(2_048), modelId: z.string().min(1).max(256), enabled: z.boolean(), generalChatCompatible: z.boolean(), analysisCompatible: z.boolean(),
   supportsStreaming: z.boolean(), supportsTools: z.boolean(), supportsStructuredOutput: z.boolean(), detectedContextWindow: z.number().int().positive().optional(),
   manualContextWindow: z.number().int().positive().optional(), maxOutputTokens: z.number().int().positive().optional(), capabilitiesSource: z.enum(["detected", "manual"]),
-  verifiedAt: date.max(64).optional(), lastVerificationError: z.string().max(500).optional(),
+  detectedModels: z.array(detectedModelSchema).max(500).optional(), verifiedAt: date.max(64).optional(), lastVerificationError: z.string().max(500).optional(),
 }).strict();
 
 export const assistantSettingsSchema = z.object({

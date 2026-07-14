@@ -5,7 +5,7 @@ import { AssistantMessage } from "@/components/assistant/AssistantMessage";
 import { ConversationEvent } from "@/components/assistant/ConversationEvent";
 import type { AssistantContextValue } from "@/components/assistant/AssistantProvider";
 
-export function ConversationTimeline({ assistant, onManagePeople }: Readonly<{ assistant: AssistantContextValue; onManagePeople?(): void }>) {
+export function ConversationTimeline({ assistant, onShowContextUsage }: Readonly<{ assistant: AssistantContextValue; onShowContextUsage?(): void }>) {
   const conversation = assistant.conversation;
   const latestAssistantId = [...assistant.messages].reverse().find((message) => message.role === "assistant")?.id;
   const repeatableIds = new Set(assistant.repeatableMessageIds);
@@ -56,7 +56,7 @@ export function ConversationTimeline({ assistant, onManagePeople }: Readonly<{ a
           </>
         )}
       </div>
-      {conversation ? <AssistantComposer streaming={assistant.streaming} disabled={assistant.selectionLoading || conversation.status !== "active" || !assistant.canSend} conversation={conversation} profiles={assistant.modelProfiles.filter((profile) => profile.enabled && (conversation.type === "analysis" ? profile.analysisCompatible : profile.generalChatCompatible))} personCount={conversation.associatedPersonIds.length} contextTokens={[...assistant.messages].reverse().find((message) => message.usage)?.usage?.inputTokens} onSend={assistant.send} onStop={assistant.stop} onPreferences={(patch) => void assistant.updateConversationPreferences(patch)} onConfigureModels={assistant.openModelSettings} onManagePeople={onManagePeople} /> : null}
+      {conversation ? <AssistantComposer streaming={assistant.streaming} disabled={assistant.selectionLoading || conversation.status !== "active" || !assistant.canSend} conversation={conversation} profiles={assistant.modelProfiles.filter((profile) => profile.enabled && (conversation.type === "analysis" ? profile.analysisCompatible : profile.generalChatCompatible))} contextTokens={[...assistant.messages].reverse().find((message) => message.usage)?.usage?.inputTokens} onSend={assistant.send} onStop={assistant.stop} onPreferences={(patch) => void assistant.updateConversationPreferences(patch)} onConfigureModels={assistant.openModelSettings} onShowContextUsage={onShowContextUsage} /> : null}
       <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">{assistant.announcement}</div>
       {assistant.error ? <p role="alert" className="border-t border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-danger">{assistant.error}</p> : null}
     </main>

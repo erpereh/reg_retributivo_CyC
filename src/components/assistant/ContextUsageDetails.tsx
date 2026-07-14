@@ -4,18 +4,22 @@ import { useState } from "react";
 import type { ChatEvent, ChatMessage, PersistedDocumentMetadata } from "@/lib/assistant/domain";
 import type { AssistantStoredRecord, ContextSnapshot } from "@/lib/assistant/storage/repositories";
 
-export function ContextUsageDetails({ messages, snapshots, events, documents, indexJobs }: Readonly<{
+export function ContextUsageDetails({ messages, snapshots, events, documents, indexJobs, open: controlledOpen, onOpenChange }: Readonly<{
   messages: readonly ChatMessage[];
   snapshots: readonly ContextSnapshot[];
   events: readonly ChatEvent[];
   documents: readonly PersistedDocumentMetadata[];
   indexJobs: readonly AssistantStoredRecord[];
+  open?: boolean;
+  onOpenChange?(open: boolean): void;
 }>) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = (next: boolean) => { onOpenChange?.(next); if (controlledOpen === undefined) setInternalOpen(next); };
   const usage = [...messages].reverse().find((message) => message.usage)?.usage;
   return (
     <section className="border-t border-line pt-4">
-      <button type="button" className="flex min-h-11 w-full items-center justify-between rounded-xl px-3 text-left text-sm font-bold text-ink hover:bg-slate-50" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+      <button type="button" className="flex min-h-11 w-full items-center justify-between rounded-xl px-3 text-left text-sm font-bold text-ink hover:bg-slate-50" aria-expanded={open} onClick={() => setOpen(!open)}>
         Ver uso de contexto <span aria-hidden="true">{open ? "−" : "+"}</span>
       </button>
       {open ? (
