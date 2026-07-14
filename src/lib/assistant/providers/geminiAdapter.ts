@@ -2,6 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 import {
   ProviderAdapterError,
+  providerErrorFromStatus,
   sanitizeProviderError,
   type AIProviderAdapter,
   type BehavioralProbeResult,
@@ -17,16 +18,19 @@ import {
 
 interface GeminiModelLike {
   readonly name?: string;
+  readonly baseModelId?: string;
   readonly displayName?: string;
   readonly inputTokenLimit?: number;
   readonly outputTokenLimit?: number;
   readonly supportedActions?: readonly string[];
+  readonly supportedGenerationMethods?: readonly string[];
 }
 interface GeminiResponseLike {
   readonly text?: string;
   readonly functionCalls?: readonly { readonly id?: string; readonly name?: string; readonly args?: unknown }[];
   readonly usageMetadata?: { readonly promptTokenCount?: number; readonly candidatesTokenCount?: number; readonly totalTokenCount?: number };
   readonly candidates?: readonly { readonly finishReason?: string }[];
+  readonly promptFeedback?: { readonly blockReason?: string };
 }
 interface GeminiClientLike {
   readonly models: {
@@ -45,14 +49,46 @@ function modelId(name?: string): string {
 function asModel(model: GeminiModelLike): ProviderModel {
   const id = modelId(model.name);
   if (!id) throw new ProviderAdapterError("provider");
-  return { id, displayName: model.displayName ?? id, contextWindow: model.inputTokenLimit, maxOutputTokens: model.outputTokenLimit, supportedParameters: model.supportedActions };
+  const supportedMethods = [...(model.supportedGenerationMethods ?? model.supportedActions ?? [])];
+  return { id, providerModelName: model.name, baseModelId: model.baseModelId, displayName: model.displayName ?? model.baseModelId ?? model.name ?? id, contextWindow: model.inputTokenLimit, maxOutputTokens: model.outputTokenLimit, supportedMethods, supportedParameters: supportedMethods };
 }
+
+function supportsGenerateContent(methods: readonly string[]): boolean {
+  return methods.some((method) => method.replace(/[^a-z0-9]/giu, "").toLocaleLowerCase("en") === "generatecontent");
+}
+
+function geminiContents(messages: readonly { role: "system" | "user" | "assistant" | "tool"; content: string }[]) {
+  return messages.map((message) => {
+    if (message.role !== "tool") return { role: message.role === "assistant" ? "model" : "user", parts: [{ text: message.content }] };
+    try {
+      const results = JSON.parse(message.content) as unknown;
+      if (!Array.isArray(results) || !results.length) throw new Error("invalid tool results");
+      const parts = results.map((result) => {
+        if (!result || typeof result !== "object") throw new Error("invalid tool result");
+        const entry = result as { tool?: unknown; requestId?: unknown; data?: unknown; result?: unknown };
+        if (typeof entry.tool !== "string" || !entry.tool) throw new Error("invalid tool name");
+        return { functionResponse: { name: entry.tool, response: { requestId: typeof entry.requestId === "string" ? entry.requestId : undefined, result: entry.data ?? entry.result ?? {} } } };
+      });
+      return { role: "user", parts };
+    } catch {
+      return { role: "user", parts: [{ text: message.content }] };
+    }
+  });
+}
+
+function finishReasonCode(reason: string): string {
+  return reason.trim().toLocaleLowerCase("en").replace(/[^a-z0-9]+/giu, "_").replace(/^_+|_+$/gu, "") || "unknown";
+}
+
+type GeminiFetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 export class GeminiAdapter implements AIProviderAdapter {
   private readonly clientFactory: (apiKey: string) => GeminiClientLike;
+  private readonly fetcher: GeminiFetcher;
 
-  constructor(options: { clientFactory?: (apiKey: string) => GeminiClientLike } = {}) {
+  constructor(options: { clientFactory?: (apiKey: string) => GeminiClientLike; fetcher?: GeminiFetcher } = {}) {
     this.clientFactory = options.clientFactory ?? ((apiKey) => new GoogleGenAI({ apiKey }) as unknown as GeminiClientLike);
+    this.fetcher = options.fetcher ?? fetch;
   }
 
   private client(apiKey: string): GeminiClientLike {
@@ -62,12 +98,31 @@ export class GeminiAdapter implements AIProviderAdapter {
   async listModels({ apiKey, signal }: { apiKey: string; signal?: AbortSignal }): Promise<readonly ProviderModel[]> {
     try {
       if (signal?.aborted) throw new ProviderAdapterError("cancelled");
-      const pager = await this.client(apiKey).models.list({ config: { pageSize: 1000, abortSignal: signal } });
       const result: ProviderModel[] = [];
-      for await (const model of pager) {
+      const seen = new Set<string>();
+      const seenTokens = new Set<string>();
+      let pageToken: string | undefined;
+      do {
         if (signal?.aborted) throw new ProviderAdapterError("cancelled");
-        if ((model.supportedActions ?? []).some((action) => /generateContent/i.test(action)) || !model.supportedActions?.length) result.push(asModel(model));
-      }
+        const query = new URLSearchParams({ pageSize: "1000" });
+        if (pageToken) query.set("pageToken", pageToken);
+        const response = await this.fetcher(`https://generativelanguage.googleapis.com/v1beta/models?${query}`, { method: "GET", headers: { "x-goog-api-key": apiKey, accept: "application/json" }, signal });
+        if (!response.ok) throw providerErrorFromStatus(response.status);
+        const payload = await response.json() as { models?: unknown; nextPageToken?: unknown };
+        if (!Array.isArray(payload.models) || (payload.nextPageToken !== undefined && typeof payload.nextPageToken !== "string")) throw new ProviderAdapterError("provider", "gemini_models_parse");
+        for (const raw of payload.models) {
+          if (!raw || typeof raw !== "object") throw new ProviderAdapterError("provider", "gemini_models_parse");
+          const model = raw as GeminiModelLike;
+          const normalized = asModel(model);
+          if (!supportsGenerateContent(normalized.supportedMethods ?? [])) continue;
+          const identity = normalized.providerModelName?.trim().toLocaleLowerCase("en");
+          if (!identity || seen.has(identity)) continue;
+          seen.add(identity); result.push(normalized);
+        }
+        pageToken = payload.nextPageToken || undefined;
+        if (pageToken && seenTokens.has(pageToken)) throw new ProviderAdapterError("provider", "gemini_models_pagination");
+        if (pageToken) seenTokens.add(pageToken);
+      } while (pageToken);
       return result;
     } catch (error) { throw sanitizeProviderError(error); }
   }
@@ -93,13 +148,14 @@ export class GeminiAdapter implements AIProviderAdapter {
       if (request.signal?.aborted) throw new ProviderAdapterError("cancelled");
       const response = await this.client(request.apiKey).models.generateContent({
         model: request.modelId,
-        contents: request.messages.map((message) => ({ role: message.role === "assistant" ? "model" : "user", parts: [{ text: message.content }] })),
+        contents: geminiContents(request.messages),
         config: {
           abortSignal: request.signal,
           tools: [{ functionDeclarations: request.tools.map((tool) => ({ name: tool.name, description: tool.description, parametersJsonSchema: tool.parameters })) }],
-          toolConfig: { functionCallingConfig: { mode: "ANY" } },
+          toolConfig: { functionCallingConfig: { mode: "AUTO" } },
         },
       });
+      if (response.promptFeedback?.blockReason) throw new ProviderAdapterError("provider", "gemini_response_blocked");
       return { toolCalls: (response.functionCalls ?? []).map((call, index) => ({ id: call.id ?? `gemini-call-${index}`, name: call.name ?? "", args: call.args })) };
     } catch (error) { throw sanitizeProviderError(error); }
   }
@@ -109,19 +165,26 @@ export class GeminiAdapter implements AIProviderAdapter {
       if (request.signal?.aborted) throw new ProviderAdapterError("cancelled");
       const stream = await this.client(request.apiKey).models.generateContentStream({
         model: request.modelId,
-        contents: request.messages.map((message) => ({ role: message.role === "assistant" ? "model" : "user", parts: [{ text: message.content }] })),
+        contents: geminiContents(request.messages),
         config: { maxOutputTokens: request.maxOutputTokens, abortSignal: request.signal },
       });
       let finishReason = "stop";
+      let sawText = false;
       for await (const chunk of stream) {
         if (request.signal?.aborted) throw new ProviderAdapterError("cancelled");
-        if (chunk.text) yield { type: "text_delta", delta: chunk.text };
+        if (chunk.promptFeedback?.blockReason) throw new ProviderAdapterError("provider", "gemini_response_blocked");
+        if (chunk.text) { sawText = true; yield { type: "text_delta", delta: chunk.text }; }
         const usage = chunk.usageMetadata;
         if (usage?.totalTokenCount !== undefined) yield { type: "usage", usage: { inputTokens: usage.promptTokenCount ?? 0, outputTokens: usage.candidatesTokenCount ?? 0, totalTokens: usage.totalTokenCount, estimated: false } };
         finishReason = chunk.candidates?.[0]?.finishReason ?? finishReason;
       }
+      if (!sawText && finishReason !== "stop") throw new ProviderAdapterError("provider", `gemini_finish_${finishReasonCode(finishReason)}`);
+      if (!sawText) throw new ProviderAdapterError("provider", "empty_response");
       yield { type: "done", finishReason };
-    } catch (error) { throw sanitizeProviderError(error); }
+    } catch (error) {
+      if (error instanceof SyntaxError) throw new ProviderAdapterError("provider", "gemini_stream_parse");
+      throw sanitizeProviderError(error);
+    }
   }
 
   private async structuredOutput(apiKey: string, id: string, signal?: AbortSignal): Promise<boolean> {

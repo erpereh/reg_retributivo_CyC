@@ -6,6 +6,7 @@ import {
   type ContextStrategy, type Conversation, type ModelProfile, type PersistedDocumentMetadata, type ResponseMode, type SourceReference,
 } from "@/lib/assistant/domain";
 import { createEphemeralKeyVault, type EphemeralKeyScope } from "@/lib/assistant/providers/ephemeralKeyVault";
+import { ProviderAdapterError } from "@/lib/assistant/providers/types";
 import { GENERAL_RETRIBUTIVO_PROMPT, type FakeAssistantAdapter } from "@/lib/assistant/providers/fakeAdapter";
 import { DEFAULT_ASSISTANT_SETTINGS, assistantSettingsSchema, modelProfileSchema } from "@/lib/assistant/schemas";
 import { localIterableResponse } from "@/lib/assistant/providers/localNdjsonTransport";
@@ -812,9 +813,9 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       const persisted = await persistRunRound(conversation.id, [...baseMessages, userMessage, terminal], nextSources, runIsCurrent).catch(() => false);
       if (persisted && runIsCurrent()) {
         if (stopped) { setNotice("Respuesta detenida"); setAnnouncement(`Respuesta detenida: ${terminal.content}`); }
-        else { setError("No se pudo completar la respuesta del Asistente."); setAnnouncement("La respuesta ha fallado"); }
+        else { setError(caught instanceof ProviderAdapterError ? caught.publicMessage : "No se pudo completar la respuesta del Asistente."); setAnnouncement("La respuesta ha fallado"); }
       } else if (!stopped && runIsCurrent()) {
-        setError("No se pudo completar la respuesta del Asistente.");
+        setError(caught instanceof ProviderAdapterError ? caught.publicMessage : "No se pudo completar la respuesta del Asistente.");
         setAnnouncement("La respuesta ha fallado");
       }
     } finally {

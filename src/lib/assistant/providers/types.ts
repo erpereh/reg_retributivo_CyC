@@ -76,6 +76,14 @@ const PUBLIC_MESSAGES: Readonly<Record<ProviderErrorClassification, string>> = {
   cancelled: "La comprobación fue cancelada.",
   provider: "El proveedor devolvió una respuesta no válida.",
 };
+const PUBLIC_MESSAGES_BY_CODE: Readonly<Record<string, string>> = {
+  empty_response: "El modelo no devolvió contenido.",
+  tool_round_limit: "El asistente necesitó demasiadas rondas de herramientas.",
+  stream_truncated: "La respuesta se interrumpió antes de completarse.",
+  stream_parse: "No se pudo interpretar la respuesta del proveedor.",
+  gemini_response_blocked: "Gemini bloqueó la respuesta.",
+  gemini_stream_parse: "No se pudo interpretar la respuesta del proveedor.",
+};
 
 export class ProviderAdapterError extends Error {
   readonly code: string;
@@ -87,7 +95,7 @@ export class ProviderAdapterError extends Error {
     this.name = "ProviderAdapterError";
     this.code = code;
     this.classification = classification;
-    this.publicMessage = PUBLIC_MESSAGES[classification];
+    this.publicMessage = PUBLIC_MESSAGES_BY_CODE[code] ?? PUBLIC_MESSAGES[classification];
   }
 
   toJSON() {
@@ -96,14 +104,17 @@ export class ProviderAdapterError extends Error {
 }
 
 export function providerErrorFromStatus(status: number): ProviderAdapterError {
-  if (status === 401 || status === 403) return new ProviderAdapterError("auth");
-  if (status === 408 || status === 409 || status === 425 || status === 429 || status >= 500) return new ProviderAdapterError("transient");
-  if (status === 413) return new ProviderAdapterError("context");
-  return new ProviderAdapterError("provider");
+  const code = `provider_http_${status}`;
+  if (status === 401 || status === 403) return new ProviderAdapterError("auth", code);
+  if (status === 408 || status === 409 || status === 425 || status === 429 || status >= 500) return new ProviderAdapterError("transient", code);
+  if (status === 413) return new ProviderAdapterError("context", code);
+  return new ProviderAdapterError("provider", code);
 }
 
 export function sanitizeProviderError(error: unknown): ProviderAdapterError {
   if (error instanceof ProviderAdapterError) return error;
   if (error instanceof DOMException && error.name === "AbortError") return new ProviderAdapterError("cancelled");
+  const status = typeof error === "object" && error !== null && "status" in error ? Number((error as { status?: unknown }).status) : Number.NaN;
+  if (Number.isInteger(status) && status >= 100 && status <= 599) return providerErrorFromStatus(status);
   return new ProviderAdapterError("provider");
 }

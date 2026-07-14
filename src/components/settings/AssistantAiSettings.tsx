@@ -31,8 +31,9 @@ function keyScope(profile: ModelProfile): EphemeralKeyScope {
   return { profileId: profile.id, endpoint: (PROVIDER_PRESETS[profile.provider].baseUrl ?? profile.baseUrl).replace(/\/+$/, "") };
 }
 
-function modelLabel(model: ProviderModel): string {
-  return model.contextWindow ? `${model.displayName} · ${model.contextWindow.toLocaleString("es-ES")} tokens` : `${model.displayName} · Ventana no informada`;
+function modelLabel(model: ProviderModel, duplicateDisplayName = false): string {
+  const name = duplicateDisplayName ? `${model.displayName} · ${model.id}` : model.displayName;
+  return model.contextWindow ? `${name} · ${model.contextWindow.toLocaleString("es-ES")} tokens` : `${name} · Ventana no informada`;
 }
 
 function manualUrlIsAllowed(value: string): boolean {
@@ -130,15 +131,19 @@ export function AssistantAiSettings() {
         return listed;
       });
       if (controller.signal.aborted || operation.current !== current) return;
-      const selected = models.find((model) => model.id === profile.modelId) ?? models[0];
+      const selected = models.find((model) => model.id === profile.selectedModelCatalogId) ?? models.find((model) => model.id === profile.modelId || model.baseModelId === profile.modelId) ?? models[0];
       const updated: ModelProfile = {
         ...profile,
-        modelId: selected.id,
-        detectedModels: models.map(({ id: modelId, displayName, contextWindow, maxOutputTokens }) => ({
+        modelId: selected.baseModelId ?? selected.id,
+        selectedModelCatalogId: selected.id,
+        detectedModels: models.map(({ id: modelId, providerModelName, baseModelId, displayName, contextWindow, maxOutputTokens, supportedMethods }) => ({
           id: modelId,
+          ...(providerModelName !== undefined ? { providerModelName } : {}),
+          ...(baseModelId !== undefined ? { baseModelId } : {}),
           displayName,
           ...(contextWindow !== undefined ? { contextWindow } : {}),
           ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+          ...(supportedMethods !== undefined ? { supportedMethods: [...supportedMethods] } : {}),
         })),
         detectedContextWindow: selected.contextWindow,
         maxOutputTokens: selected.maxOutputTokens ?? profile.maxOutputTokens,
@@ -187,6 +192,7 @@ export function AssistantAiSettings() {
 
   const busy = Boolean(draft && busyProfileId === draft.id);
   const visibleModels = detectedModels.filter((model) => `${model.displayName} ${model.id}`.toLocaleLowerCase("es").includes(modelQuery.trim().toLocaleLowerCase("es")));
+  const duplicateDisplayNames = new Set(detectedModels.filter((model) => detectedModels.filter((candidate) => candidate.displayName === model.displayName).length > 1).map((model) => model.displayName));
 
   return (
     <div className="flex flex-col gap-5">
@@ -202,7 +208,7 @@ export function AssistantAiSettings() {
           <label className="text-sm font-semibold text-ink">Base URL<input aria-label="Base URL" className="filter-control mt-2" value={draft.baseUrl} disabled={busy} readOnly={draft.provider !== "manual"} onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} /></label>
           <p className="self-end text-sm text-muted">Variable server-side: <code>{PROVIDER_PRESETS[draft.provider].envName ?? "Clave efímera"}</code></p>
           {draft.provider === "manual" ? <label className="text-sm font-semibold text-ink">Clave efímera<input ref={keyInput} aria-label="Clave efímera" className="filter-control mt-2" type="password" autoComplete="off" disabled={busy} onChange={(event) => setKey(keyScope(draft), event.target.value)} /><span className="mt-1 block font-normal text-muted">Solo vive en memoria.</span></label> : null}
-          {detectedModels.length ? <label className="text-sm font-semibold text-ink md:col-span-2">Modelo detectado{detectedModels.length > 8 ? <input aria-label="Buscar modelo detectado" className="filter-control mt-2" value={modelQuery} disabled={busy} onChange={(event) => setModelQuery(event.target.value)} placeholder="Buscar modelo" /> : null}<select aria-label="Modelo detectado" className="filter-control mt-2" value={draft.modelId} disabled={busy} onChange={(event) => { const selected = detectedModels.find((model) => model.id === event.target.value); setDraft({ ...draft, modelId: event.target.value, detectedContextWindow: selected?.contextWindow, maxOutputTokens: selected?.maxOutputTokens }); }}>{visibleModels.map((model) => <option key={model.id} value={model.id}>{modelLabel(model)}</option>)}</select></label> : null}
+          {detectedModels.length ? <label className="text-sm font-semibold text-ink md:col-span-2">Modelo detectado{detectedModels.length > 8 ? <input aria-label="Buscar modelo detectado" className="filter-control mt-2" value={modelQuery} disabled={busy} onChange={(event) => setModelQuery(event.target.value)} placeholder="Buscar modelo" /> : null}<select aria-label="Modelo detectado" className="filter-control mt-2" value={draft.selectedModelCatalogId ?? draft.modelId} disabled={busy} onChange={(event) => { const selected = detectedModels.find((model) => model.id === event.target.value); setDraft({ ...draft, modelId: selected?.baseModelId ?? selected?.id ?? event.target.value, selectedModelCatalogId: selected?.id, detectedContextWindow: selected?.contextWindow, maxOutputTokens: selected?.maxOutputTokens }); }}>{visibleModels.map((model) => <option key={model.id} value={model.id}>{modelLabel(model, duplicateDisplayNames.has(model.displayName))}</option>)}</select></label> : null}
           <details className="md:col-span-2"><summary className="cursor-pointer text-sm font-semibold text-ink">Opciones avanzadas</summary><div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="text-sm text-muted">Ventana manual<input className="filter-control mt-1" type="number" min="1" disabled={busy} value={draft.manualContextWindow ?? ""} onChange={(event) => setDraft({ ...draft, manualContextWindow: event.target.value ? Number(event.target.value) : undefined })} /></label><label className="text-sm text-muted">Salida máxima<input className="filter-control mt-1" type="number" min="1" disabled={busy} value={draft.maxOutputTokens ?? ""} onChange={(event) => setDraft({ ...draft, maxOutputTokens: event.target.value ? Number(event.target.value) : undefined })} /></label></div></details>
           <div className="flex flex-wrap gap-2 md:col-span-2"><button className="btn-primary" type="submit" disabled={busy}>{busy ? <><LoaderCircle aria-hidden="true" className="animate-spin" />Conectando y guardando…</> : "Guardar perfil"}</button><button className="btn-secondary" type="button" disabled={busy} onClick={() => { clearKey(); setDraft(undefined); setDetectedModels([]); setMessage(undefined); }}>Cancelar</button></div>
         </form> : null}

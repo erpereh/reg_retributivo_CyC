@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { AssistantOrchestrator } from "@/lib/assistant/orchestration/assistantOrchestrator";
+import { ProviderAdapterError } from "@/lib/assistant/providers/types";
 import type { AnalysisToolRegistry } from "@/lib/assistant/tools/registry";
 
 function ndjson(events: readonly unknown[]) { return new Response(events.map((event) => `${JSON.stringify(event)}\n`).join(""), { headers: { "content-type": "application/x-ndjson" } }); }
@@ -22,7 +23,7 @@ describe("assistant client orchestration", () => {
     const transport = vi.fn(async (body: Record<string, unknown>) => ndjson([{ type: "tool_request", roundId: String(body.roundId), requestId: String(body.roundId), tool: "getPersonProfile", args: { analysisId: "a1", personId: "10048" } }, { type: "done", roundId: String(body.roundId), finishReason: "tool_request" }]));
     const registry = { names: ["getPersonProfile"], execute: vi.fn(async () => ({ safe: true })) } as unknown as AnalysisToolRegistry;
     const orchestrator = new AssistantOrchestrator({ transport, registry, validateRequestScope });
-    await expect(orchestrator.send({ conversationId: "c1", analysisId: "a1", question: "Consulta matrícula 10048", modelProfileId: "p1", modelId: "fake", responseMode: "strict", contextStrategy: "automatic" })).rejects.toThrow(/3 rondas/i);
+    await expect(orchestrator.send({ conversationId: "c1", analysisId: "a1", question: "Consulta matrícula 10048", modelProfileId: "p1", modelId: "fake", responseMode: "strict", contextStrategy: "automatic" })).rejects.toMatchObject({ code: "tool_round_limit", classification: "provider" } satisfies Partial<ProviderAdapterError>);
     await expect(orchestrator.send({ conversationId: "c1", analysisId: "a1", question: "persona@example.com", modelProfileId: "p1", modelId: "fake", responseMode: "strict", contextStrategy: "automatic" })).rejects.toThrow(/sensible|privacidad/i);
     const controller = new AbortController(); controller.abort();
     await expect(orchestrator.send({ conversationId: "c1", analysisId: "a1", question: "Consulta", modelProfileId: "p1", modelId: "fake", responseMode: "strict", contextStrategy: "automatic", signal: controller.signal })).rejects.toThrow();
@@ -75,5 +76,44 @@ describe("assistant client orchestration", () => {
     await expect(second).resolves.toMatchObject({ text: "reemplazo" });
     expect(signals[0].aborted).toBe(true);
     expect(signals[0]).not.toBe(signals[1]);
+  });
+
+  it("ignores events emitted after the first done event for the active request", async () => {
+    const transport = vi.fn(async (body: Record<string, unknown>) => ndjson([
+      { type: "text_delta", roundId: String(body.roundId), messageId: "m1", delta: "Respuesta válida" },
+      { type: "done", roundId: String(body.roundId), finishReason: "stop" },
+      { type: "text_delta", roundId: String(body.roundId), messageId: "m1", delta: " tardía" },
+    ]));
+    const registry = { names: [], execute: vi.fn() } as unknown as AnalysisToolRegistry;
+    const result = await new AssistantOrchestrator({ transport, registry, validateRequestScope }).send({ conversationId: "c1", question: "Consulta", modelProfileId: "p1", modelId: "fake", responseMode: "strict", contextStrategy: "automatic" });
+    expect(result.text).toBe("Respuesta válida");
+  });
+
+  it("marks an incomplete final NDJSON frame as a truncated stream", async () => {
+    const transport = vi.fn(async () => new Response('{"type":"done"', { headers: { "content-type": "application/x-ndjson" } }));
+    const registry = { names: [], execute: vi.fn() } as unknown as AnalysisToolRegistry;
+    await expect(new AssistantOrchestrator({ transport, registry, validateRequestScope }).send({ conversationId: "c1", question: "Consulta", modelProfileId: "p1", modelId: "fake", responseMode: "strict", contextStrategy: "automatic" })).rejects.toMatchObject({ code: "stream_truncated", classification: "provider" } satisfies Partial<ProviderAdapterError>);
+  });
+
+  it("blocks a second concurrent retry instead of starting another execution", async () => {
+    let calls = 0; let releaseRetry: (() => void) | undefined;
+    const transport = vi.fn(async (body: Record<string, unknown>, signal?: AbortSignal) => {
+      calls += 1;
+      if (calls === 2) await new Promise<void>((resolve, reject) => {
+        releaseRetry = resolve;
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+      return ndjson([{ type: "text_delta", roundId: String(body.roundId), messageId: `m${calls}`, delta: `respuesta-${calls}` }, { type: "done", roundId: String(body.roundId), finishReason: "stop" }]);
+    });
+    const registry = { names: [], execute: vi.fn() } as unknown as AnalysisToolRegistry;
+    const orchestrator = new AssistantOrchestrator({ transport, registry, validateRequestScope });
+    const input = { conversationId: "c1", question: "Consulta", modelProfileId: "p1", modelId: "fake", responseMode: "strict" as const, contextStrategy: "automatic" as const };
+    await orchestrator.send(input);
+    const retry = orchestrator.retry();
+    await vi.waitFor(() => expect(releaseRetry).toBeTypeOf("function"));
+    await expect(orchestrator.retry()).rejects.toMatchObject({ code: "retry_in_progress", classification: "cancelled" } satisfies Partial<ProviderAdapterError>);
+    releaseRetry?.();
+    await expect(retry).resolves.toMatchObject({ text: "respuesta-2" });
+    expect(transport).toHaveBeenCalledTimes(2);
   });
 });

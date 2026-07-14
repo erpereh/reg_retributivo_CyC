@@ -71,7 +71,7 @@ describe("phase 4 disconnected-path regressions", () => {
   });
 
   it("keeps tool identity and sanitized sources in the result envelope", async () => {
-    const transport = vi.fn(async (body: Record<string, unknown>) => body.phase === "plan" ? ndjson([{ type: "tool_request", roundId: body.roundId, requestId: "req-1", tool: "getAnalysisSummary", args: { analysisId: "a1" } }, { type: "done", roundId: body.roundId, finishReason: "tool_request" }]) : ndjson([{ type: "done", roundId: body.roundId, finishReason: "stop" }]));
+    const transport = vi.fn(async (body: Record<string, unknown>) => body.phase === "plan" ? ndjson([{ type: "tool_request", roundId: body.roundId, requestId: "req-1", tool: "getAnalysisSummary", args: { analysisId: "a1" } }, { type: "done", roundId: body.roundId, finishReason: "tool_request" }]) : ndjson([{ type: "text_delta", roundId: body.roundId, messageId: "m2", delta: "Resumen listo" }, { type: "done", roundId: body.roundId, finishReason: "stop" }]));
     const source = { id: "s1", conversationId: "c1", analysisId: "a1", sourceType: "analysis", sanitizedSourceLabel: "Análisis retributivo", availability: "available", conceptIds: [], excerpt: "Resumen estructurado", sanitizedHash: "h1" };
     const registry = { names: ["getAnalysisSummary"], execute: vi.fn(), executeEnvelope: vi.fn(async () => ({ data: { summary: { uniquePeople: 1 } }, sources: [source] })) } as unknown as AnalysisToolRegistry;
     await new AssistantOrchestrator({ transport, registry, validateRequestScope }).send({ conversationId: "c1", analysisId: "a1", question: "Resumen", modelProfileId: "p1", modelId: "m1", responseMode: "strict", contextStrategy: "automatic" });
@@ -146,7 +146,7 @@ describe("phase 4 disconnected-path regressions", () => {
 
   it("does not precompact or persist a caller snapshot below a server-reported 85% threshold", async () => {
     const persistedSnapshots: unknown[] = []; const persistedMetadata: unknown[] = [];
-    const transport = vi.fn(async (body: Record<string, unknown>) => ndjson([{ type: "done", roundId: body.roundId, finishReason: "stop" }]));
+    const transport = vi.fn(async (body: Record<string, unknown>) => ndjson([{ type: "text_delta", roundId: body.roundId, messageId: "m1", delta: "Respuesta válida" }, { type: "done", roundId: body.roundId, finishReason: "stop" }]));
     const registry = { names: [], execute: vi.fn() } as unknown as AnalysisToolRegistry;
     const orchestrator = new AssistantOrchestrator({ transport, registry, validateRequestScope, persistSnapshot: async (snapshot) => { persistedSnapshots.push(snapshot); }, persistRunMetadata: async (metadata) => { persistedMetadata.push(metadata); } });
     await orchestrator.send({ conversationId: "c1", analysisId: "a1", question: "Resumen", modelProfileId: "p1", modelId: "m1", responseMode: "flexible", contextStrategy: "optimized", compaction: { messages: [{ id: "old-1", content: "Historia antigua", tokens: 100 }, { id: "recent-1", content: "Historia reciente", tokens: 100 }], summary: "Resumen sanitizado", decisions: ["mantener"], figures: [125], sourceIds: ["s1"], actionIds: [], personIds: ["10048"], analysisVersion: "v1", keepRecent: 1 } });

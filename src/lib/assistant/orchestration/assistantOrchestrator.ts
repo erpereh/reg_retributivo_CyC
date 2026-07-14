@@ -1,5 +1,5 @@
 import { assertSafeForProvider } from "@/lib/assistant/privacy/assertions";
-import { IncrementalNdjsonDecoder } from "@/lib/assistant/streamProtocol";
+import { IncrementalNdjsonDecoder, StreamProtocolError } from "@/lib/assistant/streamProtocol";
 import type { AssistantStreamEvent } from "@/lib/assistant/schemas";
 import type { AnalysisToolRegistry, AnalysisToolName } from "@/lib/assistant/tools/registry";
 import type { ContextStrategy, ModelProfile, ResponseMode } from "@/lib/assistant/domain";
@@ -82,9 +82,24 @@ export function createRepositoryBoundAssistantOrchestrator(dependencies: Omit<Or
 async function readEvents(response: Response, onEvent: (event: AssistantStreamEvent) => void): Promise<void> {
   if (!response.ok || !response.body) throw new Error("La ruta de chat no respondió correctamente.");
   const decoder = new IncrementalNdjsonDecoder(); const reader = response.body.getReader(); let eventCount = 0; let textLength = 0;
-  const bounded = (event: AssistantStreamEvent) => { eventCount += 1; if (event.type === "text_delta") textLength += event.delta.length; if (eventCount > 1_000 || textLength > 16_384) throw new Error("El stream del asistente supera el tamaño permitido."); onEvent(event); };
-  try { while (true) { const { done, value } = await reader.read(); if (done) break; decoder.push(value).forEach(bounded); } decoder.finish().forEach(bounded); }
-  catch (error) { await reader.cancel(error).catch(() => undefined); throw error; }
+  let terminal = false;
+  const bounded = (event: AssistantStreamEvent) => {
+    if (terminal) return;
+    eventCount += 1; if (event.type === "text_delta") textLength += event.delta.length;
+    if (eventCount > 1_000 || textLength > 16_384) throw new Error("El stream del asistente supera el tamaño permitido.");
+    onEvent(event);
+    if (event.type === "done" || event.type === "error") terminal = true;
+  };
+  try {
+    while (true) { const { done, value } = await reader.read(); if (done) break; decoder.push(value).forEach(bounded); }
+    decoder.finish().forEach(bounded);
+    if (!terminal) throw new ProviderAdapterError("provider", "stream_truncated");
+  }
+  catch (error) {
+    await reader.cancel(error).catch(() => undefined);
+    if (error instanceof StreamProtocolError) throw new ProviderAdapterError("provider", error.code);
+    throw error;
+  }
   finally { reader.releaseLock(); }
 }
 
@@ -99,9 +114,15 @@ export class AssistantOrchestrator {
   private lastInput?: SendAssistantInput;
   private lastInterrupted?: { messageId: string; context: string };
   private lastProducedMessageId?: string;
+  private retryInFlight = false;
   constructor(private readonly dependencies: OrchestratorDependencies) { if (typeof dependencies.validateRequestScope !== "function") throw new Error("AssistantOrchestrator requiere un validator de scope enlazado al repositorio."); }
   stop(): void { this.activeController?.abort(new DOMException("La respuesta fue detenida.", "AbortError")); }
-  retry(onTextDelta?: (delta: string) => void) { if (!this.lastInput) return Promise.reject(new Error("No hay una solicitud para reintentar.")); return this.send({ ...this.lastInput, ...(onTextDelta ? { onTextDelta } : {}), resumeFrom: this.lastInterrupted }); }
+  retry(onTextDelta?: (delta: string) => void) {
+    if (!this.lastInput) return Promise.reject(new Error("No hay una solicitud para reintentar."));
+    if (this.retryInFlight) return Promise.reject(new ProviderAdapterError("cancelled", "retry_in_progress"));
+    this.retryInFlight = true;
+    return this.send({ ...this.lastInput, ...(onTextDelta ? { onTextDelta } : {}), resumeFrom: this.lastInterrupted }).finally(() => { this.retryInFlight = false; });
+  }
   async regenerate(onTextDelta?: (delta: string) => void) { if (!this.lastInput) throw new Error("No hay una respuesta para regenerar."); const input = { ...this.lastInput, ...(onTextDelta ? { onTextDelta } : {}), resumeFrom: undefined }; const replacedId = this.lastProducedMessageId; return this.execute(input, replacedId ? (context) => this.dependencies.markMessageReplaced?.(replacedId, context) : undefined); }
 
   async send(input: SendAssistantInput): Promise<AssistantRunResult> {
@@ -132,7 +153,10 @@ export class AssistantOrchestrator {
           for (const status of events) if (status.type === "status" && status.code === "context_compacted" && status.snapshot) { await this.dependencies.persistSnapshot?.(status.snapshot, runContext); assertActive(); }
           const errorEvent = events.find((event): event is Extract<AssistantStreamEvent, { type: "error" }> => event.type === "error"); if (errorEvent) throw new ProviderAdapterError(errorEvent.classification ?? (errorEvent.retryable ? "transient" : "provider"), errorEvent.code);
           const requests = events.filter((event): event is Extract<AssistantStreamEvent, { type: "tool_request" }> => event.type === "tool_request");
-          if (!requests.length) { const completed = { id: messageId, status: "completed" as const, content: text, modelProfileId: producer.id, modelId: producer.modelId }; producedMessages.push(completed); await this.dependencies.persistMessage?.(completed, runContext); assertActive(); const snapshotId = events.find((event): event is Extract<AssistantStreamEvent, { type: "status" }> & { snapshot: ContextSnapshot } => event.type === "status" && event.code === "context_compacted" && Boolean(event.snapshot))?.snapshot.id; await this.dependencies.persistRunMetadata?.({ conversationId: input.conversationId, actualStrategy: input.contextStrategy, actualResponseMode: input.responseMode, ...(snapshotId ? { snapshotId } : {}) }, runContext); assertActive(); this.lastProducedMessageId = messageId; this.lastInterrupted = undefined; return { text, events: allEvents, rounds: posts, producedMessages }; }
+          if (!requests.length) {
+            if (!text.trim()) throw new ProviderAdapterError("provider", "empty_response");
+            const completed = { id: messageId, status: "completed" as const, content: text, modelProfileId: producer.id, modelId: producer.modelId }; producedMessages.push(completed); await this.dependencies.persistMessage?.(completed, runContext); assertActive(); const snapshotId = events.find((event): event is Extract<AssistantStreamEvent, { type: "status" }> & { snapshot: ContextSnapshot } => event.type === "status" && event.code === "context_compacted" && Boolean(event.snapshot))?.snapshot.id; await this.dependencies.persistRunMetadata?.({ conversationId: input.conversationId, actualStrategy: input.contextStrategy, actualResponseMode: input.responseMode, ...(snapshotId ? { snapshotId } : {}) }, runContext); assertActive(); this.lastProducedMessageId = messageId; this.lastInterrupted = undefined; return { text, events: allEvents, rounds: posts, producedMessages };
+          }
           toolResults = []; for (const request of requests) { const envelope = this.dependencies.registry.executeEnvelope ? await this.dependencies.registry.executeEnvelope(request.tool as AnalysisToolName, request.args, request.requestId) : { data: await this.dependencies.registry.execute(request.tool as AnalysisToolName, request.args), sources: [] }; assertActive(); assertSafeForProvider(envelope); toolResults.push({ requestId: request.requestId, tool: request.tool, data: envelope.data, sources: envelope.sources }); }
           phase = phase === "plan" ? "respond" : "continue";
         } catch (error) {
@@ -142,7 +166,7 @@ export class AssistantOrchestrator {
           if (classification !== "transient") throw error; attempt += 1; phase = continuation ? "continue" : "plan"; toolResults = [];
         }
       }
-      throw lastError ?? new Error("Se alcanzó el máximo global de 3 rondas.");
+      throw lastError ?? new ProviderAdapterError("provider", "tool_round_limit");
     } catch (error) {
       if (controller.signal.aborted) {
         const textEvents = allEvents.filter((event): event is Extract<AssistantStreamEvent, { type: "text_delta" }> => event.type === "text_delta");
