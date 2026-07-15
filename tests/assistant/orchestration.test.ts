@@ -16,7 +16,38 @@ describe("assistant client orchestration", () => {
     expect(result.text).toBe("Respuesta");
     expect(result.rounds).toBe(2);
     expect(registry.execute).toHaveBeenCalledWith("getPersonProfile", { analysisId: "a1", personId: "10048" });
-    expect(transport.mock.calls[1][0]).toEqual(expect.objectContaining({ phase: "respond", toolResults: [{ requestId: "q1", tool: "getPersonProfile", args: { analysisId: "a1", personId: "10048" }, data: { safe: true }, sources: [] }] }));
+    expect(transport.mock.calls[1][0]).toMatchObject({ phase: "respond", toolRounds: [{ calls: [{ requestId: "q1", name: "getPersonProfile", args: { analysisId: "a1", personId: "10048" } }], results: [{ requestId: "q1", name: "getPersonProfile", args: { analysisId: "a1", personId: "10048" }, outcome: { ok: true, data: { safe: true } }, sources: [] }] }] });
+  });
+
+  it("executes independent calls in parallel but returns their outcomes in provider order", async () => {
+    const transport = vi.fn(async (body: Record<string, unknown>) => body.phase === "plan"
+      ? ndjson([
+          { type: "tool_request", roundId: String(body.roundId), requestId: "first", tool: "getPersonProfile", args: { analysisId: "a1", personId: "10048" } },
+          { type: "tool_request", roundId: String(body.roundId), requestId: "second", tool: "getPersonConceptDifferences", args: { analysisId: "a1", personId: "10048" } },
+          { type: "done", roundId: String(body.roundId), finishReason: "tool_request" },
+        ])
+      : ndjson([{ type: "text_delta", roundId: String(body.roundId), messageId: "m", delta: "Listo" }, { type: "done", roundId: String(body.roundId), finishReason: "stop" }]));
+    const registry = { names: ["getPersonProfile", "getPersonConceptDifferences"], executeEnvelope: vi.fn(async (name: string) => {
+      if (name === "getPersonProfile") await new Promise((resolve) => setTimeout(resolve, 15));
+      return { data: { name }, sources: [] };
+    }), execute: vi.fn() } as unknown as AnalysisToolRegistry;
+    await new AssistantOrchestrator({ transport, registry, validateRequestScope }).send({ conversationId: "c1", analysisId: "a1", question: "Consulta", modelProfileId: "p1", modelId: "fake", responseMode: "strict", contextStrategy: "automatic" });
+    const round = (transport.mock.calls[1]?.[0] as { toolRounds: [{ calls: { requestId: string }[]; results: { requestId: string }[] }] }).toolRounds[0]!;
+    expect(round.calls.map((call) => call.requestId)).toEqual(["first", "second"]);
+    expect(round.results.map((result) => result.requestId)).toEqual(["first", "second"]);
+  });
+
+  it("preserves native partial text after stop, ignores a late tool result, and never opens another round", async () => {
+    let resolveTool!: () => void;
+    const gate = new Promise<void>((resolve) => { resolveTool = resolve; });
+    const transport = vi.fn(async (body: Record<string, unknown>) => ndjson([{ type: "tool_request", roundId: String(body.roundId), requestId: "q1", tool: "getPersonProfile", args: { analysisId: "a1", personId: "10048" }, assistantText: "Primero consulto los datos locales." }, { type: "done", roundId: String(body.roundId), finishReason: "tool_request" }]));
+    const registry = { names: ["getPersonProfile"], execute: vi.fn(async () => { await gate; return { safe: true }; }) } as unknown as AnalysisToolRegistry;
+    const orchestrator = new AssistantOrchestrator({ transport, registry, validateRequestScope });
+    const pending = orchestrator.send({ conversationId: "c1", analysisId: "a1", question: "Consulta", modelProfileId: "p1", modelId: "fake", responseMode: "strict", contextStrategy: "automatic" });
+    await vi.waitFor(() => expect(registry.execute).toHaveBeenCalledOnce());
+    orchestrator.stop(); resolveTool();
+    await expect(pending).rejects.toMatchObject({ status: "stopped", partialText: "Primero consulto los datos locales." });
+    expect(transport).toHaveBeenCalledOnce();
   });
 
   it("uses one direct general round and persists the hello response once", async () => {

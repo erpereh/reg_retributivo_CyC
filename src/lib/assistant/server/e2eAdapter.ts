@@ -43,8 +43,10 @@ export class DeterministicE2EAdapter implements AIProviderAdapter {
 
   async *streamResponse(request: StreamResponseRequest): AsyncIterable<ProviderStreamEvent> {
     const reversedMessages = [...request.messages].reverse();
-    const userQuestion = reversedMessages.find((message) => message.role === "user")?.content ?? "";
-    const partial = reversedMessages.find((message) => message.role === "assistant")?.content ?? "";
+    const user = reversedMessages.find((message) => message.role === "user");
+    const assistant = reversedMessages.find((message) => message.role === "assistant");
+    const userQuestion = user?.role === "user" ? user.content : "";
+    const partial = assistant?.role === "assistant" ? assistant.content : "";
     const wait = (milliseconds: number) => new Promise<void>((resolve, reject) => {
       const timer = setTimeout(resolve, milliseconds);
       request.signal?.addEventListener("abort", () => { clearTimeout(timer); reject(request.signal?.reason); }, { once: true });

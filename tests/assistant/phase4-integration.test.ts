@@ -75,7 +75,7 @@ describe("phase 4 disconnected-path regressions", () => {
     const source = { id: "s1", conversationId: "c1", analysisId: "a1", sourceType: "analysis", sanitizedSourceLabel: "Análisis retributivo", availability: "available", conceptIds: [], excerpt: "Resumen estructurado", sanitizedHash: "h1" };
     const registry = { names: ["getAnalysisSummary"], execute: vi.fn(), executeEnvelope: vi.fn(async () => ({ data: { summary: { uniquePeople: 1 } }, sources: [source] })) } as unknown as AnalysisToolRegistry;
     await new AssistantOrchestrator({ transport, registry, validateRequestScope }).send({ conversationId: "c1", analysisId: "a1", question: "Resumen", modelProfileId: "p1", modelId: "m1", responseMode: "strict", contextStrategy: "automatic" });
-    expect(transport.mock.calls[1][0]).toEqual(expect.objectContaining({ toolResults: [{ requestId: "req-1", tool: "getAnalysisSummary", args: { analysisId: "a1" }, data: { summary: { uniquePeople: 1 } }, sources: [source] }] }));
+    expect(transport.mock.calls[1][0]).toMatchObject({ toolRounds: [{ calls: [{ requestId: "req-1", name: "getAnalysisSummary", args: { analysisId: "a1" } }], results: [{ requestId: "req-1", name: "getAnalysisSummary", args: { analysisId: "a1" }, outcome: { ok: true, data: { summary: { uniquePeople: 1 } } }, sources: [source] }] }] });
   });
 
   it("rejects an event from another round and cancels an oversized NDJSON reader", async () => {

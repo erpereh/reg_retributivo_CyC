@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { assertEphemeralProviderMetadata } from "@/lib/assistant/toolRounds";
 import {
   ProviderAdapterError,
   providerErrorFromStatus,
@@ -7,6 +8,7 @@ import {
   type BehavioralProbeResult,
   type ModelMetadata,
   type ProviderId,
+  type ProviderMessage,
   type ProviderModel,
   type ProviderStreamEvent,
   type StreamResponseRequest,
@@ -25,7 +27,7 @@ const modelSchema = z.object({
 }).passthrough();
 const listSchema = z.object({ data: z.array(modelSchema) }).passthrough();
 const completionSchema = z.object({
-  choices: z.array(z.object({ message: z.object({ content: z.string().nullable().optional(), tool_calls: z.array(z.object({ id: z.string(), function: z.object({ name: z.string(), arguments: z.string() }).passthrough() }).passthrough()).nullable().optional() }).passthrough() }).passthrough()),
+  choices: z.array(z.object({ message: z.object({ content: z.string().nullable().optional(), tool_calls: z.array(z.object({ id: z.string(), function: z.object({ name: z.string(), arguments: z.string() }).passthrough() }).passthrough()).nullable().optional() }).passthrough(), finish_reason: z.string().nullable().optional() }).passthrough()),
   usage: z.object({ prompt_tokens: z.number().int().nonnegative(), completion_tokens: z.number().int().nonnegative(), total_tokens: z.number().int().nonnegative() }).passthrough().optional(),
 }).passthrough();
 const streamChunkSchema = z.object({
@@ -47,6 +49,10 @@ function safeJson(response: Response): Promise<unknown> {
   return response.json().catch(() => { throw new ProviderAdapterError("provider"); });
 }
 
+function openAiResultPayload(outcome: Extract<ProviderMessage, { role: "tool_result" }>["results"][number]["outcome"]): string {
+  return JSON.stringify(outcome.ok && !("empty" in outcome) ? { ok: true, data: outcome.data } : outcome);
+}
+
 export class OpenAICompatibleAdapter implements AIProviderAdapter {
   readonly provider: Exclude<ProviderId, "gemini">;
   readonly baseUrl: string;
@@ -60,6 +66,33 @@ export class OpenAICompatibleAdapter implements AIProviderAdapter {
 
   private headers(apiKey: string): Record<string, string> {
     return { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" };
+  }
+
+  private messages(messages: readonly ProviderMessage[]): readonly Record<string, unknown>[] {
+    return messages.flatMap((message): readonly Record<string, unknown>[] => {
+      if (message.role === "assistant_tool_call") {
+        return [{
+          role: "assistant",
+          content: message.content?.trim() || null,
+          tool_calls: message.calls.map((call) => this.nativeToolCall(call)),
+        }];
+      }
+      if (message.role === "tool_result") {
+        return message.results.map((result) => ({ role: "tool", tool_call_id: result.requestId, content: openAiResultPayload(result.outcome) }));
+      }
+      return [{ role: message.role, content: message.content }];
+    });
+  }
+
+  private nativeToolCall(call: Extract<ProviderMessage, { role: "assistant_tool_call" }>["calls"][number]): unknown {
+    if (call.providerMetadata === undefined) {
+      return { id: call.requestId, type: "function", function: { name: call.name, arguments: JSON.stringify(call.args) } };
+    }
+    assertEphemeralProviderMetadata(call.providerMetadata);
+    if (!call.providerMetadata || typeof call.providerMetadata !== "object") throw new ProviderAdapterError("incompatible", "native_tool_provider_mismatch");
+    const metadata = call.providerMetadata as { provider?: unknown; nativeToolCall?: unknown };
+    if (metadata.provider !== this.provider || !metadata.nativeToolCall || typeof metadata.nativeToolCall !== "object") throw new ProviderAdapterError("incompatible", "native_tool_provider_mismatch");
+    return metadata.nativeToolCall;
   }
 
   private async call(path: string, apiKey: string, init: RequestInit = {}): Promise<Response> {
@@ -100,20 +133,25 @@ export class OpenAICompatibleAdapter implements AIProviderAdapter {
     const response = await this.call("/chat/completions", request.apiKey, {
       method: "POST", signal: request.signal,
       body: JSON.stringify({
-        model: request.modelId, messages: request.messages,
+        model: request.modelId, messages: this.messages(request.messages),
         tools: request.tools.map((tool) => ({ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.parameters, strict: true } })),
-        tool_choice: "required", max_completion_tokens: request.maxOutputTokens, stream: false,
+        tool_choice: "auto", max_completion_tokens: request.maxOutputTokens, stream: false,
       }),
     });
     const parsed = completionSchema.safeParse(await safeJson(response));
     if (!parsed.success) throw new ProviderAdapterError("provider");
-    const calls = parsed.data.choices[0]?.message.tool_calls ?? [];
+    const choice = parsed.data.choices[0];
+    const calls = choice?.message.tool_calls ?? [];
+    const usage = parsed.data.usage;
     return {
       toolCalls: calls.map((call) => {
         let args: unknown;
         try { args = JSON.parse(call.function.arguments); } catch { throw new ProviderAdapterError("incompatible"); }
-        return { id: call.id, name: call.function.name, args };
+        return { id: call.id, name: call.function.name, args, providerMetadata: { provider: this.provider, nativeToolCall: call } };
       }),
+      ...(choice?.message.content?.trim() ? { text: choice.message.content } : {}),
+      ...(usage ? { usage: { inputTokens: usage.prompt_tokens, outputTokens: usage.completion_tokens, totalTokens: usage.total_tokens, estimated: false } } : {}),
+      ...(choice?.finish_reason ? { finishReason: choice.finish_reason } : {}),
     };
   }
 
@@ -121,7 +159,7 @@ export class OpenAICompatibleAdapter implements AIProviderAdapter {
     if (request.signal?.aborted) throw new ProviderAdapterError("cancelled");
     const response = await this.call("/chat/completions", request.apiKey, {
       method: "POST", signal: request.signal,
-      body: JSON.stringify({ model: request.modelId, messages: request.messages, max_completion_tokens: request.maxOutputTokens, stream: true, stream_options: { include_usage: true } }),
+      body: JSON.stringify({ model: request.modelId, messages: this.messages(request.messages), max_completion_tokens: request.maxOutputTokens, stream: true, stream_options: { include_usage: true } }),
     });
     if (!response.headers.get("content-type")?.toLowerCase().includes("text/event-stream")) {
       await response.body?.cancel().catch(() => undefined);

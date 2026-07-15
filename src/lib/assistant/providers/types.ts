@@ -1,4 +1,5 @@
 import type { DetectedModel, ModelProfile, TokenUsage } from "@/lib/assistant/domain";
+import type { ProviderToolCallRecord, ProviderToolResultRecord } from "@/lib/assistant/toolRounds";
 
 export type ProviderId = ModelProfile["provider"];
 export type ModelProfileInput = ModelProfile;
@@ -25,13 +26,22 @@ export interface ProviderModel extends DetectedModel {
 
 export interface ModelMetadata extends ProviderModel {}
 export interface TokenCount { readonly tokens: number; readonly estimated: boolean }
-export interface ProviderMessage { readonly role: "system" | "user" | "assistant" | "tool"; readonly content: string }
+export interface ProviderTextMessage { readonly role: "system" | "user" | "assistant"; readonly content: string }
+export interface ProviderToolCallMessage { readonly role: "assistant_tool_call"; readonly content?: string; readonly calls: readonly ProviderToolCallRecord[] }
+export interface ProviderToolResultMessage { readonly role: "tool_result"; readonly results: readonly ProviderToolResultRecord[] }
+export type ProviderMessage = ProviderTextMessage | ProviderToolCallMessage | ProviderToolResultMessage;
 export interface ProviderTool {
   readonly name: string;
   readonly description: string;
   readonly parameters: Readonly<Record<string, unknown>>;
 }
-export interface ProviderToolCall { readonly id: string; readonly name: string; readonly args: unknown }
+export interface ProviderToolCall {
+  readonly id?: string;
+  readonly name: string;
+  readonly args: unknown;
+  /** Native call data is ephemeral: never persist, display, log or cross providers. */
+  readonly providerMetadata?: unknown;
+}
 export interface ToolPlan {
   readonly toolCalls: readonly ProviderToolCall[];
   readonly text?: string;
@@ -110,6 +120,7 @@ const PUBLIC_MESSAGES_BY_CODE: Readonly<Record<string, string>> = {
   gemini_finish_max_tokens: "Gemini alcanzó el límite de salida antes de responder.",
   gemini_empty_response: "Gemini no devolvió contenido de texto.",
   gemini_tool_round_limit: "Se alcanzó el máximo de consultas internas.",
+  tool_grounding_failed: "No se pudo verificar que la respuesta use los datos locales recuperados.",
 };
 
 export class ProviderAdapterError extends Error {

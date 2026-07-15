@@ -7,6 +7,26 @@ import { canonicalizePrivacyText } from "@/lib/assistant/privacy/patterns";
 
 export const ANALYSIS_TOOL_NAMES = ["getAnalysisSummary", "findPersonByEmployeeId", "searchPeople", "getPersonProfile", "getPersonPayrollPeriods", "getPersonConceptDifferences", "getPersonCuadreReg", "getPersonNormalizedData", "getPersonGroupings", "comparePeople", "getTopDifferences", "getDifferencesByCenter", "getDifferencesByPosition", "getDifferencesByConcept", "getPendingConcepts", "getDisabledConcepts", "searchDocumentChunks", "getSourceDetails"] as const;
 export type AnalysisToolName = typeof ANALYSIS_TOOL_NAMES[number];
+export const ANALYSIS_TOOL_DESCRIPTIONS: Readonly<Record<AnalysisToolName, string>> = {
+  getAnalysisSummary: "Obtiene el resumen global del análisis retributivo activo: personas, diferencias totales, conceptos pendientes, recibos procesados e incidencias.",
+  findPersonByEmployeeId: "Busca una persona dentro del análisis activo usando su matrícula laboral exacta.",
+  searchPeople: "Busca personas trabajadoras del análisis activo por criterios sanitizados, sin exponer nombres reales.",
+  getPersonProfile: "Obtiene el perfil retributivo de una persona del análisis activo mediante su matrícula: puesto, centro, categoría, estado y totales del Registro Retributivo, recibos y diferencia.",
+  getPersonPayrollPeriods: "Obtiene los periodos y totales de recibos disponibles para una persona del análisis activo.",
+  getPersonConceptDifferences: "Obtiene las diferencias por concepto de una persona: código del Registro Retributivo, concepto del recibo, importe en Registro, importe en recibos, diferencia, bloque y estado.",
+  getPersonCuadreReg: "Obtiene el cuadre completo de una persona entre importes por periodo, desglose, normalizados, variables y diferencias.",
+  getPersonNormalizedData: "Obtiene los importes normalizados, variables y diferencias de una persona para el cuadre retributivo.",
+  getPersonGroupings: "Obtiene las agrupaciones retributivas disponibles de una persona: puesto, valoración, categoría, familia y grupo personal.",
+  comparePeople: "Compara los perfiles retributivos de varias matrículas asociadas al análisis activo.",
+  getTopDifferences: "Obtiene las personas con las diferencias retributivas más relevantes del análisis activo.",
+  getDifferencesByCenter: "Agrupa las diferencias retributivas del análisis activo por centro de trabajo.",
+  getDifferencesByPosition: "Agrupa las diferencias retributivas del análisis activo por puesto de trabajo.",
+  getDifferencesByConcept: "Obtiene las diferencias retributivas del análisis activo agrupadas por concepto.",
+  getPendingConcepts: "Obtiene conceptos del análisis activo pendientes de revisión o decisión.",
+  getDisabledConcepts: "Obtiene conceptos deshabilitados, bloqueados o excluidos del análisis activo.",
+  searchDocumentChunks: "Busca fragmentos disponibles de documentos asociados al análisis activo mediante texto sanitizado.",
+  getSourceDetails: "Obtiene el detalle sanitizado de una fuente documental disponible del análisis activo.",
+};
 const analysisId = z.string().min(1).max(128); const personId = z.string().min(1).max(64);
 const scoped = z.object({ analysisId }).strict(); const person = z.object({ analysisId, personId }).strict();
 const query = z.object({ analysisId, query: z.string().min(1).max(256), limit: z.number().int().min(1).max(50).default(10) }).strict();
@@ -110,7 +130,9 @@ function assertNoKnownNames(value: unknown, analysis: AnalysisToolData): void {
 }
 
 function knownNames(analysis: AnalysisToolData): string[] {
-  return [...analysis.result.people.map((row) => row.person), ...analysis.result.payrollRecords.map((row) => row.workerName), ...analysis.result.registroEmployees.map((row) => row.workerName)].filter((name): name is string => Boolean(name?.trim()));
+  const payrollRecords = Array.isArray(analysis.result.payrollRecords) ? analysis.result.payrollRecords : [];
+  const registroEmployees = Array.isArray(analysis.result.registroEmployees) ? analysis.result.registroEmployees : [];
+  return [...analysis.result.people.map((row) => row.person), ...payrollRecords.map((row) => row.workerName), ...registroEmployees.map((row) => row.workerName)].filter((name): name is string => Boolean(name?.trim()));
 }
 
 function stripUndefined(value: unknown): unknown {

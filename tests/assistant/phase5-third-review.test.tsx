@@ -253,7 +253,7 @@ describe("Phase 5 third-review regressions", () => {
     expect(outcome).toBe("rejected");
   });
 
-  test("retries an empty failed production response from plan without an empty continuation", async () => {
+  test("retries an empty failed general response without invoking analysis planning", async () => {
     const factory = new IDBFactory();
     const dbName = "phase5-empty-failed-retry";
     const selectedProfile = profile();
@@ -270,12 +270,12 @@ describe("Phase 5 third-review regressions", () => {
     render(<AssistantProvider factory={factory} dbName={dbName}><AssistantView /></AssistantProvider>);
     fireEvent.click(await screen.findByRole("button", { name: "Reintentar respuesta" }));
     await screen.findByText("Respuesta reiniciada");
-    expect(bodies[0]).toMatchObject({ phase: "plan" });
+    expect(bodies[0]).toMatchObject({ phase: "general" });
     expect(bodies[0]).not.toHaveProperty("continuationContext");
     expect(bodies[0]).not.toHaveProperty("interruptedMessageId");
   });
 
-  test("retries a non-empty stopped production response as a continuation", async () => {
+  test("retries a non-empty stopped general response with its partial text in recent history", async () => {
     const factory = new IDBFactory();
     const dbName = "phase5-partial-stopped-retry";
     const selectedProfile = profile();
@@ -292,7 +292,12 @@ describe("Phase 5 third-review regressions", () => {
     render(<AssistantProvider factory={factory} dbName={dbName}><AssistantView /></AssistantProvider>);
     fireEvent.click(await screen.findByRole("button", { name: "Reintentar respuesta" }));
     await screen.findByText("Parcial completada");
-    expect(bodies[0]).toMatchObject({ phase: "continue", continuationContext: "Parcial", interruptedMessageId: "assistant-a" });
+    expect(bodies[0]).toMatchObject({
+      phase: "general",
+      generalHistory: [{ role: "assistant", content: "Parcial" }],
+    });
+    expect(bodies[0]).not.toHaveProperty("continuationContext");
+    expect(bodies[0]).not.toHaveProperty("interruptedMessageId");
   });
 
   test("hides repeat controls for a restored fake analysis response without its exact in-memory descriptor", async () => {

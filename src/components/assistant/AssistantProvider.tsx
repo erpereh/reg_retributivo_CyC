@@ -19,7 +19,7 @@ import { createAnalysisVersionSnapshot, syncAnalysisVersion } from "@/lib/assist
 import { executeChatAction, rejectChatAction, type AppNavigationIntent } from "@/lib/assistant/integrations/actions";
 import { registerAnalysisCleanupListener } from "@/lib/assistant/integrations/analysisCleanupCoordinator";
 import { AssistantRunStoppedError, createRepositoryBoundAssistantOrchestrator, type AssistantOrchestrator } from "@/lib/assistant/orchestration/assistantOrchestrator";
-import type { AnalysisToolRegistry } from "@/lib/assistant/tools/registry";
+import { createAnalysisToolRegistry } from "@/lib/assistant/tools/registry";
 import { applySelectedModelMetadata, resolveSelectedModelMetadata } from "@/lib/assistant/modelMetadata";
 
 const TEST_MODEL_ID = "injected-test-model";
@@ -129,6 +129,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
   const modelProfilesRef = useRef<ModelProfile[]>([]);
   const configurationMutationRef = useRef<Promise<void>>(Promise.resolve());
   const conversationMutationRef = useRef<Promise<void>>(Promise.resolve());
+  const analysisScopeMutationRef = useRef<Promise<void>>(Promise.resolve());
   const selectionIntentSequenceRef = useRef(0);
   const selectionIntentRef = useRef<SelectionIntent | undefined>(undefined);
   const createInFlightRef = useRef<SelectionIntent | undefined>(undefined);
@@ -143,6 +144,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
   const conversationsRef = useRef<Conversation[]>([]);
   const messagesRef = useRef<ChatMessage[]>([]);
   const currentAnalysisVersionRef = useRef<{ analysisId: string; analysisVersion: string } | undefined>(undefined);
+  const activeAnalysisRef = useRef<StoredAnalysis | undefined>(activeAnalysis);
   const resolvingActionIdsRef = useRef(new Set<string>());
   const mountedRef = useRef(true);
   const [ready, setReady] = useState(false);
@@ -173,6 +175,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
   useEffect(() => { conversationRef.current = conversation; }, [conversation]);
   useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
+  useEffect(() => { activeAnalysisRef.current = activeAnalysis; }, [activeAnalysis]);
 
   useEffect(() => {
     const repositories = repositoriesRef.current;
@@ -252,6 +255,12 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
         repositories.documents.listAll(),
         repositories.indexJobs.listAll(),
       ]);
+      const repairedMessages = await Promise.all(messagePage.items.map(async (message) => {
+        if (message.status !== "streaming") return message;
+        const repaired = { ...message, status: message.content.trim() ? "interrupted" as const : "failed" as const };
+        await repositories.messages.put(repaired);
+        return repaired;
+      }));
       const confirmed = await repositories.conversations.get(selected.id);
       if (!confirmed) {
         removeCachedConversation(selected.id);
@@ -262,7 +271,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       selected = confirmed;
       const selectedDocuments = allDocuments.filter((document) => document.scope.type === "conversation" ? document.scope.conversationId === selected.id : selected.type === "analysis" && document.scope.analysisId === selected.analysisId);
       const selectedDocumentIds = new Set(selectedDocuments.map((document) => document.id));
-      const selectedSources = await Promise.all([...new Set(messagePage.items.flatMap((item) => item.sourceRefIds))].map((id) => repositories.sources.get(id)));
+      const selectedSources = await Promise.all([...new Set(repairedMessages.flatMap((item) => item.sourceRefIds))].map((id) => repositories.sources.get(id)));
       if (!mountedRef.current || selectionIntentRef.current !== selectionIntent || contentGeneration !== contentGenerationRef.current || generation !== loadGenerationRef.current || deletedConversationsRef.current.has(selected.id)) return;
       const nextConversations = newestConversations(conversationsRef.current.some((item) => item.id === selected.id)
         ? conversationsRef.current.map((item) => item.id === selected.id ? selected : item)
@@ -270,9 +279,9 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       conversationsRef.current = nextConversations;
       setConversations(nextConversations);
       conversationRef.current = selected;
-      messagesRef.current = messagePage.items;
+      messagesRef.current = repairedMessages;
       setConversation(selected);
-      setMessages(messagePage.items);
+      setMessages(repairedMessages);
       setMessageCursor(messagePage.nextCursor);
       setSources(selectedSources.filter((item): item is SourceReference => Boolean(item)));
       setRevealedSourceIds([]);
@@ -317,7 +326,33 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
             const stream = pending.kind === "general" ? adapterRef.current.streamGeneral(pending.request) : adapterRef.current.streamPersonProfile(pending.request);
             return localIterableResponse(stream, String(body.roundId), signal);
           },
-          registry: { names: [], execute: async () => { throw new Error("Herramienta no disponible."); } } as unknown as AnalysisToolRegistry,
+          resolveRegistry: async (input) => {
+            const snapshotConversation = await repositories!.conversations.get(input.conversationId);
+            if (!snapshotConversation || snapshotConversation.status !== "active") throw new ProviderAdapterError("privacy", "local_scope_mismatch");
+            const analysisId = input.analysisId;
+            if (snapshotConversation.type !== "analysis" || !analysisId) {
+              return { names: [], execute: async () => { throw new Error("Las herramientas solo están disponibles en conversaciones de análisis."); } } as never;
+            }
+            const liveAnalysis = activeAnalysisRef.current;
+            if (!liveAnalysis || liveAnalysis.id !== analysisId || snapshotConversation.analysisId !== analysisId) throw new ProviderAdapterError("privacy", "local_scope_mismatch");
+            const analysis = structuredClone(liveAnalysis);
+            const allDocuments = await repositories!.documents.listAll();
+            const selectedDocuments = allDocuments.filter((document) => document.scope.type === "analysis" && document.scope.analysisId === analysisId && (document.status === "ready" || document.status === "partial"));
+            const jobs = await repositories!.indexJobs.listAll();
+            const chunkIds = [...new Set(jobs.filter((job) => selectedDocuments.some((document) => document.id === job.documentId) && Array.isArray(job.indexedChunkIds)).flatMap((job) => job.indexedChunkIds as string[]))];
+            const chunks = (await Promise.all(chunkIds.map((chunkId) => repositories!.chunks.get(chunkId)))).flatMap((chunk) => {
+              const record = chunk as { id?: string; documentId?: string; content?: string; sanitizedHash?: string; scope?: unknown; availability?: "available" | "historical_unavailable"; facets?: Record<string, string[]> } | undefined;
+              if (!record?.id || !record.documentId || typeof record.content !== "string" || !selectedDocuments.some((document) => document.id === record.documentId)) return [];
+              return [{ id: record.id, documentId: record.documentId, content: record.content, sanitizedHash: record.sanitizedHash ?? record.id, scope: { type: "analysis" as const, analysisId }, availability: record.availability ?? "available", ...(record.facets ? { facets: record.facets } : {}) }];
+            });
+            const documents = selectedDocuments.map((document) => ({
+              id: document.id, scope: { type: "analysis" as const, analysisId }, availability: "available" as const,
+              sanitizedSourceLabel: document.sanitizedSourceLabel, sourceType: document.mediaType,
+              content: chunks.filter((chunk) => chunk.documentId === document.id).map((chunk) => chunk.content).join("\n\n"),
+              sanitizedHash: chunks.filter((chunk) => chunk.documentId === document.id).map((chunk) => chunk.sanitizedHash).join(":") || document.id,
+            }));
+            return createAnalysisToolRegistry({ conversation: { id: snapshotConversation.id, type: "analysis", analysisId }, analysis, documents, chunks });
+          },
         }, repositories);
         const [storedProfiles, storedSettings, conversationPage] = await Promise.all([
           repositories.modelProfiles.listAll(),
@@ -718,6 +753,13 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
 
   const send = useCallback(async (rawText: string) => {
     if (!conversation || !rawText.trim() || streaming || selectionLoading || deletedConversationsRef.current.has(conversation.id)) return;
+    if (conversation.type === "analysis") {
+      await analysisScopeMutationRef.current;
+      if (!await ensureActiveAnalysisVersion()) {
+        setError("No se puede generar la respuesta porque el análisis ya no está disponible.");
+        return;
+      }
+    }
     const authoritative = await repositoriesRef.current?.conversations.get(conversation.id);
     if (!authoritative || authoritative.status !== "active") {
       if (authoritative) { conversationRef.current = authoritative; setConversation(authoritative); setNotice("Esta conversación es histórica y de solo lectura."); }
@@ -754,7 +796,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     let nextSources = sources;
     let sourceRefIds: string[] = [];
     const personMatch = /matrícula ([\p{L}\p{N}._-]+)/u.exec(content);
-    if (conversation.type === "analysis" && conversation.analysisId && activeAnalysis && personMatch) {
+    if (adapterRef.current && conversation.type === "analysis" && conversation.analysisId && activeAnalysis && personMatch) {
       const profile = executeAssistantToolRequest({ tool: "getPersonProfile", args: { analysisId: conversation.analysisId, personId: personMatch[1] } }, activeAnalysis, conversation.id);
       pendingFakeRequestRef.current = { kind: "profile", request: { messageId: "pending", totals: profile.totals, source: profile.source } };
       nextSources = [...sources.filter((item) => item.id !== profile.source.id), profile.source];
@@ -796,13 +838,18 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       repeatableRunsRef.current.set(assistantMessage.id, runPending);
       const compatibleDefaultProfile = modelProfilesRef.current.find((profile) => profile.id === (conversation.type === "analysis" ? assistantSettingsRef.current.defaultAnalysisModelProfileId : assistantSettingsRef.current.defaultGeneralModelProfileId));
       const result = await orchestratorRef.current!.send({
-        conversationId: conversation.id, ...(conversation.type === "analysis" ? { analysisId: conversation.analysisId } : {}), question: content, assistantMessageId: assistantMessage.id,
+        conversationId: conversation.id, ...(authoritative.type === "analysis" ? { analysisId: authoritative.analysisId, analysisContext: { associatedPersonIds: authoritative.associatedPersonIds, ...(authoritative.primaryPersonId ? { primaryPersonId: authoritative.primaryPersonId } : {}), ...(authoritative.analysisVersion ? { analysisVersion: authoritative.analysisVersion } : {}) } } : {}), question: content, assistantMessageId: assistantMessage.id,
         modelProfileId, modelId, ...(selectedProfile ? { profile: selectedProfile } : {}), ...(compatibleDefaultProfile ? { compatibleDefaultProfile } : {}),
         ...(conversation.type === "general" ? { generalHistory: messages.filter((message) => message.status !== "streaming" && message.content.trim()).slice(-10).map((message) => ({ role: message.role, content: message.content })) } : {}), responseMode: conversation.responseMode, contextStrategy: conversation.contextStrategy, onTextDelta,
       });
       if (!runIsCurrent()) return;
       if (partialTimer) clearTimeout(partialTimer);
       partialTimer = undefined;
+      const usedSources = result.events.filter((event): event is Extract<typeof event, { type: "source" }> => event.type === "source").map((event) => event.source);
+      if (usedSources.length) {
+        nextSources = [...nextSources.filter((source) => !usedSources.some((used) => used.id === source.id)), ...usedSources];
+        sourceRefIds = usedSources.map((source) => source.id);
+      }
       const producedMessages = result.producedMessages.map((produced, index) => ({
         ...assistantMessage,
         id: produced.id,
@@ -810,6 +857,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
         status: produced.status,
         modelProfileId: produced.modelProfileId,
         modelId: produced.modelId,
+        sourceRefIds,
         createdAt: new Date(Date.parse(assistantMessage.createdAt) + index).toISOString(),
       }));
       const completed = producedMessages.at(-1) ?? { ...assistantMessage, content: result.text, status: "completed" as const };
@@ -836,7 +884,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       if (runIsCurrent()) setStreaming(false);
       if (activeRunTokenRef.current === runToken) activeRunTokenRef.current = undefined;
     }
-  }, [activeAnalysis, beginConversationRun, conversation, isConversationRunCurrent, messages, persistRunRound, selectionLoading, sources, streaming]);
+  }, [activeAnalysis, beginConversationRun, conversation, ensureActiveAnalysisVersion, isConversationRunCurrent, messages, persistRunRound, selectionLoading, sources, streaming]);
 
   const stop = useCallback(() => {
     const token = activeRunTokenRef.current;
@@ -867,6 +915,10 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     const repeatTarget = resolveRepeatTarget(messageId);
     const orchestrator = orchestratorRef.current;
     if (!repeatTarget || !orchestrator || streaming || selectionLoading) return;
+    if (repeatTarget.selected.type === "analysis") {
+      await analysisScopeMutationRef.current;
+      if (!await ensureActiveAnalysisVersion()) return;
+    }
     const authoritative = await repositoriesRef.current?.conversations.get(repeatTarget.selected.id);
     if (!authoritative || authoritative.status !== "active") return;
     const { selected, target, precedingUser, modelProfileId, modelId, selectedProfile } = repeatTarget;
@@ -887,6 +939,8 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     setStreaming(true); setError(undefined); setNotice(undefined);
     setAnnouncement(mode === "retry" ? "Reanudando respuesta" : "Regenerando respuesta");
     let generated = "";
+    let nextSources = sources;
+    let sourceRefIds: string[] = [];
     let timer: ReturnType<typeof setTimeout> | undefined;
     const rendered = () => canContinue ? `${target.content}${generated}` : generated;
     const flush = () => {
@@ -899,9 +953,15 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     const onTextDelta = (delta: string) => { if (!runIsCurrent()) return; generated += delta; if (!timer) timer = setTimeout(flush, STREAM_BATCH_MS); };
     try {
       const result = await orchestrator.send({
-        conversationId: selected.id, ...(selected.type === "analysis" ? { analysisId: selected.analysisId } : {}), question: precedingUser.content,
+        conversationId: selected.id, ...(authoritative.type === "analysis" ? { analysisId: authoritative.analysisId, analysisContext: { associatedPersonIds: authoritative.associatedPersonIds, ...(authoritative.primaryPersonId ? { primaryPersonId: authoritative.primaryPersonId } : {}), ...(authoritative.analysisVersion ? { analysisVersion: authoritative.analysisVersion } : {}) } } : {}), question: precedingUser.content,
         assistantMessageId: target.id, modelProfileId, modelId, ...(selectedProfile ? { profile: selectedProfile } : {}),
         ...(compatibleDefaultProfile ? { compatibleDefaultProfile } : {}), responseMode: target.responseMode, contextStrategy: target.contextStrategy,
+        ...(authoritative.type === "general" ? {
+          generalHistory: messagesRef.current
+            .filter((message) => message.id !== target.id && message.id !== precedingUser.id && message.status !== "streaming" && message.content.trim())
+            .slice(-10)
+            .map((message) => ({ role: message.role, content: message.content })),
+        } : {}),
         ...(canContinue ? { resumeFrom: { messageId: target.id, context: target.content } } : {}), onTextDelta,
       });
       if (!runIsCurrent()) return;
@@ -909,8 +969,13 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       if (timer) clearTimeout(timer);
       timer = undefined;
       const content = rendered();
-      const nextMessages = messagesRef.current.map((message) => message.id === messageId ? { ...message, content, status: "completed" as const } : message);
-      const persisted = await persistRunRound(selected.id, nextMessages, sources, runIsCurrent);
+      const usedSources = result.events.filter((event): event is Extract<typeof event, { type: "source" }> => event.type === "source").map((event) => event.source);
+      if (usedSources.length) {
+        nextSources = [...sources.filter((source) => !usedSources.some((used) => used.id === source.id)), ...usedSources];
+        sourceRefIds = usedSources.map((source) => source.id);
+      }
+      const nextMessages = messagesRef.current.map((message) => message.id === messageId ? { ...message, content, status: "completed" as const, sourceRefIds } : message);
+      const persisted = await persistRunRound(selected.id, nextMessages, nextSources, runIsCurrent);
       if (persisted && runIsCurrent()) {
         setNotice(mode === "retry" ? "Respuesta reanudada" : "La respuesta se ha regenerado");
         setAnnouncement(`${mode === "retry" ? "Respuesta reanudada" : "Respuesta regenerada"}: ${content}`);
@@ -926,7 +991,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       } else {
         const hasNewPartial = generated.length > 0;
         const content = hasNewPartial ? rendered() : target.content;
-        const status = hasNewPartial ? "interrupted" as const : target.status;
+        const status = mode === "regenerate" && !hasNewPartial ? target.status : "failed" as const;
         const nextMessages = messagesRef.current.map((message) => message.id === messageId ? { ...message, content, status } : message);
         messagesRef.current = nextMessages;
         setMessages(nextMessages);
@@ -940,7 +1005,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       if (runIsCurrent()) setStreaming(false);
       if (activeRunTokenRef.current === runToken) activeRunTokenRef.current = undefined;
     }
-  }, [adapter, beginConversationRun, isConversationRunCurrent, persistRunRound, resolveRepeatTarget, selectionLoading, sources, streaming]);
+  }, [adapter, beginConversationRun, ensureActiveAnalysisVersion, isConversationRunCurrent, persistRunRound, resolveRepeatTarget, selectionLoading, sources, streaming]);
   const retryResponse = useCallback((messageId: string) => repeatResponse(messageId, "retry"), [repeatResponse]);
   const regenerateResponse = useCallback((messageId: string) => repeatResponse(messageId, "regenerate"), [repeatResponse]);
 
@@ -1074,21 +1139,27 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     setAnnouncement(`Matrícula ${personId} asociada al Asistente`);
   }, [activeAnalysis, ensureActiveAnalysisVersion, loadConversationData, ready]);
 
-  const addPerson = useCallback(async (personId: string) => {
-    await updateSelectedConversation((current) => current.type === "analysis" ? {
+  const addPerson = useCallback((personId: string) => {
+    const operation = updateSelectedConversation((current) => current.type === "analysis" ? {
       associatedPersonIds: [...new Set([...current.associatedPersonIds, personId])], primaryPersonId: current.primaryPersonId ?? personId,
     } : {});
+    analysisScopeMutationRef.current = operation.catch(() => undefined);
+    return operation;
   }, [updateSelectedConversation]);
   const associatePerson = addPerson;
-  const removePerson = useCallback(async (personId: string) => {
-    await updateSelectedConversation((current) => {
+  const removePerson = useCallback((personId: string) => {
+    const operation = updateSelectedConversation((current) => {
       if (current.type !== "analysis") return {};
       const associatedPersonIds = current.associatedPersonIds.filter((id) => id !== personId);
       return { associatedPersonIds, primaryPersonId: current.primaryPersonId === personId ? associatedPersonIds[0] : current.primaryPersonId };
     });
+    analysisScopeMutationRef.current = operation.catch(() => undefined);
+    return operation;
   }, [updateSelectedConversation]);
-  const setPrimaryPerson = useCallback(async (personId: string) => {
-    await updateSelectedConversation((current) => current.type === "analysis" ? { associatedPersonIds: [...new Set([...current.associatedPersonIds, personId])], primaryPersonId: personId } : {});
+  const setPrimaryPerson = useCallback((personId: string) => {
+    const operation = updateSelectedConversation((current) => current.type === "analysis" ? { associatedPersonIds: [...new Set([...current.associatedPersonIds, personId])], primaryPersonId: personId } : {});
+    analysisScopeMutationRef.current = operation.catch(() => undefined);
+    return operation;
   }, [updateSelectedConversation]);
 
   const requestPersonProfile = useCallback(async () => {

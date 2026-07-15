@@ -84,10 +84,13 @@ const analysisToolRequestSchema = z.object({
   requestId: id,
   tool: z.enum(ANALYSIS_TOOL_NAMES),
   args: z.unknown(),
+  /** Model text that accompanied this native call; held until grounding completes. */
+  assistantText: z.string().max(16_384).optional(),
+  providerMetadata: z.unknown().optional(),
 }).strict();
 
 export const assistantStreamEventSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("status"), roundId: id, label: z.string().min(1).max(256), code: z.enum(["context_warning", "context_compacted"]).optional(), snapshot: contextSnapshotSchema.optional() }).strict(),
+  z.object({ type: z.literal("status"), roundId: id, label: z.string().min(1).max(256), code: z.enum(["context_warning", "context_compacted", "tool_grounding_retried"]).optional(), snapshot: contextSnapshotSchema.optional() }).strict(),
   analysisToolRequestSchema,
   z.object({ type: z.literal("tool_result_ack"), roundId: id, requestId: id }).strict(),
   z.object({ type: z.literal("text_delta"), roundId: id, messageId: id, delta: z.string().max(16_384) }).strict(),

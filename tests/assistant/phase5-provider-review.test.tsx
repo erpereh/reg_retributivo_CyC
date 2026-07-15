@@ -162,6 +162,11 @@ describe("Phase 5 reviewed provider behavior", () => {
     const composer = screen.getByRole("textbox", { name: "Pregunta" });
     fireEvent.change(composer, { target: { value: "¿Qué es Retributivo?" } });
     fireEvent.keyDown(composer, { key: "Enter" });
+    await waitFor(() => {
+      if (screen.queryByRole("alert")) return;
+      expect(bodies).toHaveLength(1);
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
     expect(await screen.findByText("Respuesta remota")).toBeVisible();
     expect(bodies[0]).toMatchObject({ modelProfileId: selected.id, modelId: selected.modelId, profile: selected });
     expect(JSON.stringify(bodies)).not.toContain("apiKey");

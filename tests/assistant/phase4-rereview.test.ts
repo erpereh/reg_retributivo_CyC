@@ -3,6 +3,7 @@ import { AssistantOrchestrator, createRepositoryRequestScopeValidator } from "@/
 import { createChatPostHandler, createChatService } from "@/lib/assistant/server/chatService";
 import { ProviderAdapterError, type AIProviderAdapter, type ProviderMessage } from "@/lib/assistant/providers/types";
 import type { AnalysisToolRegistry } from "@/lib/assistant/tools/registry";
+import { canonicalizeToolArguments } from "@/lib/assistant/toolRounds";
 
 const profile = { id: "p1", name: "Fake", provider: "openai", baseUrl: "https://api.openai.com/v1", modelId: "m1", enabled: true, generalChatCompatible: true, analysisCompatible: true, supportsStreaming: true, supportsTools: true, supportsStructuredOutput: true, detectedContextWindow: 10_000, capabilitiesSource: "detected" } as const;
 const registry = { names: [], execute: vi.fn() } as unknown as AnalysisToolRegistry;
@@ -89,7 +90,9 @@ describe("phase 4 rereview integrated regressions", () => {
       sources: { get: vi.fn(async () => undefined) },
     };
     const validate = createRepositoryRequestScopeValidator(records as never);
-    await expect(validate({ conversationId: "c1", analysisId: "a1", interruptedMessageId: "m1", toolResults: [{ sources: [{ id: "tool-source-c1-d1", conversationId: "c1", analysisId: "a1", documentId: "d1", sourceType: "txt", sanitizedSourceLabel: "Doc", availability: "available", conceptIds: [], excerpt: "fragmento", sanitizedHash: "h1" }] }] }, { signal: new AbortController().signal, executionId: "x", generation: 1 })).resolves.toBeUndefined();
+    const args = await canonicalizeToolArguments("getSourceDetails", { analysisId: "a1", sourceId: "d1" });
+    const source = { id: "tool-source-c1-d1", conversationId: "c1", analysisId: "a1", documentId: "d1", sourceType: "txt", sanitizedSourceLabel: "Doc", availability: "available" as const, conceptIds: [], excerpt: "fragmento", sanitizedHash: "h1" };
+    await expect(validate({ conversationId: "c1", analysisId: "a1", interruptedMessageId: "m1", toolRounds: [{ executionId: "x", roundId: "r1", calls: [{ executionId: "x", roundId: "r1", requestId: "q1", name: "getSourceDetails", args: args.args, argsHash: args.hash }], results: [{ executionId: "x", roundId: "r1", requestId: "q1", name: "getSourceDetails", args: args.args, argsHash: args.hash, outcome: { ok: true, data: { sourceId: "d1", sanitizedSourceLabel: "Doc", sourceType: "txt", excerpt: "fragmento", sanitizedHash: "h1" } }, sources: [source] }] }] }, { signal: new AbortController().signal, executionId: "x", generation: 1 })).resolves.toBeUndefined();
     const transport = vi.fn();
     await expect(new AssistantOrchestrator({ transport, registry, validateRequestScope: validate } as never).send({ conversationId: "c1", analysisId: "a2", question: "Resumen", modelProfileId: "p1", modelId: "m1", responseMode: "strict", contextStrategy: "automatic" })).rejects.toMatchObject({ classification: "privacy" });
     expect(transport).not.toHaveBeenCalled();

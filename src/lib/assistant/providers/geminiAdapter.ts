@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
+import { assertEphemeralProviderMetadata } from "@/lib/assistant/toolRounds";
 import {
   ProviderAdapterError,
   sanitizeProviderError,
@@ -7,7 +8,9 @@ import {
   type BehavioralProbeResult,
   type ModelMetadata,
   type ProviderModel,
+  type ProviderMessage,
   type ProviderStreamEvent,
+  type ProviderToolCall,
   type StreamResponseRequest,
   type TokenCount,
   type TokenCountRequest,
@@ -27,6 +30,7 @@ interface GeminiModelLike {
 interface GeminiPartLike {
   readonly text?: string;
   readonly functionCall?: { readonly id?: string; readonly name?: string; readonly args?: unknown };
+  readonly [key: string]: unknown;
 }
 interface GeminiCandidateLike {
   readonly content?: { readonly role?: string; readonly parts?: readonly GeminiPartLike[] };
@@ -69,27 +73,40 @@ function supportsGenerateContent(methods: readonly string[]): boolean {
   return methods.some((method) => method.replace(/[^a-z0-9]/giu, "").toLocaleLowerCase("en") === "generatecontent");
 }
 
-function geminiContents(messages: readonly { role: "system" | "user" | "assistant" | "tool"; content: string }[]): unknown[] {
+function geminiContents(messages: readonly ProviderMessage[]): unknown[] {
   return messages.flatMap<unknown>((message) => {
     if (message.role === "system") return [];
-    if (message.role !== "tool") return [{ role: message.role === "assistant" ? "model" : "user", parts: [{ text: message.content }] }];
-    try {
-      const results = JSON.parse(message.content) as unknown;
-      if (!Array.isArray(results) || !results.length) throw new Error("invalid tool results");
-      const parts = results.map((result) => {
-        if (!result || typeof result !== "object") throw new Error("invalid tool result");
-        const entry = result as { tool?: unknown; requestId?: unknown; args?: unknown; data?: unknown; result?: unknown };
-        if (typeof entry.tool !== "string" || !entry.tool) throw new Error("invalid tool name");
-        return { name: entry.tool, id: typeof entry.requestId === "string" ? entry.requestId : undefined, args: entry.args && typeof entry.args === "object" ? entry.args : {} , result: entry.data ?? entry.result ?? {} };
-      });
-      return [
-        { role: "model", parts: parts.map(({ name, id, args }) => ({ functionCall: { name, ...(id ? { id } : {}), args } })) },
-        { role: "user", parts: parts.map(({ name, id, result }) => ({ functionResponse: { name, ...(id ? { id } : {}), response: { result } } })) },
-      ];
-    } catch {
-      return [{ role: "user", parts: [{ text: message.content }] }];
+
+    if (message.role === "assistant_tool_call") {
+      const parts: unknown[] = [];
+      if (message.content?.trim()) parts.push({ text: message.content });
+      for (const call of message.calls) parts.push(geminiCallPart(call));
+      return parts.length ? [{ role: "model", parts }] : [];
     }
+
+    if (message.role === "tool_result") {
+      if (!message.results.length) return [];
+      return [{
+        role: "user",
+        parts: message.results.map((result) => ({ functionResponse: { name: result.name, response: { result: geminiResultPayload(result.outcome) } } })),
+      }];
+    }
+
+    return [{ role: message.role === "assistant" ? "model" : "user", parts: [{ text: message.content }] }];
   });
+}
+
+function geminiCallPart(call: Extract<ProviderMessage, { role: "assistant_tool_call" }>["calls"][number]): unknown {
+  if (call.providerMetadata === undefined) return { functionCall: { name: call.name, args: call.args } };
+  assertEphemeralProviderMetadata(call.providerMetadata);
+  if (!call.providerMetadata || typeof call.providerMetadata !== "object") throw new ProviderAdapterError("incompatible", "native_tool_provider_mismatch");
+  const metadata = call.providerMetadata as { provider?: unknown; nativePart?: unknown };
+  if (metadata.provider !== "gemini" || !metadata.nativePart || typeof metadata.nativePart !== "object") throw new ProviderAdapterError("incompatible", "native_tool_provider_mismatch");
+  return metadata.nativePart;
+}
+
+function geminiResultPayload(outcome: Extract<ProviderMessage, { role: "tool_result" }>["results"][number]["outcome"]): unknown {
+  return outcome.ok && !("empty" in outcome) ? outcome.data : outcome;
 }
 
 function geminiCategory(id: string, methods: readonly string[]): NonNullable<ProviderModel["category"]> {
@@ -103,8 +120,8 @@ function geminiCategory(id: string, methods: readonly string[]): NonNullable<Pro
   return supportsGenerateContent(methods) ? "chat" : "specialized";
 }
 
-function geminiSystemInstruction(messages: readonly { role: "system" | "user" | "assistant" | "tool"; content: string }[]) {
-  const text = messages.filter((message) => message.role === "system").map((message) => message.content.trim()).filter(Boolean).join("\n\n");
+function geminiSystemInstruction(messages: readonly ProviderMessage[]) {
+  const text = messages.flatMap((message) => message.role === "system" ? [message.content.trim()] : []).filter(Boolean).join("\n\n");
   return text ? { parts: [{ text }] } : undefined;
 }
 
@@ -117,8 +134,10 @@ function responseFinishReason(response: GeminiResponseLike): string | undefined 
   return response.candidates?.find((candidate) => Boolean(candidate.finishReason))?.finishReason;
 }
 
-function responseFunctionCalls(response: GeminiResponseLike) {
-  return response.functionCalls ?? response.candidates?.flatMap((candidate) => candidate.content?.parts ?? []).flatMap((part) => part.functionCall ? [part.functionCall] : []) ?? [];
+function responseFunctionCalls(response: GeminiResponseLike): readonly { readonly call: NonNullable<GeminiPartLike["functionCall"]>; readonly nativePart: GeminiPartLike }[] {
+  const native = response.candidates?.flatMap((candidate) => candidate.content?.parts ?? []).flatMap((part) => part.functionCall ? [{ call: part.functionCall, nativePart: part }] : []) ?? [];
+  if (native.length) return native;
+  return (response.functionCalls ?? []).map((call) => ({ call, nativePart: { functionCall: call } }));
 }
 
 export function extractGeminiText(response: GeminiResponseLike): string {
@@ -253,7 +272,17 @@ export class GeminiAdapter implements AIProviderAdapter {
       const calls = responseFunctionCalls(response);
       if (!text && !calls.length) throw geminiResponseError(response);
       const finishReason = responseFinishReason(response);
-      return { toolCalls: calls.map((call, index) => ({ id: call.id ?? `gemini-call-${index}`, name: call.name ?? "", args: call.args })), ...(text ? { text } : {}), ...(responseUsage(response) ? { usage: responseUsage(response) } : {}), ...(finishReason ? { finishReason } : {}) };
+      return {
+        toolCalls: calls.map(({ call, nativePart }): ProviderToolCall => ({
+          ...(call.id ? { id: call.id } : {}),
+          name: call.name ?? "",
+          args: call.args,
+          providerMetadata: { provider: "gemini", nativePart },
+        })),
+        ...(text ? { text } : {}),
+        ...(responseUsage(response) ? { usage: responseUsage(response) } : {}),
+        ...(finishReason ? { finishReason } : {}),
+      };
     } catch (error) { throw sanitizeGeminiError(error); }
   }
 
