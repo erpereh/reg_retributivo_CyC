@@ -30,10 +30,10 @@ describe("Phase 6 core integrations", () => {
   let factory: IDBFactory;
   beforeEach(() => { factory = new IDBFactory(); vi.stubGlobal("IDBKeyRange", IDBKeyRange); });
 
-  test("migrates the assistant database to schema 4 with cleanup indexes", async () => {
+  test("migrates the assistant database to schema 5 with cleanup indexes", async () => {
     const db = await openAssistantDatabase(factory, "phase6-schema");
-    expect(ASSISTANT_DB_VERSION).toBe(4);
-    expect(db.version).toBe(4);
+    expect(ASSISTANT_DB_VERSION).toBe(5);
+    expect(db.version).toBe(5);
     const cleanup = db.transaction("cleanupJobs").objectStore("cleanupJobs");
     expect(Array.from(cleanup.indexNames)).toEqual(expect.arrayContaining(["status", "analysisId", "statusUpdatedAt"]));
     db.close();

@@ -100,7 +100,9 @@ describe("provider adapters", () => {
       generateContent: vi.fn(),
       generateContentStream: vi.fn(),
     };
-    const fetcher = vi.fn(async () => Response.json({ models: [{ name: "models/gemini-future", displayName: "Gemini Future", inputTokenLimit: 1_000_000, outputTokenLimit: 8_192, supportedGenerationMethods: ["generateContent", "countTokens"] }] }));
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith("/models/gemini-future")
+      ? Response.json({ name: "models/gemini-future", displayName: "Gemini Future", inputTokenLimit: 1_000_000, outputTokenLimit: 8_192, supportedGenerationMethods: ["generateContent", "countTokens"] })
+      : Response.json({ models: [{ name: "models/gemini-future", displayName: "Gemini Future", inputTokenLimit: 1_000_000, outputTokenLimit: 8_192, supportedGenerationMethods: ["generateContent", "countTokens"] }] }));
     const adapter = new GeminiAdapter({ clientFactory: () => ({ models }) as never, fetcher });
     const controller = new AbortController();
 
@@ -110,7 +112,8 @@ describe("provider adapters", () => {
     await expect(adapter.getModelMetadata({ apiKey: "secret", modelId: "gemini-future", signal: controller.signal })).resolves.toEqual(expect.objectContaining({ contextWindow: 1_000_000 }));
     await expect(adapter.countTokens({ apiKey: "secret", modelId: "gemini-future", text: "contenido", signal: controller.signal })).resolves.toEqual({ tokens: 37, estimated: false });
     expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/v1beta/models?pageSize=1000"), expect.objectContaining({ signal: controller.signal }));
-    expect(models.get).toHaveBeenCalledWith(expect.objectContaining({ config: expect.objectContaining({ abortSignal: controller.signal }) }));
+    expect(fetcher).toHaveBeenCalledWith("https://generativelanguage.googleapis.com/v1beta/models/gemini-future", expect.objectContaining({ signal: controller.signal }));
+    expect(models.get).not.toHaveBeenCalled();
     expect(models.countTokens).toHaveBeenCalledWith(expect.objectContaining({ config: expect.objectContaining({ abortSignal: controller.signal }) }));
   });
 
@@ -132,13 +135,14 @@ describe("provider adapters", () => {
     await expect(adapter.listModels({ apiKey: "secret" })).resolves.toEqual([
       expect.objectContaining({ id: "gemini-2.5-flash", providerModelName: "models/gemini-2.5-flash", baseModelId: "gemini-2.5-flash", supportedMethods: ["generateContent"] }),
       expect.objectContaining({ id: "gemini-2.5-flash-preview", providerModelName: "models/gemini-2.5-flash-preview", baseModelId: "gemini-2.5-flash" }),
+      expect.objectContaining({ id: "embedding-001", category: "embedding", supportedMethods: ["embedContent"] }),
     ]);
     expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/v1beta/models?pageSize=1000"), expect.objectContaining({ headers: expect.objectContaining({ "x-goog-api-key": "secret" }) }));
     expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("pageToken=page-2"), expect.anything());
   });
 
   test("uses Gemini AUTO tool selection and returns local tool results as function responses", async () => {
-    const generateContent = vi.fn(async () => ({ functionCalls: [] }));
+    const generateContent = vi.fn(async () => ({ text: "Sin herramientas" }));
     const models = { list: vi.fn(), get: vi.fn(), countTokens: vi.fn(), generateContent, generateContentStream: vi.fn() };
     const adapter = new GeminiAdapter({ clientFactory: () => ({ models }) as never });
 
@@ -155,21 +159,88 @@ describe("provider adapters", () => {
     }));
   });
 
-  test("turns a Gemini prompt block into a typed error instead of a completed empty stream", async () => {
+  test("keeps Gemini planning text, calls, usage and finish metadata together", async () => {
+    const generateContent = vi.fn(async () => ({
+      candidates: [{ content: { role: "model", parts: [{ text: "Voy a consultarlo." }, { functionCall: { id: "call-1", name: "getPersonProfile", args: { analysisId: "a1", personId: "10048" } } }] }, finishReason: "STOP" }],
+      usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 4, totalTokenCount: 7 },
+    }));
+    const models = { list: vi.fn(), get: vi.fn(), countTokens: vi.fn(), generateContent, generateContentStream: vi.fn() };
+    const adapter = new GeminiAdapter({ clientFactory: () => ({ models }) as never });
+
+    const result = await adapter.planTools({
+      apiKey: "secret", modelId: "gemini-test", messages: [{ role: "user", content: "Consulta" }],
+      tools: [{ name: "getPersonProfile", description: "Perfil", parameters: { type: "object" } }],
+    });
+
+    expect(result).toMatchObject({
+      text: "Voy a consultarlo.", finishReason: "STOP", usage: { inputTokens: 3, outputTokens: 4, totalTokens: 7, estimated: false },
+      toolCalls: [{ id: "call-1", name: "getPersonProfile", args: { analysisId: "a1", personId: "10048" } }],
+    });
+  });
+
+  test("turns a non-streaming Gemini candidate response into internal stream events", async () => {
+    const generateContent = vi.fn(async () => ({
+      candidates: [{ content: { role: "model", parts: [{ text: "Hola" }] }, finishReason: "STOP" }],
+      usageMetadata: { promptTokenCount: 2, candidatesTokenCount: 1, totalTokenCount: 3 },
+    }));
+    const models = { list: vi.fn(), get: vi.fn(), countTokens: vi.fn(), generateContent, generateContentStream: vi.fn() };
+    const adapter = new GeminiAdapter({ clientFactory: () => ({ models }) as never });
+    const events = [];
+
+    for await (const event of adapter.streamResponse({ apiKey: "secret", modelId: "gemini-test", messages: [{ role: "system", content: "Instrucciones" }, { role: "assistant", content: "Contexto" }, { role: "user", content: "hola" }] })) events.push(event);
+
+    expect(events).toEqual([
+      { type: "text_delta", delta: "Hola" },
+      { type: "usage", usage: { inputTokens: 2, outputTokens: 1, totalTokens: 3, estimated: false } },
+      { type: "done", finishReason: "STOP" },
+    ]);
+    expect(generateContent).toHaveBeenCalledWith(expect.objectContaining({
+      model: "gemini-test",
+      config: expect.objectContaining({ systemInstruction: expect.anything() }),
+      contents: [
+        { role: "model", parts: [{ text: "Contexto" }] },
+        { role: "user", parts: [{ text: "hola" }] },
+      ],
+    }));
+    expect(models.generateContentStream).not.toHaveBeenCalled();
+  });
+
+  test("resolves Gemini metadata through the normalized REST resource name", async () => {
+    const fetcher = vi.fn(async () => Response.json({
+      name: "models/gemini-manual", baseModelId: "gemini-manual", displayName: "Gemini Manual", inputTokenLimit: 16_000, outputTokenLimit: 4_096, supportedGenerationMethods: ["generateContent"],
+    }));
+    const models = { list: vi.fn(), get: vi.fn(), countTokens: vi.fn(), generateContent: vi.fn(), generateContentStream: vi.fn() };
+    const adapter = new GeminiAdapter({ clientFactory: () => ({ models }) as never, fetcher });
+
+    await expect(adapter.getModelMetadata({ apiKey: "secret", modelId: "models/gemini-manual" })).resolves.toMatchObject({
+      id: "gemini-manual", providerModelName: "models/gemini-manual", generationModelId: "gemini-manual",
+    });
+    expect(fetcher).toHaveBeenCalledWith("https://generativelanguage.googleapis.com/v1beta/models/gemini-manual", expect.objectContaining({ headers: expect.objectContaining({ "x-goog-api-key": "secret" }) }));
+    expect(models.get).not.toHaveBeenCalled();
+  });
+
+  test("preserves Gemini's actual HTTP status while classifying a 400 key failure safely", async () => {
+    const adapter = new GeminiAdapter({
+      clientFactory: () => ({ models: { list: vi.fn(), get: vi.fn(), countTokens: vi.fn(), generateContent: vi.fn(), generateContentStream: vi.fn() } }) as never,
+      fetcher: vi.fn(async () => Response.json({ error: { status: "INVALID_ARGUMENT", message: "API key not valid. secret-key" } }, { status: 400 })),
+    });
+
+    await expect(adapter.listModels({ apiKey: "secret-key" })).rejects.toMatchObject({ code: "gemini_auth_error", classification: "auth", httpStatus: 400 });
+  });
+
+  test("turns a Gemini prompt block into a typed error instead of a completed response", async () => {
     const models = {
-      list: vi.fn(), get: vi.fn(), countTokens: vi.fn(), generateContent: vi.fn(),
-      generateContentStream: vi.fn(async function* () { yield { promptFeedback: { blockReason: "SAFETY" } }; }),
+      list: vi.fn(), get: vi.fn(), countTokens: vi.fn(), generateContent: vi.fn(async () => ({ promptFeedback: { blockReason: "SAFETY" } })), generateContentStream: vi.fn(),
     };
     const adapter = new GeminiAdapter({ clientFactory: () => ({ models }) as never });
     const consume = async () => { for await (const _ of adapter.streamResponse({ apiKey: "secret", modelId: "gemini-test", messages: [{ role: "user", content: "Consulta" }] })) { /* consume */ } };
 
-    await expect(consume()).rejects.toMatchObject({ code: "gemini_response_blocked", classification: "provider" });
+    await expect(consume()).rejects.toMatchObject({ code: "gemini_blocked", classification: "provider" });
   });
 
-  test("accepts normal Gemini EOF without a provider done marker after flushing its final text", async () => {
+  test("converts a normal non-streaming Gemini result to text and done events", async () => {
     const models = {
-      list: vi.fn(), get: vi.fn(), countTokens: vi.fn(), generateContent: vi.fn(),
-      generateContentStream: vi.fn(async function* () { yield { text: "Texto final", candidates: [{ finishReason: "STOP" }] }; }),
+      list: vi.fn(), get: vi.fn(), countTokens: vi.fn(), generateContent: vi.fn(async () => ({ text: "Texto final", candidates: [{ finishReason: "STOP" }] })), generateContentStream: vi.fn(),
     };
     const adapter = new GeminiAdapter({ clientFactory: () => ({ models }) as never });
     const events = [];
@@ -177,14 +248,13 @@ describe("provider adapters", () => {
     expect(events).toEqual([{ type: "text_delta", delta: "Texto final" }, { type: "done", finishReason: "STOP" }]);
   });
 
-  test("classifies an unparseable Gemini stream frame", async () => {
+  test("classifies invalid non-streaming Gemini data", async () => {
     const models = {
-      list: vi.fn(), get: vi.fn(), countTokens: vi.fn(), generateContent: vi.fn(),
-      generateContentStream: vi.fn(async function* () { throw new SyntaxError("invalid SSE payload"); }),
+      list: vi.fn(), get: vi.fn(), countTokens: vi.fn(), generateContent: vi.fn(async () => { throw new SyntaxError("invalid JSON payload"); }), generateContentStream: vi.fn(),
     };
     const adapter = new GeminiAdapter({ clientFactory: () => ({ models }) as never });
     const consume = async () => { for await (const _ of adapter.streamResponse({ apiKey: "secret", modelId: "gemini-test", messages: [{ role: "user", content: "Consulta" }] })) { /* consume */ } };
-    await expect(consume()).rejects.toMatchObject({ code: "gemini_stream_parse", classification: "provider" });
+    await expect(consume()).rejects.toMatchObject({ code: "gemini_invalid_json", classification: "provider" });
   });
 
   test("exposes distinct safe messages for empty output, tool limits and truncated streams", () => {

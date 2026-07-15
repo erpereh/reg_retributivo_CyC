@@ -27,6 +27,10 @@ describe("Assistant settings", () => {
     fireEvent.change(screen.getByLabelText("Clave efímera"), { target: { value: "sk-never-store" } });
     fireEvent.click(screen.getByRole("button", { name: "Guardar perfil" }));
     expect(screen.getByRole("button", { name: "Conectando y guardando…" })).toBeDisabled();
+    const modelSearch = await screen.findByRole("combobox", { name: "Buscar modelo detectado" });
+    fireEvent.focus(modelSearch);
+    fireEvent.mouseDown(await screen.findByRole("option", { name: /Manual model/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Guardar perfil" }));
     await screen.findByRole("heading", { level: 3, name: "Manual local" });
 
     const db = await openAssistantDatabase(factory, "settings-ai-test");
@@ -34,7 +38,7 @@ describe("Assistant settings", () => {
     const profiles = await new Promise<Record<string, unknown>[]>((resolve) => { request.onsuccess = () => resolve(request.result); });
     db.close();
     expect(profiles).toHaveLength(1);
-    expect(profiles[0]).toMatchObject({ modelId: "manual-model", detectedContextWindow: 32_000, detectedModels: [{ id: "manual-model", displayName: "Manual model", contextWindow: 32_000, maxOutputTokens: 4_096 }] });
+    expect(profiles[0]).toMatchObject({ modelId: "manual-model", detectedModels: [{ id: "manual-model", displayName: "Manual model", contextWindow: 32_000, maxOutputTokens: 4_096 }] });
     expect(profiles[0]?.verifiedAt).toEqual(expect.any(String));
     expect(JSON.stringify(profiles)).not.toContain("sk-never-store");
   });
@@ -88,6 +92,10 @@ describe("Assistant settings", () => {
     await screen.findByRole("heading", { name: "Proveedores y modelos" });
     fireEvent.change(screen.getByLabelText("Proveedor para añadir"), { target: { value: "openai" } });
     fireEvent.click(screen.getByRole("button", { name: /Añadir perfil/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Guardar perfil" }));
+    const modelSearch = await screen.findByRole("combobox", { name: "Buscar modelo detectado" });
+    fireEvent.focus(modelSearch);
+    fireEvent.mouseDown(await screen.findByRole("option", { name: /GPT test/i }));
     fireEvent.click(screen.getByRole("button", { name: "Guardar perfil" }));
     await screen.findByRole("heading", { level: 3, name: "OpenAI" });
 

@@ -12,7 +12,7 @@ const providers = Object.keys(PROVIDER_PRESETS) as ProviderId[];
 const LOCAL_STORAGE_WARNING = "Las conversaciones y el contexto sanitizado se almacenan localmente en este navegador.";
 const DETECTION_TIMEOUT_MS = 30_000;
 
-type ModelsResponse = { models?: unknown; error?: unknown };
+type ModelsResponse = { models?: unknown; model?: unknown; error?: unknown };
 type DetectionOperation = { controller: AbortController; timeout: ReturnType<typeof setTimeout>; timedOut: boolean };
 
 function id(): string {
@@ -52,6 +52,21 @@ function isProviderModel(value: unknown): value is ProviderModel {
     && (model.maxOutputTokens === undefined || (typeof model.maxOutputTokens === "number" && Number.isFinite(model.maxOutputTokens) && model.maxOutputTokens > 0));
 }
 
+function storedModels(models: readonly ProviderModel[]) {
+  return models.map(({ id: modelId, providerModelName, generationModelId, baseModelId, category, displayName, contextWindow, maxOutputTokens, supportedMethods }) => ({
+    id: modelId, ...(providerModelName !== undefined ? { providerModelName } : {}), ...(generationModelId !== undefined ? { generationModelId } : {}), ...(baseModelId !== undefined ? { baseModelId } : {}), ...(category !== undefined ? { category } : {}), displayName,
+    ...(contextWindow !== undefined ? { contextWindow } : {}), ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}), ...(supportedMethods !== undefined ? { supportedMethods: [...supportedMethods] } : {}),
+  }));
+}
+
+function supportsGenerateContent(model: ProviderModel): boolean {
+  return !model.supportedMethods?.length || model.supportedMethods.some((method) => method.replace(/[^a-z0-9]/giu, "").toLocaleLowerCase("en") === "generatecontent");
+}
+
+function chatModelsCount(models: readonly ProviderModel[]): number {
+  return models.filter((model) => (model.category ?? "chat") === "chat" && supportsGenerateContent(model)).length;
+}
+
 function publicError(payload: ModelsResponse | undefined): string {
   const error = payload?.error;
   if (typeof error !== "string" || !error.trim() || error.length > 240) return "No se pudo obtener el listado de modelos.";
@@ -70,6 +85,10 @@ export function AssistantAiSettings() {
   const [providerToAdd, setProviderToAdd] = useState<ProviderId>("manual");
   const [detectedModels, setDetectedModels] = useState<ProviderModel[]>([]);
   const [modelQuery, setModelQuery] = useState("");
+  const [modelListOpen, setModelListOpen] = useState(false);
+  const [activeModelIndex, setActiveModelIndex] = useState(0);
+  const [manualModelEntry, setManualModelEntry] = useState("");
+  const [manualEntryOpen, setManualEntryOpen] = useState(false);
   const [message, setMessage] = useState<string>();
   const [busyProfileId, setBusyProfileId] = useState<string>();
   const [openMenuId, setOpenMenuId] = useState<string>();
@@ -91,6 +110,8 @@ export function AssistantAiSettings() {
     clearKey();
     setDetectedModels(profile.detectedModels ?? []);
     setModelQuery("");
+    setModelListOpen(false);
+    setManualEntryOpen(false);
     setMessage(undefined);
     setDraft({ ...profile });
   }
@@ -100,6 +121,8 @@ export function AssistantAiSettings() {
     clearKey();
     setDetectedModels([]);
     setModelQuery("");
+    setModelListOpen(false);
+    setManualEntryOpen(false);
     setMessage(undefined);
     setDraft(emptyProfile(provider, draft.id));
   }
@@ -117,7 +140,7 @@ export function AssistantAiSettings() {
     setBusyProfileId(profile.id);
     setMessage(`Conectando con ${PROVIDER_PRESETS[profile.provider].label}…`);
     try {
-      const models = await withKey(keyScope(profile), async (apiKey) => {
+      const detection = await withKey(keyScope(profile), async (apiKey) => {
         if (profile.provider === "manual" && !apiKey) throw new Error("Introduce una clave API para el proveedor Manual.");
         if (mounted.current && operation.current === current) setMessage("Detectando modelos disponibles…");
         const response = await fetch("/api/assistant/models", {
@@ -126,35 +149,32 @@ export function AssistantAiSettings() {
         });
         const payload = await response.json().catch(() => undefined) as ModelsResponse | undefined;
         if (!response.ok) throw new Error(publicError(payload));
-        const listed = Array.isArray(payload?.models) ? payload.models.filter(isProviderModel) : [];
+        const rawModels = Array.isArray(payload?.models) ? payload.models : [];
+        const listed = rawModels.filter(isProviderModel);
         if (!listed.length) throw new Error("No se han detectado modelos compatibles.");
-        return listed;
+        return { models: listed, rawCount: rawModels.length };
       });
+      const { models, rawCount } = detection;
       if (controller.signal.aborted || operation.current !== current) return;
-      const selected = models.find((model) => model.id === profile.selectedModelCatalogId) ?? models.find((model) => model.id === profile.modelId || model.baseModelId === profile.modelId) ?? models[0];
+      const selected = models.find((model) => model.id === profile.modelId);
       const updated: ModelProfile = {
         ...profile,
-        modelId: selected.baseModelId ?? selected.id,
-        selectedModelCatalogId: selected.id,
-        detectedModels: models.map(({ id: modelId, providerModelName, baseModelId, displayName, contextWindow, maxOutputTokens, supportedMethods }) => ({
-          id: modelId,
-          ...(providerModelName !== undefined ? { providerModelName } : {}),
-          ...(baseModelId !== undefined ? { baseModelId } : {}),
-          displayName,
-          ...(contextWindow !== undefined ? { contextWindow } : {}),
-          ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
-          ...(supportedMethods !== undefined ? { supportedMethods: [...supportedMethods] } : {}),
-        })),
-        detectedContextWindow: selected.contextWindow,
-        maxOutputTokens: selected.maxOutputTokens ?? profile.maxOutputTokens,
+        detectedModels: storedModels(models),
         generalChatCompatible: true, analysisCompatible: true, supportsStreaming: true,
-        capabilitiesSource: "detected", verifiedAt: new Date().toISOString(), lastVerificationError: undefined,
+        capabilitiesSource: "detected", modelsUpdatedAt: new Date().toISOString(), verifiedAt: new Date().toISOString(), lastVerificationError: undefined,
       };
+      if (closeDraft && !selected) {
+        setDetectedModels(models); setDraft(updated);
+        setMessage(profile.modelId ? "El modelo seleccionado ya no está disponible. Selecciona otro modelo antes de guardar." : `Se detectaron ${models.length} modelos. Selecciona uno para guardar el perfil.`);
+        return;
+      }
       await saveModelProfile(updated);
       clearKey();
       if (!mounted.current || operation.current !== current) return;
       setDetectedModels(models);
-      setMessage(`Conexión correcta · ${models.length} modelos detectados`);
+      const compatibleCount = models.filter((model) => supportsGenerateContent(model)).length;
+      const specializedCount = models.length - compatibleCount;
+      setMessage(`Conexión correcta · ${rawCount} recibidos · ${compatibleCount} compatibles con generateContent · ${specializedCount} especializados · ${chatModelsCount(models)} mostrados`);
       if (closeDraft) {
         if (keyInput.current) keyInput.current.value = "";
         setDraft(undefined);
@@ -176,7 +196,41 @@ export function AssistantAiSettings() {
     event.preventDefault();
     if (!draft?.name.trim()) { setMessage("Indica un nombre para el perfil."); return; }
     if (draft.provider === "manual" && !manualUrlIsAllowed(draft.baseUrl)) { setMessage("La Base URL Manual debe ser segura y válida."); return; }
+    if (detectedModels.length) {
+      if (!draft.modelId) { setMessage("Selecciona un modelo de texto antes de guardar el perfil."); return; }
+      void saveModelProfile({ ...draft, name: draft.name.trim(), baseUrl: (PROVIDER_PRESETS[draft.provider].baseUrl ?? draft.baseUrl).replace(/\/+$/, ""), detectedModels: storedModels(detectedModels) }).then(() => {
+        clearKey(); if (keyInput.current) keyInput.current.value = ""; setDraft(undefined); setMessage("Perfil guardado.");
+      }).catch(() => setMessage("No se pudo guardar el perfil."));
+      return;
+    }
     void detectAndSave({ ...draft, name: draft.name.trim(), baseUrl: (PROVIDER_PRESETS[draft.provider].baseUrl ?? draft.baseUrl).replace(/\/+$/, "") }, true);
+  }
+
+  function selectModel(model: ProviderModel) {
+    if (!draft) return;
+    setDraft({ ...draft, modelId: model.id });
+    setModelQuery(model.displayName);
+    setModelListOpen(false);
+  }
+
+  async function addManualGeminiModel() {
+    if (!draft || draft.provider !== "gemini") return;
+    const modelId = manualModelEntry.trim().replace(/^(?:models\/)+/u, "");
+    if (!modelId) { setMessage("Introduce un identificador de modelo."); return; }
+    setBusyProfileId(draft.id);
+    try {
+      const model = await withKey(keyScope(draft), async (apiKey) => {
+        const response = await fetch("/api/assistant/models", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ operation: "get", provider: "gemini", modelId, ...(apiKey ? { apiKey } : {}) }) });
+        const payload = await response.json().catch(() => undefined) as ModelsResponse | undefined;
+        if (!response.ok) throw new Error(publicError(payload));
+        if (!isProviderModel(payload?.model)) throw new Error("Gemini no devolvió metadatos válidos para el modelo.");
+        return payload.model;
+      });
+      const models = [...detectedModels.filter((entry) => entry.id !== model.id), model];
+      setDetectedModels(models); setDraft({ ...draft, modelId: model.id, detectedModels: storedModels(models) }); setManualModelEntry(""); setManualEntryOpen(false); setMessage("Modelo validado y seleccionado. Guarda el perfil para persistirlo.");
+    } catch (error) {
+      setMessage(error instanceof Error ? publicError({ error: error.message }) : "No se pudo validar el modelo indicado.");
+    } finally { setBusyProfileId(undefined); }
   }
 
   async function removeProfile(profile: ModelProfile) {
@@ -191,8 +245,10 @@ export function AssistantAiSettings() {
   if (!ready) return <p role="status" className="text-sm text-muted">{initializationError ?? "Cargando ajustes del Asistente…"}</p>;
 
   const busy = Boolean(draft && busyProfileId === draft.id);
-  const visibleModels = detectedModels.filter((model) => `${model.displayName} ${model.id}`.toLocaleLowerCase("es").includes(modelQuery.trim().toLocaleLowerCase("es")));
-  const duplicateDisplayNames = new Set(detectedModels.filter((model) => detectedModels.filter((candidate) => candidate.displayName === model.displayName).length > 1).map((model) => model.displayName));
+  const chatModels = detectedModels.filter((model) => (model.category ?? "chat") === "chat" && supportsGenerateContent(model));
+  const specializedModelsCount = detectedModels.length - chatModels.length;
+  const visibleModels = chatModels.filter((model) => `${model.displayName} ${model.id} ${model.providerModelName ?? ""} ${model.baseModelId ?? ""}`.toLocaleLowerCase("es").includes(modelQuery.trim().toLocaleLowerCase("es")));
+  const duplicateDisplayNames = new Set(chatModels.filter((model) => chatModels.filter((candidate) => candidate.displayName === model.displayName).length > 1).map((model) => model.displayName));
 
   return (
     <div className="flex flex-col gap-5">
@@ -208,7 +264,8 @@ export function AssistantAiSettings() {
           <label className="text-sm font-semibold text-ink">Base URL<input aria-label="Base URL" className="filter-control mt-2" value={draft.baseUrl} disabled={busy} readOnly={draft.provider !== "manual"} onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} /></label>
           <p className="self-end text-sm text-muted">Variable server-side: <code>{PROVIDER_PRESETS[draft.provider].envName ?? "Clave efímera"}</code></p>
           {draft.provider === "manual" ? <label className="text-sm font-semibold text-ink">Clave efímera<input ref={keyInput} aria-label="Clave efímera" className="filter-control mt-2" type="password" autoComplete="off" disabled={busy} onChange={(event) => setKey(keyScope(draft), event.target.value)} /><span className="mt-1 block font-normal text-muted">Solo vive en memoria.</span></label> : null}
-          {detectedModels.length ? <label className="text-sm font-semibold text-ink md:col-span-2">Modelo detectado{detectedModels.length > 8 ? <input aria-label="Buscar modelo detectado" className="filter-control mt-2" value={modelQuery} disabled={busy} onChange={(event) => setModelQuery(event.target.value)} placeholder="Buscar modelo" /> : null}<select aria-label="Modelo detectado" className="filter-control mt-2" value={draft.selectedModelCatalogId ?? draft.modelId} disabled={busy} onChange={(event) => { const selected = detectedModels.find((model) => model.id === event.target.value); setDraft({ ...draft, modelId: selected?.baseModelId ?? selected?.id ?? event.target.value, selectedModelCatalogId: selected?.id, detectedContextWindow: selected?.contextWindow, maxOutputTokens: selected?.maxOutputTokens }); }}>{visibleModels.map((model) => <option key={model.id} value={model.id}>{modelLabel(model, duplicateDisplayNames.has(model.displayName))}</option>)}</select></label> : null}
+          {detectedModels.length ? <div className="text-sm font-semibold text-ink md:col-span-2"><p>Modelo detectado</p><p className="mt-1 text-xs font-normal text-muted">{chatModels.length} modelos de texto detectados{specializedModelsCount ? ` · ${specializedModelsCount} modelos especializados no mostrados` : ""}</p><div className="relative mt-2"><input role="combobox" aria-label="Buscar modelo detectado" aria-expanded={modelListOpen} aria-controls="assistant-model-options" aria-activedescendant={modelListOpen && visibleModels[activeModelIndex] ? `assistant-model-${visibleModels[activeModelIndex].id}` : undefined} className="filter-control" value={modelQuery} disabled={busy} onFocus={() => setModelListOpen(true)} onKeyDown={(event) => { if (event.key === "ArrowDown") { event.preventDefault(); setModelListOpen(true); setActiveModelIndex((index) => Math.min(index + 1, Math.max(visibleModels.length - 1, 0))); } else if (event.key === "ArrowUp") { event.preventDefault(); setActiveModelIndex((index) => Math.max(index - 1, 0)); } else if (event.key === "Enter" && visibleModels[activeModelIndex]) { event.preventDefault(); selectModel(visibleModels[activeModelIndex]); } else if (event.key === "Escape") { setModelListOpen(false); } }} onChange={(event) => { setModelQuery(event.target.value); setActiveModelIndex(0); setModelListOpen(true); }} placeholder="Buscar por nombre o identificador" />{modelListOpen ? <ul id="assistant-model-options" role="listbox" className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-line bg-white p-1 shadow-lg">{visibleModels.map((model, index) => <li id={`assistant-model-${model.id}`} key={model.id} role="option" aria-selected={draft.modelId === model.id} className={`cursor-pointer rounded-lg px-3 py-2 ${index === activeModelIndex ? "bg-blue-50" : ""}`} onMouseDown={(event) => { event.preventDefault(); selectModel(model); }} title={model.id}><span className="block">{modelLabel(model, duplicateDisplayNames.has(model.displayName))}</span><span className="block font-mono text-xs font-normal text-muted">{model.id}</span><span className="block text-xs font-normal text-muted">{model.contextWindow?.toLocaleString("es-ES") ?? "Límite no informado"} entrada · {model.maxOutputTokens?.toLocaleString("es-ES") ?? "Límite no informado"} salida · Chat y análisis</span></li>)}{!visibleModels.length ? <li className="px-3 py-2 text-sm font-normal text-muted">No hay coincidencias.</li> : null}<li className="border-t border-line p-1"><button className="btn-secondary w-full" type="button" onMouseDown={(event) => { event.preventDefault(); setManualEntryOpen(true); }}>Introducir identificador manualmente</button></li></ul> : null}</div>{manualEntryOpen ? <div className="mt-2 flex gap-2"><input aria-label="Identificador manual de Gemini" className="filter-control" value={manualModelEntry} onChange={(event) => setManualModelEntry(event.target.value)} placeholder="gemini-model-id" /><button className="btn-secondary" type="button" disabled={busy} onClick={() => void addManualGeminiModel()}>Validar</button></div> : null}{draft.modelId ? <p className="mt-1 font-mono text-xs font-normal text-muted">Seleccionado: {draft.modelId}</p> : null}</div> : null}
+          {draft.provider === "gemini" && !detectedModels.length ? <div className="text-sm font-semibold text-ink md:col-span-2"><p>Modelo Gemini manual</p><div className="mt-2 flex gap-2"><input aria-label="Identificador manual de Gemini" className="filter-control" value={manualModelEntry} onChange={(event) => setManualModelEntry(event.target.value)} placeholder="gemini-model-id" /><button className="btn-secondary" type="button" disabled={busy} onClick={() => void addManualGeminiModel()}>Validar</button></div></div> : null}
           <details className="md:col-span-2"><summary className="cursor-pointer text-sm font-semibold text-ink">Opciones avanzadas</summary><div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="text-sm text-muted">Ventana manual<input className="filter-control mt-1" type="number" min="1" disabled={busy} value={draft.manualContextWindow ?? ""} onChange={(event) => setDraft({ ...draft, manualContextWindow: event.target.value ? Number(event.target.value) : undefined })} /></label><label className="text-sm text-muted">Salida máxima<input className="filter-control mt-1" type="number" min="1" disabled={busy} value={draft.maxOutputTokens ?? ""} onChange={(event) => setDraft({ ...draft, maxOutputTokens: event.target.value ? Number(event.target.value) : undefined })} /></label></div></details>
           <div className="flex flex-wrap gap-2 md:col-span-2"><button className="btn-primary" type="submit" disabled={busy}>{busy ? <><LoaderCircle aria-hidden="true" className="animate-spin" />Conectando y guardando…</> : "Guardar perfil"}</button><button className="btn-secondary" type="button" disabled={busy} onClick={() => { clearKey(); setDraft(undefined); setDetectedModels([]); setMessage(undefined); }}>Cancelar</button></div>
         </form> : null}

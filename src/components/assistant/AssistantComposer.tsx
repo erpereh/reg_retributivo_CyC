@@ -27,7 +27,7 @@ function providerIcon(provider: ProviderId) {
 }
 
 function profileModelName(profile: ModelProfile) {
-  return profile.detectedModels?.find((model) => model.id === profile.selectedModelCatalogId || model.id === profile.modelId || model.baseModelId === profile.modelId)?.displayName ?? profile.modelId ?? profile.name;
+  return profile.detectedModels?.find((model) => model.id === profile.modelId || model.baseModelId === profile.modelId)?.displayName ?? profile.modelId ?? profile.name;
 }
 
 const controlClassName = "inline-flex min-h-9 min-w-9 max-w-[12rem] items-center gap-1.5 rounded-lg px-2 text-xs font-bold text-ink hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-45";

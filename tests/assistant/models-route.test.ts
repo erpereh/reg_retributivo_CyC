@@ -20,6 +20,27 @@ function adapter(overrides: Partial<AIProviderAdapter> = {}): AIProviderAdapter 
 }
 
 describe("POST /api/assistant/models", () => {
+  test("gets a manually entered Gemini model without accepting an invented identifier", async () => {
+    const fake = adapter({ getModelMetadata: vi.fn(async () => ({ id: "gemini-verified", providerModelName: "models/gemini-verified", generationModelId: "gemini-verified", displayName: "Gemini verified", supportedMethods: ["generateContent"] })) });
+    const POST = createModelsPostHandler(createModelService({ resolveAdapter: () => fake, env: { GEMINI_API_KEY: "server-only" } }));
+
+    const response = await POST(request({ operation: "get", provider: "gemini", modelId: "models/models/gemini-verified" }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ model: expect.objectContaining({ id: "gemini-verified", generationModelId: "gemini-verified" }) });
+    expect(fake.getModelMetadata).toHaveBeenCalledWith(expect.objectContaining({ apiKey: "server-only", modelId: "gemini-verified" }));
+  });
+
+  test("keeps Gemini's mapped HTTP status and refuses an unknown manual model", async () => {
+    const fake = adapter({ getModelMetadata: vi.fn(async () => { throw new ProviderAdapterError("incompatible", "gemini_model_not_found", 404); }) });
+    const POST = createModelsPostHandler(createModelService({ resolveAdapter: () => fake, env: { GEMINI_API_KEY: "server-only" } }));
+
+    const response = await POST(request({ operation: "get", provider: "gemini", modelId: "gemini-invented" }));
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual(expect.objectContaining({ code: "gemini_model_not_found" }));
+  });
+
   test.each([
     ["gemini", "GEMINI_API_KEY", "https://generativelanguage.googleapis.com"],
     ["openai", "OPENAI_API_KEY", "https://api.openai.com/v1"],

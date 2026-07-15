@@ -16,10 +16,9 @@ describe("phase 4 rereview integrated regressions", () => {
     const fake = adapter({ streamResponse: vi.fn(async function* (request) { streams += 1; providerMessages.push([...request.messages]); if (streams === 1) { yield { type: "text_delta", delta: "Parcial seguro" } as const; throw new ProviderAdapterError("transient"); } yield { type: "text_delta", delta: " continuado" } as const; yield { type: "done", finishReason: "stop" } as const; }) });
     const handler = createChatPostHandler(createChatService(async () => ({ adapter: fake, apiKey: "server-key" })));
     const orchestrator = new AssistantOrchestrator({ transport: routeTransport(handler), registry, validateRequestScope, persistMessage: async (message: unknown) => { persisted.push(message); }, idFactory: () => "11111111-1111-4111-8111-111111111111" } as never);
-    await expect(orchestrator.send({ conversationId: "c1", question: "Pregunta original", modelProfileId: "p1", modelId: "m1", profile, responseMode: "strict", contextStrategy: "automatic" })).resolves.toMatchObject({ text: " continuado" });
-    expect(persisted).toEqual([expect.objectContaining({ status: "interrupted", content: "Parcial seguro" }), expect.objectContaining({ status: "completed", content: " continuado" })]);
-    expect(providerMessages[1]).toEqual(expect.arrayContaining([{ role: "assistant", content: "Parcial seguro" }, { role: "user", content: expect.stringMatching(/continúa.*sin repetir/i) }]));
-    expect(providerMessages[1]).not.toContainEqual({ role: "user", content: "Pregunta original" });
+    await expect(orchestrator.send({ conversationId: "c1", question: "Pregunta original", modelProfileId: "p1", modelId: "m1", profile, responseMode: "strict", contextStrategy: "automatic" })).resolves.toMatchObject({ text: "Parcial seguro continuado" });
+    expect(persisted).toEqual([expect.objectContaining({ status: "interrupted", content: "Parcial seguro" }), expect.objectContaining({ status: "completed", content: "Parcial seguro continuado" })]);
+    expect(providerMessages[1]).toEqual(expect.arrayContaining([{ role: "assistant", content: "Parcial seguro" }, { role: "user", content: "Pregunta original" }]));
   });
 
   it("automatically warns and compacts at adapter-counted thresholds without caller-precomputed compaction", async () => {

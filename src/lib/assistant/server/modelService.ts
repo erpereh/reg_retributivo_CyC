@@ -37,6 +37,7 @@ function keyFor(provider: ProviderId, requestKey: string | undefined, env: Serve
 
 export interface ModelService {
   list(input: { provider: ProviderId; baseUrl?: string; apiKey?: string; signal?: AbortSignal }): Promise<{ models: readonly ProviderModel[] }>;
+  get(input: { provider: ProviderId; modelId: string; baseUrl?: string; apiKey?: string; signal?: AbortSignal }): Promise<{ model: ProviderModel }>;
 }
 
 export function createModelService(options: { resolveAdapter?: ResolveAdapter; env?: ServerEnv } = {}): ModelService {
@@ -53,6 +54,15 @@ export function createModelService(options: { resolveAdapter?: ResolveAdapter; e
     async list(input) {
       const { adapter, apiKey } = dependencies(input.provider, input.baseUrl, input.apiKey);
       return { models: await adapter.listModels({ apiKey, signal: input.signal }) };
+    },
+    async get(input) {
+      const { adapter, apiKey } = dependencies(input.provider, input.baseUrl, input.apiKey);
+      const modelId = input.modelId.replace(/^(?:models\/)+/u, "");
+      if (!modelId) throw new ModelServiceInputError("Indica un identificador de modelo válido.");
+      const model = await adapter.getModelMetadata({ apiKey, modelId, signal: input.signal });
+      const supportsGeneration = (model.supportedMethods ?? []).some((method) => method.replace(/[^a-z0-9]/giu, "").toLocaleLowerCase("en") === "generatecontent");
+      if (!supportsGeneration || model.category && model.category !== "chat") throw new ModelServiceInputError("El modelo indicado no admite chat de texto con generateContent.");
+      return { model };
     },
   };
 }

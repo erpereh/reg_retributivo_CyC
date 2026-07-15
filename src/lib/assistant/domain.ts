@@ -93,13 +93,15 @@ export interface ModelProfile {
   baseUrl: string; modelId: string; enabled: boolean; generalChatCompatible: boolean; analysisCompatible: boolean;
   supportsStreaming: boolean; supportsTools: boolean; supportsStructuredOutput: boolean; detectedContextWindow?: number;
   manualContextWindow?: number; maxOutputTokens?: number; capabilitiesSource: "detected" | "manual";
-  selectedModelCatalogId?: string; detectedModels?: DetectedModel[]; verifiedAt?: string; lastVerificationError?: string;
+  detectedModels?: DetectedModel[]; modelsUpdatedAt?: string; verifiedAt?: string; lastVerificationError?: string;
 }
 
 export interface DetectedModel {
   id: string;
   providerModelName?: string;
+  generationModelId?: string;
   baseModelId?: string;
+  category?: "chat" | "embedding" | "tts" | "live" | "image" | "audio" | "video" | "specialized";
   displayName: string;
   contextWindow?: number;
   maxOutputTokens?: number;

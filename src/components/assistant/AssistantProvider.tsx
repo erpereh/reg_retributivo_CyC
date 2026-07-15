@@ -788,7 +788,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       const result = await orchestratorRef.current!.send({
         conversationId: conversation.id, ...(conversation.type === "analysis" ? { analysisId: conversation.analysisId } : {}), question: content, assistantMessageId: assistantMessage.id,
         modelProfileId, modelId, ...(selectedProfile ? { profile: selectedProfile } : {}), ...(compatibleDefaultProfile ? { compatibleDefaultProfile } : {}),
-        responseMode: conversation.responseMode, contextStrategy: conversation.contextStrategy, onTextDelta,
+        ...(conversation.type === "general" ? { generalHistory: messages.filter((message) => message.status !== "streaming" && message.content.trim()).slice(-10).map((message) => ({ role: message.role, content: message.content })) } : {}), responseMode: conversation.responseMode, contextStrategy: conversation.contextStrategy, onTextDelta,
       });
       if (!runIsCurrent()) return;
       if (partialTimer) clearTimeout(partialTimer);
@@ -809,7 +809,8 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       if (!runIsCurrent()) return;
       flushPartial();
       const stopped = caught instanceof AssistantRunStoppedError;
-      const terminal = { ...assistantMessage, content: stopped ? caught.partialText : partialText, status: stopped ? "stopped" as const : "failed" as const };
+      const terminalContent = stopped ? caught.partialText : partialText;
+      const terminal = { ...assistantMessage, content: terminalContent, status: stopped ? "stopped" as const : terminalContent ? "interrupted" as const : "failed" as const };
       const persisted = await persistRunRound(conversation.id, [...baseMessages, userMessage, terminal], nextSources, runIsCurrent).catch(() => false);
       if (persisted && runIsCurrent()) {
         if (stopped) { setNotice("Respuesta detenida"); setAnnouncement(`Respuesta detenida: ${terminal.content}`); }
@@ -915,7 +916,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       } else {
         const hasNewPartial = generated.length > 0;
         const content = hasNewPartial ? rendered() : target.content;
-        const status = hasNewPartial ? "failed" as const : target.status;
+        const status = hasNewPartial ? "interrupted" as const : target.status;
         const nextMessages = messagesRef.current.map((message) => message.id === messageId ? { ...message, content, status } : message);
         messagesRef.current = nextMessages;
         setMessages(nextMessages);

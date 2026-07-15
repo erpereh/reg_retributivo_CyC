@@ -7,7 +7,8 @@ const provider = z.enum(["gemini", "openai", "openrouter", "cerebras", "groq", "
 export const MAX_MODELS_REQUEST_BYTES = 64 * 1024;
 export const DEFAULT_MODELS_PROVIDER_DEADLINE_MS = 30_000;
 const listOperation = z.object({ operation: z.literal("list"), provider, baseUrl: z.string().url().max(2_048).optional(), apiKey: z.string().min(1).max(4_096).optional() }).strict();
-export const modelsRequestSchema = z.discriminatedUnion("operation", [listOperation]);
+const getOperation = z.object({ operation: z.literal("get"), provider, modelId: z.string().min(1).max(256), baseUrl: z.string().url().max(2_048).optional(), apiKey: z.string().min(1).max(4_096).optional() }).strict();
+export const modelsRequestSchema = z.discriminatedUnion("operation", [listOperation, getOperation]);
 
 class RequestBodyTooLarge extends Error {}
 
@@ -56,10 +57,12 @@ export function createModelsPostHandler(service: ModelService, options: { deadli
     if (!parsed.success) return NextResponse.json({ error: "Solicitud de modelos no válida." }, { status: 400 });
     const deadline = requestDeadlineSignal(request.signal, options.deadlineMs ?? DEFAULT_MODELS_PROVIDER_DEADLINE_MS);
     try {
-      return NextResponse.json(await service.list({ ...parsed.data, signal: deadline.signal }));
+      return NextResponse.json(parsed.data.operation === "list"
+        ? await service.list({ ...parsed.data, signal: deadline.signal })
+        : await service.get({ ...parsed.data, signal: deadline.signal }));
     } catch (error) {
       if (error instanceof ModelServiceInputError) return NextResponse.json({ error: error.message }, { status: 400 });
-      if (error instanceof ProviderAdapterError) return NextResponse.json({ error: error.publicMessage, code: error.code, classification: error.classification }, { status: error.classification === "auth" ? 401 : 502 });
+      if (error instanceof ProviderAdapterError) return NextResponse.json({ error: error.publicMessage, code: error.code, classification: error.classification }, { status: error.httpStatus ?? (error.classification === "auth" ? 401 : 502) });
       return NextResponse.json({ error: "No se pudo completar la operación con el proveedor.", code: "provider_error", classification: "provider" }, { status: 502 });
     } finally {
       deadline.dispose();

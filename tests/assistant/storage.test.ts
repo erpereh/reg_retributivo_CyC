@@ -33,12 +33,12 @@ describe("assistant IndexedDB repositories", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  test("creates the complete idempotent version 4 schema", async () => {
+  test("creates the complete idempotent version 5 schema", async () => {
     const db = await openAssistantDatabase(factory, "schema-test");
     expect(Array.from(db.objectStoreNames)).toEqual([...ASSISTANT_STORES].sort());
     db.close();
     const reloaded = await openAssistantDatabase(factory, "schema-test");
-    expect(reloaded.version).toBe(4);
+    expect(reloaded.version).toBe(5);
     expect(Array.from(reloaded.objectStoreNames)).toEqual([...ASSISTANT_STORES].sort());
     reloaded.close();
   });

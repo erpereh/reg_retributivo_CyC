@@ -65,9 +65,9 @@ describe("phase 4 disconnected-path regressions", () => {
       : ndjson([{ type: "text_delta", roundId: body.roundId, messageId: "continued-2", delta: " continuado" }, { type: "done", roundId: body.roundId, finishReason: "stop" }]); });
     const registry = { names: [], execute: vi.fn() } as unknown as AnalysisToolRegistry;
     const orchestrator = new AssistantOrchestrator({ transport, registry, validateRequestScope, persistMessage: async (message: unknown) => { persisted.push(message); } } as never);
-    await expect(orchestrator.send({ conversationId: "c1", question: "Resumen", modelProfileId: "p1", modelId: "m1", responseMode: "strict", contextStrategy: "automatic" })).resolves.toMatchObject({ text: " continuado" });
-    expect(transport.mock.calls[1][0]).toMatchObject({ phase: "continue", interruptedMessageId: expect.stringMatching(/:message:1$/), continuationContext: "Parcial" });
-    expect(persisted).toEqual([expect.objectContaining({ status: "interrupted", content: "Parcial", modelProfileId: "p1", modelId: "m1" }), expect.objectContaining({ status: "completed", content: " continuado", modelProfileId: "p1", modelId: "m1" })]);
+    await expect(orchestrator.send({ conversationId: "c1", question: "Resumen", modelProfileId: "p1", modelId: "m1", responseMode: "strict", contextStrategy: "automatic" })).resolves.toMatchObject({ text: "Parcial continuado" });
+    expect(transport.mock.calls[1][0]).toMatchObject({ phase: "general", question: "Resumen", generalHistory: [{ role: "assistant", content: "Parcial" }] });
+    expect(persisted).toEqual([expect.objectContaining({ status: "interrupted", content: "Parcial", modelProfileId: "p1", modelId: "m1" }), expect.objectContaining({ status: "completed", content: "Parcial continuado", modelProfileId: "p1", modelId: "m1" })]);
   });
 
   it("keeps tool identity and sanitized sources in the result envelope", async () => {
@@ -75,7 +75,7 @@ describe("phase 4 disconnected-path regressions", () => {
     const source = { id: "s1", conversationId: "c1", analysisId: "a1", sourceType: "analysis", sanitizedSourceLabel: "Análisis retributivo", availability: "available", conceptIds: [], excerpt: "Resumen estructurado", sanitizedHash: "h1" };
     const registry = { names: ["getAnalysisSummary"], execute: vi.fn(), executeEnvelope: vi.fn(async () => ({ data: { summary: { uniquePeople: 1 } }, sources: [source] })) } as unknown as AnalysisToolRegistry;
     await new AssistantOrchestrator({ transport, registry, validateRequestScope }).send({ conversationId: "c1", analysisId: "a1", question: "Resumen", modelProfileId: "p1", modelId: "m1", responseMode: "strict", contextStrategy: "automatic" });
-    expect(transport.mock.calls[1][0]).toEqual(expect.objectContaining({ toolResults: [{ requestId: "req-1", tool: "getAnalysisSummary", data: { summary: { uniquePeople: 1 } }, sources: [source] }] }));
+    expect(transport.mock.calls[1][0]).toEqual(expect.objectContaining({ toolResults: [{ requestId: "req-1", tool: "getAnalysisSummary", args: { analysisId: "a1" }, data: { summary: { uniquePeople: 1 } }, sources: [source] }] }));
   });
 
   it("rejects an event from another round and cancels an oversized NDJSON reader", async () => {
@@ -130,7 +130,7 @@ describe("phase 4 disconnected-path regressions", () => {
     expect((await eventsOf(tooMuchText)).at(-1)).toMatchObject({ classification: "context", retryable: false });
   });
 
-  it("retry resumes the interrupted message while regenerate replaces the completed target and starts a fresh plan", async () => {
+  it("retry keeps general chat in its direct phase while regenerate starts a fresh direct round", async () => {
     let call = 0; const bodies: Record<string, unknown>[] = []; const replaced: string[] = [];
     const transport = async (body: Record<string, unknown>) => { bodies.push(body); call += 1; if (call <= 2) return ndjson([{ type: "text_delta", roundId: body.roundId, messageId: `partial-${call}`, delta: `Parcial ${call}` }, { type: "error", roundId: body.roundId, code: "provider_transient", classification: "transient", message: "Temporal", retryable: true }]); return ndjson([{ type: "text_delta", roundId: body.roundId, messageId: `complete-${call}`, delta: "Completa" }, { type: "done", roundId: body.roundId, finishReason: "stop" }]); };
     const registry = { names: [], execute: vi.fn() } as unknown as AnalysisToolRegistry;
@@ -138,10 +138,10 @@ describe("phase 4 disconnected-path regressions", () => {
     const input = { conversationId: "c1", question: "Resumen", modelProfileId: "p1", modelId: "m1", responseMode: "strict" as const, contextStrategy: "automatic" as const };
     await expect(orchestrator.send(input)).rejects.toMatchObject({ classification: "transient" });
     await expect(orchestrator.retry()).resolves.toMatchObject({ text: "Completa" });
-    expect(bodies[2]).toEqual(expect.objectContaining({ phase: "continue", interruptedMessageId: expect.stringMatching(/:message:2$/), continuationContext: "Parcial 1Parcial 2" }));
+    expect(bodies[2]).toEqual(expect.objectContaining({ phase: "general", question: "Resumen" }));
     await expect(orchestrator.regenerate()).resolves.toMatchObject({ text: "Completa" });
     expect(replaced[0]).toMatch(/:message:1$/);
-    expect(bodies[3]).toEqual(expect.objectContaining({ phase: "plan", question: "Resumen" }));
+    expect(bodies[3]).toEqual(expect.objectContaining({ phase: "general", question: "Resumen" }));
   });
 
   it("does not precompact or persist a caller snapshot below a server-reported 85% threshold", async () => {

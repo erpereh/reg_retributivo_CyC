@@ -13,6 +13,46 @@ const events = async (response: Response) => (await response.text()).trim().spli
 const baseBody = { phase: "plan", executionId: "11111111-1111-4111-8111-111111111111", conversationId: "c1", analysisId: "a1", roundId: "r1", roundNumber: 1, modelProfileId: "p1", modelId: "m1", profile, responseMode: "strict", contextStrategy: "automatic", question: "Resumen", tools: [], contextCandidates: [{ id: "old", kind: "message", content: "HISTORIA-LARGA", tokens: 1, relevance: 1, sourceId: "s1", sanitizedHash: "h1", factKey: "history:old", scope: { type: "analysis", analysisId: "a1" } }], compactionLineage: { decisions: ["Mantener criterio"], figures: [125], sourceIds: ["s1"], actionIds: ["ac1"], personIds: ["10048"], analysisVersion: "v7" } } as const;
 
 describe("phase 4 final review regressions", () => {
+  it("generates a general hello directly without planning tools", async () => {
+    const direct = adapter(
+      vi.fn(async () => ({ tokens: 1, estimated: false })),
+      vi.fn(async function* () {
+        yield { type: "text_delta", delta: "Hola" } as const;
+        yield { type: "usage", usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, estimated: false } } as const;
+        yield { type: "done", finishReason: "STOP" } as const;
+      }),
+    );
+    const body = {
+      phase: "general", executionId: "11111111-1111-4111-8111-111111111111", conversationId: "c1", roundId: "r1", roundNumber: 1,
+      modelProfileId: "p1", modelId: "m1", profile, responseMode: "strict", contextStrategy: "automatic", question: "hola",
+    };
+
+    const result = await events(await createChatPostHandler(createChatService(async () => ({ adapter: direct, apiKey: "key" })))(new Request("http://local/chat", { method: "POST", body: JSON.stringify(body) })));
+
+    expect(result).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "text_delta", delta: "Hola" }),
+      expect.objectContaining({ type: "usage", usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, estimated: false } }),
+      expect.objectContaining({ type: "done", finishReason: "STOP" }),
+    ]));
+    expect(direct.planTools).not.toHaveBeenCalled();
+    expect(direct.streamResponse).toHaveBeenCalledOnce();
+  });
+
+  it("completes a planning response that contains text but no tool calls", async () => {
+    const planner = adapter(vi.fn(async () => ({ tokens: 1, estimated: false })));
+    vi.mocked(planner.planTools).mockResolvedValue({
+      toolCalls: [], text: "Respuesta directa", usage: { inputTokens: 2, outputTokens: 1, totalTokens: 3, estimated: false }, finishReason: "STOP",
+    });
+    const result = await events(await createChatPostHandler(createChatService(async () => ({ adapter: planner, apiKey: "key" })))(new Request("http://local/chat", { method: "POST", body: JSON.stringify({ ...baseBody, contextCandidates: [], compactionLineage: undefined }) })));
+
+    expect(result).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "text_delta", delta: "Respuesta directa" }),
+      expect.objectContaining({ type: "usage", usage: { inputTokens: 2, outputTokens: 1, totalTokens: 3, estimated: false } }),
+      expect.objectContaining({ type: "done", finishReason: "STOP" }),
+    ]));
+    expect(planner.streamResponse).not.toHaveBeenCalled();
+  });
+
   it("preserves complete compaction lineage and rejects a second plan that remains at 85 percent", async () => {
     const compacting = adapter(vi.fn(async ({ text }) => ({ tokens: text.includes("Resumen de contexto") ? 200 : text.includes("HISTORIA-LARGA") ? 6_000 : 100, estimated: false })));
     const successful = await events(await createChatPostHandler(createChatService(async () => ({ adapter: compacting, apiKey: "key" })))(new Request("http://local/chat", { method: "POST", body: JSON.stringify(baseBody) })));

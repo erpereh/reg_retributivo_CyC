@@ -32,7 +32,13 @@ export interface ProviderTool {
   readonly parameters: Readonly<Record<string, unknown>>;
 }
 export interface ProviderToolCall { readonly id: string; readonly name: string; readonly args: unknown }
-export interface ToolPlan { readonly toolCalls: readonly ProviderToolCall[] }
+export interface ToolPlan {
+  readonly toolCalls: readonly ProviderToolCall[];
+  readonly text?: string;
+  readonly usage?: TokenUsage;
+  readonly finishReason?: string;
+  readonly blockReason?: string;
+}
 
 export type ProviderStreamEvent =
   | { readonly type: "text_delta"; readonly delta: string }
@@ -83,6 +89,18 @@ const PUBLIC_MESSAGES_BY_CODE: Readonly<Record<string, string>> = {
   stream_parse: "No se pudo interpretar la respuesta del proveedor.",
   gemini_response_blocked: "Gemini bloqueó la respuesta.",
   gemini_stream_parse: "No se pudo interpretar la respuesta del proveedor.",
+  gemini_auth_error: "La clave de Gemini no es válida.",
+  gemini_forbidden: "La clave no tiene acceso al modelo seleccionado.",
+  gemini_model_not_found: "El modelo seleccionado no existe o no está disponible.",
+  gemini_rate_limited: "Se ha alcanzado el límite de peticiones de Gemini.",
+  gemini_http_error: "Gemini no pudo procesar la solicitud.",
+  gemini_invalid_json: "Gemini devolvió una respuesta no interpretable.",
+  gemini_empty_candidates: "Gemini no devolvió candidatos.",
+  gemini_empty_parts: "Gemini no devolvió contenido de texto.",
+  gemini_blocked: "Gemini bloqueó la respuesta.",
+  gemini_finish_max_tokens: "Gemini alcanzó el límite de salida antes de responder.",
+  gemini_empty_response: "Gemini no devolvió contenido de texto.",
+  gemini_tool_round_limit: "Se alcanzó el máximo de consultas internas.",
 };
 
 export class ProviderAdapterError extends Error {
@@ -90,16 +108,19 @@ export class ProviderAdapterError extends Error {
   readonly classification: ProviderErrorClassification;
   readonly publicMessage: string;
 
-  constructor(classification: ProviderErrorClassification, code = `provider_${classification}`) {
+  readonly httpStatus?: number;
+
+  constructor(classification: ProviderErrorClassification, code = `provider_${classification}`, httpStatus?: number) {
     super(PUBLIC_MESSAGES[classification]);
     this.name = "ProviderAdapterError";
     this.code = code;
     this.classification = classification;
+    this.httpStatus = httpStatus;
     this.publicMessage = PUBLIC_MESSAGES_BY_CODE[code] ?? PUBLIC_MESSAGES[classification];
   }
 
   toJSON() {
-    return { name: this.name, code: this.code, classification: this.classification, publicMessage: this.publicMessage };
+    return { name: this.name, code: this.code, classification: this.classification, ...(this.httpStatus ? { httpStatus: this.httpStatus } : {}), publicMessage: this.publicMessage };
   }
 }
 

@@ -16,7 +16,51 @@ describe("assistant client orchestration", () => {
     expect(result.text).toBe("Respuesta");
     expect(result.rounds).toBe(2);
     expect(registry.execute).toHaveBeenCalledWith("getPersonProfile", { analysisId: "a1", personId: "10048" });
-    expect(transport.mock.calls[1][0]).toEqual(expect.objectContaining({ phase: "respond", toolResults: [{ requestId: "q1", tool: "getPersonProfile", data: { safe: true }, sources: [] }] }));
+    expect(transport.mock.calls[1][0]).toEqual(expect.objectContaining({ phase: "respond", toolResults: [{ requestId: "q1", tool: "getPersonProfile", args: { analysisId: "a1", personId: "10048" }, data: { safe: true }, sources: [] }] }));
+  });
+
+  it("uses one direct general round and persists the hello response once", async () => {
+    const persistMessage = vi.fn(async () => undefined);
+    const transport = vi.fn(async (body: Record<string, unknown>) => ndjson([
+      { type: "text_delta", roundId: String(body.roundId), messageId: "provider-message", delta: "Hola" },
+      { type: "done", roundId: String(body.roundId), finishReason: "STOP" },
+    ]));
+    const registry = { names: [], execute: vi.fn() } as unknown as AnalysisToolRegistry;
+
+    const result = await new AssistantOrchestrator({ transport, registry, validateRequestScope, persistMessage }).send({
+      conversationId: "c1", question: "hola", assistantMessageId: "assistant-hello", modelProfileId: "p1", modelId: "gemini-test",
+      responseMode: "strict", contextStrategy: "automatic",
+    });
+
+    expect(transport).toHaveBeenCalledOnce();
+    expect(transport.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ phase: "general", question: "hola" }));
+    expect(result.text).toBe("Hola");
+    expect(result.producedMessages).toEqual([expect.objectContaining({ id: "assistant-hello", status: "completed", content: "Hola" })]);
+    expect(persistMessage).toHaveBeenCalledOnce();
+  });
+
+  it("keeps planning text and final tool text in one assistant message", async () => {
+    const persistMessage = vi.fn(async () => undefined);
+    const transport = vi.fn(async (body: Record<string, unknown>) => body.phase === "plan"
+      ? ndjson([
+          { type: "text_delta", roundId: String(body.roundId), messageId: "provider-message", delta: "Primero consulto. " },
+          { type: "tool_request", roundId: String(body.roundId), requestId: "q1", tool: "getPersonProfile", args: { analysisId: "a1", personId: "10048" } },
+          { type: "done", roundId: String(body.roundId), finishReason: "tool_request" },
+        ])
+      : ndjson([
+          { type: "text_delta", roundId: String(body.roundId), messageId: "provider-message", delta: "Resultado final." },
+          { type: "done", roundId: String(body.roundId), finishReason: "STOP" },
+        ]));
+    const registry = { names: ["getPersonProfile"], execute: vi.fn(async () => ({ safe: true })) } as unknown as AnalysisToolRegistry;
+
+    const result = await new AssistantOrchestrator({ transport, registry, validateRequestScope, persistMessage }).send({
+      conversationId: "c1", analysisId: "a1", question: "Consulta matrícula 10048", assistantMessageId: "assistant-analysis", modelProfileId: "p1", modelId: "gemini-test",
+      responseMode: "strict", contextStrategy: "automatic",
+    });
+
+    expect(result.text).toBe("Primero consulto. Resultado final.");
+    expect(result.producedMessages).toEqual([expect.objectContaining({ id: "assistant-analysis", content: "Primero consulto. Resultado final.", status: "completed" })]);
+    expect(persistMessage).toHaveBeenCalledOnce();
   });
 
   it("stops at three rounds, validates privacy client-side and honors AbortSignal", async () => {
