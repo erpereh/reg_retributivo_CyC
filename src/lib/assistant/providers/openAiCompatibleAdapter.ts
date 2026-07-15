@@ -102,7 +102,7 @@ export class OpenAICompatibleAdapter implements AIProviderAdapter {
       body: JSON.stringify({
         model: request.modelId, messages: request.messages,
         tools: request.tools.map((tool) => ({ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.parameters, strict: true } })),
-        tool_choice: "required", stream: false,
+        tool_choice: "required", max_completion_tokens: request.maxOutputTokens, stream: false,
       }),
     });
     const parsed = completionSchema.safeParse(await safeJson(response));

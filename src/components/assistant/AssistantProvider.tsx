@@ -20,6 +20,7 @@ import { executeChatAction, rejectChatAction, type AppNavigationIntent } from "@
 import { registerAnalysisCleanupListener } from "@/lib/assistant/integrations/analysisCleanupCoordinator";
 import { AssistantRunStoppedError, createRepositoryBoundAssistantOrchestrator, type AssistantOrchestrator } from "@/lib/assistant/orchestration/assistantOrchestrator";
 import type { AnalysisToolRegistry } from "@/lib/assistant/tools/registry";
+import { applySelectedModelMetadata, resolveSelectedModelMetadata } from "@/lib/assistant/modelMetadata";
 
 const TEST_MODEL_ID = "injected-test-model";
 const TEST_SYSTEM_PROMPT = GENERAL_RETRIBUTIVO_PROMPT;
@@ -30,6 +31,7 @@ const now = () => new Date().toISOString();
 const createId = (prefix: string) => `${prefix}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`;
 const withoutUndefined = <T extends object>(value: T): T => Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T;
 const newestConversations = (items: readonly Conversation[]) => [...items].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id));
+const sameProfile = (left: ModelProfile, right: ModelProfile) => JSON.stringify(withoutUndefined(left)) === JSON.stringify(withoutUndefined(right));
 
 function repairAssistantSettings(settings: AssistantSettings, profiles: readonly ModelProfile[]): AssistantSettings {
   const general = profiles.find((profile) => profile.id === settings.defaultGeneralModelProfileId);
@@ -322,10 +324,13 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
           repositories.assistantSettings.get(DEFAULT_ASSISTANT_SETTINGS.id),
           repositories.conversations.list({ limit: CONVERSATION_PAGE_SIZE }),
         ]);
-        const restoredProfiles = storedProfiles.flatMap((profile) => {
+        const parsedProfiles = storedProfiles.flatMap((profile) => {
           const parsed = modelProfileSchema.safeParse(profile);
           return parsed.success ? [parsed.data] : [];
         });
+        const restoredProfiles = parsedProfiles.map((profile) => applySelectedModelMetadata(profile, profile.detectedModels ?? [], profile.modelId));
+        const repairedProfiles = restoredProfiles.filter((profile, index) => !sameProfile(profile, parsedProfiles[index]!));
+        await Promise.all(repairedProfiles.map((profile) => repositories!.modelProfiles.put(withoutUndefined(profile))));
         const parsedSettings = assistantSettingsSchema.safeParse({ ...DEFAULT_ASSISTANT_SETTINGS, ...storedSettings });
         const repairedSettings = repairAssistantSettings(parsedSettings.success ? parsedSettings.data : DEFAULT_ASSISTANT_SETTINGS, restoredProfiles);
         const restoredConversations = await Promise.all(conversationPage.items.map(async (item) => item.status === "archived"
@@ -386,7 +391,8 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
   ), []);
 
   const saveModelProfile = useCallback((profile: ModelProfile) => serializeConfigurationMutation(async () => {
-    const safe = withoutUndefined(modelProfileSchema.parse(profile));
+    const normalized = applySelectedModelMetadata(profile, profile.detectedModels ?? [], profile.modelId);
+    const safe = withoutUndefined(modelProfileSchema.parse(normalized));
     const repositories = repositoriesRef.current;
     if (!repositories) throw new Error("El almacenamiento local no está disponible.");
     const nextProfiles = [...modelProfilesRef.current.filter((item) => item.id !== safe.id), safe];
@@ -730,6 +736,10 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     const createdAt = now();
     const selectedProfile = modelProfilesRef.current.find((profile) => profile.id === conversation.modelProfileId && profile.enabled
       && (conversation.type === "analysis" ? profile.analysisCompatible : profile.generalChatCompatible));
+    if (selectedProfile && !resolveSelectedModelMetadata(selectedProfile, selectedProfile.modelId).selectionAvailable) {
+      setError("El modelo seleccionado ya no está disponible. Selecciona otro modelo antes de enviar mensajes.");
+      return;
+    }
     if (!selectedProfile && !adapter) {
       setError("No hay modelos configurados.");
       return;
@@ -1107,7 +1117,10 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     ready, conversations, hasMoreConversations: Boolean(conversationCursor), conversation, messages, repeatableMessageIds, hasMoreMessages: Boolean(messageCursor), sources, revealedSourceIds, events, actions, actionOutputs, resolvingActionIds, snapshots, documents, indexJobs,
     streaming, selectionLoading, conversationTransitionPending, announcement, notice, error, createGeneralConversation, loadMoreConversations, selectConversation, renameConversation, archiveConversation, deleteConversation,
     loadMoreMessages, send, stop, retryResponse, regenerateResponse, copyResponse, acceptAction, rejectAction, convertToActiveAnalysis, associatePerson, continuePersonInAssistant, addPerson, removePerson, setPrimaryPerson,
-    requestPersonProfile, openModelSettings, updateConversationPreferences, availablePersonIds, people: conversation?.type === "analysis" ? activeAnalysis?.result.people ?? [] : [], canSend: Boolean(adapter) || Boolean(conversation && modelProfiles.some((profile) => profile.id === conversation.modelProfileId && profile.enabled && (conversation.type === "analysis" ? profile.analysisCompatible : profile.generalChatCompatible))), modelProfiles, assistantSettings, saveModelProfile, duplicateModelProfile,
+    requestPersonProfile, openModelSettings, updateConversationPreferences, availablePersonIds, people: conversation?.type === "analysis" ? activeAnalysis?.result.people ?? [] : [], canSend: Boolean(conversation && (() => {
+      const selected = modelProfiles.find((profile) => profile.id === conversation.modelProfileId && profile.enabled && (conversation.type === "analysis" ? profile.analysisCompatible : profile.generalChatCompatible));
+      return selected ? resolveSelectedModelMetadata(selected, selected.modelId).selectionAvailable : Boolean(adapter);
+    })()), modelProfiles, assistantSettings, saveModelProfile, duplicateModelProfile,
     deleteModelProfile, updateAssistantSettings, clearAssistantContent, setKey: vaultRef.current.setKey, clearKey: vaultRef.current.clearKey, withKey: vaultRef.current.withKey,
   }), [acceptAction, actionOutputs, actions, addPerson, announcement, archiveConversation, assistantSettings, associatePerson, availablePersonIds, clearAssistantContent, conversation, conversationCursor, conversations, documents,
     convertToActiveAnalysis, continuePersonInAssistant, copyResponse, createGeneralConversation, deleteConversation, deleteModelProfile, duplicateModelProfile, error, events, loadMoreConversations,

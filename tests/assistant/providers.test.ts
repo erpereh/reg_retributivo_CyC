@@ -117,6 +117,13 @@ describe("provider adapters", () => {
     expect(models.countTokens).toHaveBeenCalledWith(expect.objectContaining({ config: expect.objectContaining({ abortSignal: controller.signal }) }));
   });
 
+  test("maps a real Gemini HTTP 413 to the sanitized provider size error", async () => {
+    const models = { list: vi.fn(), get: vi.fn(), countTokens: vi.fn(), generateContent: vi.fn(), generateContentStream: vi.fn() };
+    const adapter = new GeminiAdapter({ clientFactory: () => ({ models }) as never, fetcher: vi.fn(async () => Response.json({ error: { status: "RESOURCE_EXHAUSTED", message: "private provider detail" } }, { status: 413 })) });
+
+    await expect(adapter.listModels({ apiKey: "secret" })).rejects.toMatchObject({ code: "provider_http_413", classification: "context", publicMessage: "La solicitud supera el tamaño admitido por el proveedor." });
+  });
+
   test("lists every paginated Gemini generateContent variant without collapsing a shared base model", async () => {
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -150,11 +157,11 @@ describe("provider adapters", () => {
       apiKey: "secret", modelId: "gemini-test", messages: [
         { role: "user", content: "Consulta" },
         { role: "tool", content: JSON.stringify([{ requestId: "tool-1", tool: "getAnalysisSummary", data: { total: 1 } }]) },
-      ], tools: [{ name: "getAnalysisSummary", description: "Resumen", parameters: { type: "object" } }],
+      ], tools: [{ name: "getAnalysisSummary", description: "Resumen", parameters: { type: "object" } }], maxOutputTokens: 321,
     });
 
     expect(generateContent).toHaveBeenCalledWith(expect.objectContaining({
-      config: expect.objectContaining({ toolConfig: { functionCallingConfig: { mode: "AUTO" } } }),
+      config: expect.objectContaining({ maxOutputTokens: 321, toolConfig: { functionCallingConfig: { mode: "AUTO" } } }),
       contents: expect.arrayContaining([expect.objectContaining({ parts: [expect.objectContaining({ functionResponse: expect.objectContaining({ name: "getAnalysisSummary" }) })] })]),
     }));
   });

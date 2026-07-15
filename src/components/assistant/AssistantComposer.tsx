@@ -4,6 +4,7 @@ import { Bot, BrainCircuit, ChevronDown, CircleGauge, Cpu, Gem, Plug, Scale, Sen
 import { useState, type FormEvent, type KeyboardEvent } from "react";
 import type { ContextStrategy, Conversation, ModelProfile, ResponseMode } from "@/lib/assistant/domain";
 import type { ProviderId } from "@/lib/assistant/providers/types";
+import { resolveSelectedModelMetadata } from "@/lib/assistant/modelMetadata";
 
 const responseModeLabels: Record<ResponseMode, string> = { strict: "Estricto", flexible: "Flexible" };
 const contextStrategyLabels: Record<ContextStrategy, string> = { automatic: "Automática", full: "Completa", optimized: "Optimizada" };
@@ -27,7 +28,7 @@ function providerIcon(provider: ProviderId) {
 }
 
 function profileModelName(profile: ModelProfile) {
-  return profile.detectedModels?.find((model) => model.id === profile.modelId || model.baseModelId === profile.modelId)?.displayName ?? profile.modelId ?? profile.name;
+  return resolveSelectedModelMetadata(profile, profile.modelId).selectedModel?.displayName ?? profile.modelId ?? profile.name;
 }
 
 const controlClassName = "inline-flex min-h-9 min-w-9 max-w-[12rem] items-center gap-1.5 rounded-lg px-2 text-xs font-bold text-ink hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-45";
@@ -44,9 +45,10 @@ export function AssistantComposer({ streaming, disabled = false, conversation, p
   const [value, setValue] = useState("");
   const [openMenu, setOpenMenu] = useState<"model" | "mode" | "strategy">();
   const selectedProfile = profiles.find((profile) => profile.id === conversation.modelProfileId);
+  const selectedMetadata = selectedProfile ? resolveSelectedModelMetadata(selectedProfile, selectedProfile.modelId) : undefined;
   const selectedModelName = selectedProfile ? profileModelName(selectedProfile) : profiles.length ? "Selecciona un modelo" : "No hay modelos configurados";
-  const contextCapacity = selectedProfile?.detectedContextWindow ?? selectedProfile?.manualContextWindow ?? 1_000_000;
-  const contextUsage = `${formatTokens(contextTokens ?? 0)} / ${formatTokens(contextCapacity)}`;
+  const contextCapacity = selectedMetadata?.contextWindow;
+  const contextUsage = `${formatTokens(contextTokens ?? 0)} / ${contextCapacity ? formatTokens(contextCapacity) : "—"}`;
   const controlsDisabled = conversation.status !== "active";
 
   async function submit(event?: FormEvent) { event?.preventDefault(); const raw = value; if (!raw.trim() || streaming || disabled) return; setValue(""); await onSend(raw); }
@@ -65,7 +67,7 @@ export function AssistantComposer({ streaming, disabled = false, conversation, p
             </button>
             {openMenu === "model" ? <div role="menu" className={menuClassName}>{profiles.map((profile) => {
               const name = profileModelName(profile);
-              const context = profile.detectedContextWindow ?? profile.manualContextWindow;
+              const context = resolveSelectedModelMetadata(profile, profile.modelId).contextWindow;
               return <button key={profile.id} type="button" role="menuitem" className={menuItemClassName} title={`${name} · ${profile.provider}${context ? ` · ${context.toLocaleString("es-ES")} tokens` : " · Ventana no informada"}`} onClick={() => { onPreferences({ modelProfileId: profile.id }); setOpenMenu(undefined); }}>
                 {providerIcon(profile.provider)}<span className="min-w-0 flex-1 truncate">{name}</span><span className="shrink-0 text-[0.6875rem] text-muted">{context ? `${formatTokens(context)}` : "—"}</span>
               </button>;

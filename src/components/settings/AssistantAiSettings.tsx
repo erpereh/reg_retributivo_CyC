@@ -7,6 +7,7 @@ import { Card } from "@/components/common/Card";
 import type { ModelProfile } from "@/lib/assistant/domain";
 import { PROVIDER_PRESETS, type ProviderId, type ProviderModel } from "@/lib/assistant/providers/types";
 import type { EphemeralKeyScope } from "@/lib/assistant/providers/ephemeralKeyVault";
+import { applySelectedModelMetadata, DEFAULT_REQUESTED_MAX_OUTPUT_TOKENS, resolveSelectedModelMetadata } from "@/lib/assistant/modelMetadata";
 
 const providers = Object.keys(PROVIDER_PRESETS) as ProviderId[];
 const LOCAL_STORAGE_WARNING = "Las conversaciones y el contexto sanitizado se almacenan localmente en este navegador.";
@@ -23,7 +24,7 @@ function emptyProfile(provider: ProviderId, existingId?: string): ModelProfile {
   return {
     id: existingId ?? id(), name: PROVIDER_PRESETS[provider].label, provider, baseUrl: PROVIDER_PRESETS[provider].baseUrl ?? "", modelId: "", enabled: true,
     generalChatCompatible: false, analysisCompatible: false, supportsStreaming: false, supportsTools: false, supportsStructuredOutput: false,
-    capabilitiesSource: "detected",
+    capabilitiesSource: "detected", maxOutputTokens: DEFAULT_REQUESTED_MAX_OUTPUT_TOKENS,
   };
 }
 
@@ -156,14 +157,14 @@ export function AssistantAiSettings() {
       });
       const { models, rawCount } = detection;
       if (controller.signal.aborted || operation.current !== current) return;
-      const selected = models.find((model) => model.id === profile.modelId);
-      const updated: ModelProfile = {
+      const updated: ModelProfile = applySelectedModelMetadata({
         ...profile,
         detectedModels: storedModels(models),
         generalChatCompatible: true, analysisCompatible: true, supportsStreaming: true,
         capabilitiesSource: "detected", modelsUpdatedAt: new Date().toISOString(), verifiedAt: new Date().toISOString(), lastVerificationError: undefined,
-      };
-      if (closeDraft && !selected) {
+      }, models, profile.modelId);
+      const selection = resolveSelectedModelMetadata(updated, updated.modelId);
+      if (closeDraft && !selection.selectionAvailable) {
         setDetectedModels(models); setDraft(updated);
         setMessage(profile.modelId ? "El modelo seleccionado ya no está disponible. Selecciona otro modelo antes de guardar." : `Se detectaron ${models.length} modelos. Selecciona uno para guardar el perfil.`);
         return;
@@ -179,6 +180,7 @@ export function AssistantAiSettings() {
         if (keyInput.current) keyInput.current.value = "";
         setDraft(undefined);
       } else if (draft?.id === updated.id) setDraft(updated);
+      if (!selection.selectionAvailable) setMessage("El modelo seleccionado ya no está disponible. Selecciona otro modelo antes de enviar mensajes.");
     } catch (error) {
       if (operation.current !== current || !mounted.current) return;
       if (controller.signal.aborted) setMessage(current.timedOut ? "La conexión tardó demasiado. Inténtalo de nuevo." : "La conexión fue cancelada.");
@@ -198,7 +200,8 @@ export function AssistantAiSettings() {
     if (draft.provider === "manual" && !manualUrlIsAllowed(draft.baseUrl)) { setMessage("La Base URL Manual debe ser segura y válida."); return; }
     if (detectedModels.length) {
       if (!draft.modelId) { setMessage("Selecciona un modelo de texto antes de guardar el perfil."); return; }
-      void saveModelProfile({ ...draft, name: draft.name.trim(), baseUrl: (PROVIDER_PRESETS[draft.provider].baseUrl ?? draft.baseUrl).replace(/\/+$/, ""), detectedModels: storedModels(detectedModels) }).then(() => {
+      const updated = applySelectedModelMetadata({ ...draft, name: draft.name.trim(), baseUrl: (PROVIDER_PRESETS[draft.provider].baseUrl ?? draft.baseUrl).replace(/\/+$/, ""), detectedModels: storedModels(detectedModels) }, detectedModels, draft.modelId);
+      void saveModelProfile(updated).then(() => {
         clearKey(); if (keyInput.current) keyInput.current.value = ""; setDraft(undefined); setMessage("Perfil guardado.");
       }).catch(() => setMessage("No se pudo guardar el perfil."));
       return;
@@ -208,7 +211,7 @@ export function AssistantAiSettings() {
 
   function selectModel(model: ProviderModel) {
     if (!draft) return;
-    setDraft({ ...draft, modelId: model.id });
+    setDraft(applySelectedModelMetadata(draft, detectedModels, model.id));
     setModelQuery(model.displayName);
     setModelListOpen(false);
   }
@@ -227,7 +230,7 @@ export function AssistantAiSettings() {
         return payload.model;
       });
       const models = [...detectedModels.filter((entry) => entry.id !== model.id), model];
-      setDetectedModels(models); setDraft({ ...draft, modelId: model.id, detectedModels: storedModels(models) }); setManualModelEntry(""); setManualEntryOpen(false); setMessage("Modelo validado y seleccionado. Guarda el perfil para persistirlo.");
+      setDetectedModels(models); setDraft(applySelectedModelMetadata({ ...draft, detectedModels: storedModels(models) }, models, model.id)); setManualModelEntry(""); setManualEntryOpen(false); setMessage("Modelo validado y seleccionado. Guarda el perfil para persistirlo.");
     } catch (error) {
       setMessage(error instanceof Error ? publicError({ error: error.message }) : "No se pudo validar el modelo indicado.");
     } finally { setBusyProfileId(undefined); }
@@ -266,7 +269,7 @@ export function AssistantAiSettings() {
           {draft.provider === "manual" ? <label className="text-sm font-semibold text-ink">Clave efímera<input ref={keyInput} aria-label="Clave efímera" className="filter-control mt-2" type="password" autoComplete="off" disabled={busy} onChange={(event) => setKey(keyScope(draft), event.target.value)} /><span className="mt-1 block font-normal text-muted">Solo vive en memoria.</span></label> : null}
           {detectedModels.length ? <div className="text-sm font-semibold text-ink md:col-span-2"><p>Modelo detectado</p><p className="mt-1 text-xs font-normal text-muted">{chatModels.length} modelos de texto detectados{specializedModelsCount ? ` · ${specializedModelsCount} modelos especializados no mostrados` : ""}</p><div className="relative mt-2"><input role="combobox" aria-label="Buscar modelo detectado" aria-expanded={modelListOpen} aria-controls="assistant-model-options" aria-activedescendant={modelListOpen && visibleModels[activeModelIndex] ? `assistant-model-${visibleModels[activeModelIndex].id}` : undefined} className="filter-control" value={modelQuery} disabled={busy} onFocus={() => setModelListOpen(true)} onKeyDown={(event) => { if (event.key === "ArrowDown") { event.preventDefault(); setModelListOpen(true); setActiveModelIndex((index) => Math.min(index + 1, Math.max(visibleModels.length - 1, 0))); } else if (event.key === "ArrowUp") { event.preventDefault(); setActiveModelIndex((index) => Math.max(index - 1, 0)); } else if (event.key === "Enter" && visibleModels[activeModelIndex]) { event.preventDefault(); selectModel(visibleModels[activeModelIndex]); } else if (event.key === "Escape") { setModelListOpen(false); } }} onChange={(event) => { setModelQuery(event.target.value); setActiveModelIndex(0); setModelListOpen(true); }} placeholder="Buscar por nombre o identificador" />{modelListOpen ? <ul id="assistant-model-options" role="listbox" className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-line bg-white p-1 shadow-lg">{visibleModels.map((model, index) => <li id={`assistant-model-${model.id}`} key={model.id} role="option" aria-selected={draft.modelId === model.id} className={`cursor-pointer rounded-lg px-3 py-2 ${index === activeModelIndex ? "bg-blue-50" : ""}`} onMouseDown={(event) => { event.preventDefault(); selectModel(model); }} title={model.id}><span className="block">{modelLabel(model, duplicateDisplayNames.has(model.displayName))}</span><span className="block font-mono text-xs font-normal text-muted">{model.id}</span><span className="block text-xs font-normal text-muted">{model.contextWindow?.toLocaleString("es-ES") ?? "Límite no informado"} entrada · {model.maxOutputTokens?.toLocaleString("es-ES") ?? "Límite no informado"} salida · Chat y análisis</span></li>)}{!visibleModels.length ? <li className="px-3 py-2 text-sm font-normal text-muted">No hay coincidencias.</li> : null}<li className="border-t border-line p-1"><button className="btn-secondary w-full" type="button" onMouseDown={(event) => { event.preventDefault(); setManualEntryOpen(true); }}>Introducir identificador manualmente</button></li></ul> : null}</div>{manualEntryOpen ? <div className="mt-2 flex gap-2"><input aria-label="Identificador manual de Gemini" className="filter-control" value={manualModelEntry} onChange={(event) => setManualModelEntry(event.target.value)} placeholder="gemini-model-id" /><button className="btn-secondary" type="button" disabled={busy} onClick={() => void addManualGeminiModel()}>Validar</button></div> : null}{draft.modelId ? <p className="mt-1 font-mono text-xs font-normal text-muted">Seleccionado: {draft.modelId}</p> : null}</div> : null}
           {draft.provider === "gemini" && !detectedModels.length ? <div className="text-sm font-semibold text-ink md:col-span-2"><p>Modelo Gemini manual</p><div className="mt-2 flex gap-2"><input aria-label="Identificador manual de Gemini" className="filter-control" value={manualModelEntry} onChange={(event) => setManualModelEntry(event.target.value)} placeholder="gemini-model-id" /><button className="btn-secondary" type="button" disabled={busy} onClick={() => void addManualGeminiModel()}>Validar</button></div></div> : null}
-          <details className="md:col-span-2"><summary className="cursor-pointer text-sm font-semibold text-ink">Opciones avanzadas</summary><div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="text-sm text-muted">Ventana manual<input className="filter-control mt-1" type="number" min="1" disabled={busy} value={draft.manualContextWindow ?? ""} onChange={(event) => setDraft({ ...draft, manualContextWindow: event.target.value ? Number(event.target.value) : undefined })} /></label><label className="text-sm text-muted">Salida máxima<input className="filter-control mt-1" type="number" min="1" disabled={busy} value={draft.maxOutputTokens ?? ""} onChange={(event) => setDraft({ ...draft, maxOutputTokens: event.target.value ? Number(event.target.value) : undefined })} /></label></div></details>
+          <details className="md:col-span-2"><summary className="cursor-pointer text-sm font-semibold text-ink">Opciones avanzadas</summary><div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="text-sm text-muted">Ventana manual<input className="filter-control mt-1" type="number" min="1" disabled={busy} value={draft.manualContextWindow ?? ""} onChange={(event) => setDraft({ ...draft, manualContextWindow: event.target.value ? Number(event.target.value) : undefined })} /></label><label className="text-sm text-muted">Salida solicitada máxima<input className="filter-control mt-1" type="number" min="1" disabled={busy} value={draft.maxOutputTokens ?? DEFAULT_REQUESTED_MAX_OUTPUT_TOKENS} onChange={(event) => setDraft({ ...draft, maxOutputTokens: event.target.value ? Number(event.target.value) : undefined })} /></label></div></details>
           <div className="flex flex-wrap gap-2 md:col-span-2"><button className="btn-primary" type="submit" disabled={busy}>{busy ? <><LoaderCircle aria-hidden="true" className="animate-spin" />Conectando y guardando…</> : "Guardar perfil"}</button><button className="btn-secondary" type="button" disabled={busy} onClick={() => { clearKey(); setDraft(undefined); setDetectedModels([]); setMessage(undefined); }}>Cancelar</button></div>
         </form> : null}
 

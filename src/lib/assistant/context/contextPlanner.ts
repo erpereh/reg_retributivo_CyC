@@ -10,6 +10,7 @@ export interface ContextCandidate {
 export interface ContextPlanInput {
   readonly strategy: ContextStrategy; readonly responseMode?: ResponseMode; readonly candidates: readonly ContextCandidate[]; readonly scope: DocumentScope;
   readonly contextWindow: number; readonly promptTokens: number; readonly toolSchemaTokens: number;
+  readonly outputTokens?: number;
   readonly safetyMarginPercent?: number; readonly warningThresholdPercent?: number; readonly compactionThresholdPercent?: number;
 }
 export interface ContextPlan { readonly items: readonly ContextCandidate[]; readonly budget: TokenBudget; readonly actualStrategy: ContextStrategy; readonly actualResponseMode: ResponseMode }
@@ -25,7 +26,7 @@ export class ContextPlanner {
   plan(input: ContextPlanInput): ContextPlan {
     if (!input.scope) throw new Error("El scope de contexto es obligatorio.");
     if (input.candidates.some((item) => !Number.isFinite(item.tokens) || item.tokens < 0 || !Number.isInteger(item.tokens) || !Number.isFinite(item.relevance) || item.relevance < 0 || item.relevance > 1)) throw new Error("Los candidatos de contexto no son válidos.");
-    const capacity = calculateTokenBudget({ contextWindow: input.contextWindow, promptTokens: input.promptTokens, toolSchemaTokens: input.toolSchemaTokens, contextTokens: 0, safetyMarginPercent: input.safetyMarginPercent, warningThresholdPercent: input.warningThresholdPercent, compactionThresholdPercent: input.compactionThresholdPercent });
+    const capacity = calculateTokenBudget({ contextWindow: input.contextWindow, promptTokens: input.promptTokens, toolSchemaTokens: input.toolSchemaTokens, contextTokens: 0, outputTokens: input.outputTokens, safetyMarginPercent: input.safetyMarginPercent, warningThresholdPercent: input.warningThresholdPercent, compactionThresholdPercent: input.compactionThresholdPercent });
     const structuredFacts = new Set(input.candidates.filter((item) => item.kind === "tool").map((item) => item.factKey));
     const seen = new Set<string>();
     const relevant = input.candidates.filter((item) => sameScope(item.scope, input.scope) && item.relevance > 0)
@@ -40,7 +41,7 @@ export class ContextPlanner {
       if (contextTokens + candidate.tokens > capacity.availableContextTokens) continue;
       items.push(candidate); contextTokens += candidate.tokens;
     }
-    const budget = calculateTokenBudget({ contextWindow: input.contextWindow, promptTokens: input.promptTokens, toolSchemaTokens: input.toolSchemaTokens, contextTokens, safetyMarginPercent: input.safetyMarginPercent, warningThresholdPercent: input.warningThresholdPercent, compactionThresholdPercent: input.compactionThresholdPercent });
+    const budget = calculateTokenBudget({ contextWindow: input.contextWindow, promptTokens: input.promptTokens, toolSchemaTokens: input.toolSchemaTokens, contextTokens, outputTokens: input.outputTokens, safetyMarginPercent: input.safetyMarginPercent, warningThresholdPercent: input.warningThresholdPercent, compactionThresholdPercent: input.compactionThresholdPercent });
     return { items, budget, actualStrategy: input.strategy, actualResponseMode: input.responseMode ?? "strict" };
   }
 }

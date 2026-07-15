@@ -46,10 +46,15 @@ describe("assistant domain", () => {
     ];
 
     const converted = convertConversationToAnalysis(conversation, messages, "analysis-1", "v1", "2026-07-13T11:00:00.000Z");
-    expect(converted.conversation).toMatchObject({ type: "analysis", analysisId: "analysis-1", analysisVersion: "v1" });
+    expect(converted.conversation).toMatchObject({ type: "analysis", analysisId: "analysis-1", analysisVersion: "v1", title: "Análisis activo" });
     expect(converted.messages[0].contextOrigin).toBe("general");
     expect(converted.event.event).toEqual({ type: "context_added", contextId: "analysis-1", label: "Análisis activo" });
     expect(() => convertConversationToAnalysis(converted.conversation, messages, "analysis-2", "v2")).toThrow(/otra conversación/i);
+  });
+
+  test("preserves a custom title while converting to analysis", () => {
+    const converted = convertConversationToAnalysis({ ...conversation, title: "Consulta de cierre" }, [], "analysis-1", "v1", "2026-07-13T11:00:00.000Z");
+    expect(converted.conversation.title).toBe("Consulta de cierre");
   });
 
   test.each(["streaming", "completed", "stopped", "interrupted", "failed"])("accepts the %s message status", (status) => {

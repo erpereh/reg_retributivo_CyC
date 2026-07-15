@@ -169,7 +169,7 @@ export function convertConversationToAnalysis(
   if (conversation.type === "analysis") {
     throw new Error("Para asociar otro análisis debe crearse otra conversación.");
   }
-  const converted: Conversation = { ...conversation, type: "analysis", analysisId, analysisVersion, updatedAt: now };
+  const converted: Conversation = { ...conversation, ...(conversation.title === "Consulta general" ? { title: "Análisis activo" } : {}), type: "analysis", analysisId, analysisVersion, updatedAt: now };
   return {
     conversation: converted,
     messages: messages.map((message) => ({ ...message, contextOrigin: "general" })),

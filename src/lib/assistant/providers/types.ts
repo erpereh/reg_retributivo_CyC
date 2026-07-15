@@ -48,7 +48,11 @@ export type ProviderStreamEvent =
 export interface AdapterAuth { readonly apiKey: string; readonly signal?: AbortSignal }
 export interface ModelRequest extends AdapterAuth { readonly modelId: string }
 export interface TokenCountRequest extends ModelRequest { readonly text: string }
-export interface ToolPlanRequest extends ModelRequest { readonly messages: readonly ProviderMessage[]; readonly tools: readonly ProviderTool[] }
+export interface ToolPlanRequest extends ModelRequest {
+  readonly messages: readonly ProviderMessage[];
+  readonly tools: readonly ProviderTool[];
+  readonly maxOutputTokens?: number;
+}
 export interface StreamResponseRequest extends ModelRequest {
   readonly messages: readonly ProviderMessage[];
   readonly maxOutputTokens?: number;
@@ -83,6 +87,11 @@ const PUBLIC_MESSAGES: Readonly<Record<ProviderErrorClassification, string>> = {
   provider: "El proveedor devolvió una respuesta no válida.",
 };
 const PUBLIC_MESSAGES_BY_CODE: Readonly<Record<string, string>> = {
+  context_window_unknown: "No se conoce la ventana de contexto del modelo seleccionado.",
+  context_budget_invalid: "No se pudo calcular el presupuesto de contexto.",
+  context_overflow: "El contenido seleccionado supera la ventana del modelo.",
+  context_compaction_insufficient: "El contexto sigue siendo demasiado grande después de compactarlo.",
+  provider_http_413: "La solicitud supera el tamaño admitido por el proveedor.",
   empty_response: "El modelo no devolvió contenido.",
   tool_round_limit: "El asistente necesitó demasiadas rondas de herramientas.",
   stream_truncated: "La respuesta se interrumpió antes de completarse.",

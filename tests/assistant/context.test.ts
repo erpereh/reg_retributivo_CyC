@@ -23,6 +23,27 @@ describe("context planning, token budget and compaction", () => {
     expect(() => calculateTokenBudget({ contextWindow: 3_000, promptTokens: 500, toolSchemaTokens: 500, contextTokens: 1 })).toThrow(/ventana/i);
   });
 
+  it("uses the requested output reservation throughout context planning diagnostics", () => {
+    const plan = new ContextPlanner().plan({
+      strategy: "automatic",
+      candidates: [],
+      scope: { type: "analysis", analysisId: "a1" },
+      contextWindow: 100_000,
+      promptTokens: 200,
+      toolSchemaTokens: 300,
+      outputTokens: 2_048,
+    });
+
+    expect(plan.budget).toMatchObject({
+      contextWindow: 100_000,
+      promptTokens: 200,
+      toolSchemaTokens: 300,
+      contextTokens: 0,
+      reservedOutputTokens: 2_048,
+      safetyMarginTokens: 10_000,
+    });
+  });
+
   it("warns at 75 percent and compacts at 85 percent", () => {
     expect(calculateTokenBudget({ contextWindow: 10_000, promptTokens: 500, toolSchemaTokens: 500, contextTokens: 3_500 }).warning).toBe(false);
     expect(calculateTokenBudget({ contextWindow: 10_000, promptTokens: 500, toolSchemaTokens: 500, contextTokens: 4_600 }).warning).toBe(true);

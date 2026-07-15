@@ -10,6 +10,9 @@ export interface TokenBudgetInput {
 }
 export interface TokenBudget {
   readonly contextWindow: number;
+  readonly promptTokens: number;
+  readonly toolSchemaTokens: number;
+  readonly contextTokens: number;
   readonly reservedOutputTokens: number;
   readonly safetyMarginTokens: number;
   readonly availableContextTokens: number;
@@ -34,7 +37,8 @@ export function calculateTokenBudget(input: TokenBudgetInput): TokenBudget {
   const contextUsagePercent = availableContextTokens === 0 ? (input.contextTokens ? 100 : 0) : (input.contextTokens / availableContextTokens) * 100;
   const totalTokens = input.promptTokens + input.toolSchemaTokens + input.contextTokens + reservedOutputTokens + safetyMarginTokens;
   return {
-    contextWindow: input.contextWindow, reservedOutputTokens, safetyMarginTokens, availableContextTokens, contextUsagePercent, totalTokens,
+    contextWindow: input.contextWindow, promptTokens: input.promptTokens, toolSchemaTokens: input.toolSchemaTokens, contextTokens: input.contextTokens,
+    reservedOutputTokens, safetyMarginTokens, availableContextTokens, contextUsagePercent, totalTokens,
     warning: contextUsagePercent >= (input.warningThresholdPercent ?? 75),
     requiresCompaction: contextUsagePercent >= (input.compactionThresholdPercent ?? 85),
     exceedsWindow: totalTokens > input.contextWindow,

@@ -133,6 +133,7 @@ function finishReasonCode(reason: string): string {
 
 function geminiHttpError(status: number, providerStatus?: string, detail?: string): ProviderAdapterError {
   const normalized = `${providerStatus ?? ""} ${detail ?? ""}`.toUpperCase();
+  if (status === 413) return new ProviderAdapterError("context", "provider_http_413", status);
   if (status === 401 || /UNAUTHENTICATED|API.?KEY|INVALID.?KEY|CREDENTIAL/.test(normalized)) return new ProviderAdapterError("auth", "gemini_auth_error", status);
   if (status === 403 || /PERMISSION|FORBIDDEN|ACCESS.?DENIED/.test(normalized)) return new ProviderAdapterError("auth", "gemini_forbidden", status);
   if (status === 404 || /NOT.?FOUND|MODEL/.test(normalized)) return new ProviderAdapterError("incompatible", "gemini_model_not_found", status);
@@ -241,6 +242,7 @@ export class GeminiAdapter implements AIProviderAdapter {
         model: modelId(request.modelId),
         contents: geminiContents(request.messages),
         config: {
+          maxOutputTokens: request.maxOutputTokens,
           abortSignal: request.signal,
           ...(geminiSystemInstruction(request.messages) ? { systemInstruction: geminiSystemInstruction(request.messages) } : {}),
           tools: [{ functionDeclarations: request.tools.map((tool) => ({ name: tool.name, description: tool.description, parametersJsonSchema: tool.parameters })) }],
