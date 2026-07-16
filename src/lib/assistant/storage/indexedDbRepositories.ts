@@ -5,6 +5,7 @@ import { DirectSearchIndex, type SearchFacets, type SearchIndexRecord } from "@/
 import type { DocumentScope } from "@/lib/assistant/domain";
 import { chatActionSchema, cleanupJobSchema, contextSnapshotSchema } from "@/lib/assistant/schemas";
 import { migrateLegacyAssistantModels } from "@/lib/assistant/storage/modelCatalogMigration";
+import { migrateAssistantConversationCoherence } from "@/lib/assistant/storage/conversationCoherenceMigration";
 import type { ModelCatalogEntry, ProviderConfig } from "@/lib/assistant/catalog/domain";
 import type { z } from "zod";
 import type {
@@ -253,6 +254,7 @@ function samePersistedAction(left: ChatAction, right: ChatAction): boolean {
 export async function createIndexedDbRepositories(options: IndexedDbRepositoriesOptions = {}): Promise<AssistantRepositories> {
   const db = await openAssistantDatabase(options.factory, options.dbName);
   await migrateLegacyAssistantModels(db);
+  await migrateAssistantConversationCoherence(db);
   const conversations = new IndexedConversationRepository(db);
   const messages = new IndexedMessageRepository(db);
   const events = new IndexedConversationCollectionRepository<ChatEvent>(db, "events");

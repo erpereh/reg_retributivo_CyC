@@ -125,8 +125,8 @@ describe("assistant conversation UI", () => {
 
   test("loads safe Markdown dynamically, rejects raw HTML and unsafe links, and renders only typed actions", async () => {
     const factory = new IDBFactory();
-    await seedUi(factory, "safe-markdown");
-    render(<AssistantProvider factory={factory} dbName="safe-markdown"><AssistantView /></AssistantProvider>);
+    await seedUi(factory, "safe-markdown", "analysis");
+    render(<AssistantProvider activeAnalysis={activeAnalysis} factory={factory} dbName="safe-markdown"><AssistantView /></AssistantProvider>);
 
     expect(await screen.findByText("Preparando formato seguro…")).toBeTruthy();
     expect(await screen.findByRole("heading", { name: "Resumen" })).toBeTruthy();
@@ -167,8 +167,8 @@ describe("assistant conversation UI", () => {
 
   test("distinguishes source lifecycle states and expands context and token details", async () => {
     const factory = new IDBFactory();
-    await seedUi(factory, "source-states");
-    render(<AssistantProvider factory={factory} dbName="source-states"><AssistantView /></AssistantProvider>);
+    await seedUi(factory, "source-states", "analysis");
+    render(<AssistantProvider activeAnalysis={activeAnalysis} factory={factory} dbName="source-states"><AssistantView /></AssistantProvider>);
     await screen.findByText("Fuente disponible");
     expect(screen.getByText("Disponible")).toBeTruthy();
     expect(screen.getByText("Histórica no disponible")).toBeTruthy();

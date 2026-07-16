@@ -6,6 +6,7 @@ import {
   type ContextStrategy, type Conversation, type ModelPreferences, type PersistedDocumentMetadata, type ResponseMode, type SourceReference,
 } from "@/lib/assistant/domain";
 import { applyCompleteCatalogRefresh, catalogKey, type ModelCatalogEntry, type ProviderConfig } from "@/lib/assistant/catalog/domain";
+import { generalModelCompatibility, modelCompatibility } from "@/lib/assistant/catalog/compatibility";
 import { ProviderAdapterError } from "@/lib/assistant/providers/types";
 import { GENERAL_RETRIBUTIVO_PROMPT, type FakeAssistantAdapter } from "@/lib/assistant/providers/fakeAdapter";
 import { DEFAULT_ASSISTANT_SETTINGS, assistantSettingsSchema } from "@/lib/assistant/schemas";
@@ -31,6 +32,21 @@ const now = () => new Date().toISOString();
 const createId = (prefix: string) => `${prefix}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`;
 const withoutUndefined = <T extends object>(value: T): T => Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T;
 const newestConversations = (items: readonly Conversation[]) => [...items].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id));
+
+function asModelPreferences(value: AssistantStoredRecord | undefined): ModelPreferences | undefined {
+  if (!value || value.id !== "model-preferences" || !Array.isArray(value.favoriteCatalogEntryIds) || !value.favoriteCatalogEntryIds.every((id) => typeof id === "string")
+    || !Array.isArray(value.recentCatalogEntryIds) || !value.recentCatalogEntryIds.every((id) => typeof id === "string") || typeof value.updatedAt !== "string") return undefined;
+  if (value.lastCatalogEntryId !== undefined && typeof value.lastCatalogEntryId !== "string") return undefined;
+  return value as unknown as ModelPreferences;
+}
+
+function isAnalysisEvent(event: ChatEvent): boolean {
+  return ["context_added", "context_removed", "person_added", "person_removed", "analysis_updated", "indexing_completed"].includes(event.event.type);
+}
+
+function isAnalysisAction(action: ChatAction): boolean {
+  return "analysisId" in action.action;
+}
 
 export interface AssistantContextValue {
   ready: boolean;
@@ -272,10 +288,10 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       setMessageCursor(messagePage.nextCursor);
       setSources(selectedSources.filter((item): item is SourceReference => Boolean(item)));
       setRevealedSourceIds([]);
-      setEvents(selectedEvents);
-      setActions(selectedActions);
+      setEvents(selected.type === "analysis" ? selectedEvents : selectedEvents.filter((event) => !isAnalysisEvent(event)));
+      setActions(selected.type === "analysis" ? selectedActions : selectedActions.filter((action) => !isAnalysisAction(action)));
       setActionOutputs({});
-      setSnapshots(selectedSnapshots);
+      setSnapshots(selected.type === "analysis" ? selectedSnapshots.filter((snapshot) => !snapshot.analysisId || snapshot.analysisId === selected.analysisId) : selectedSnapshots.filter((snapshot) => !snapshot.analysisId));
       setDocuments(selectedDocuments);
       setIndexJobs(allIndexJobs.filter((job) => typeof job.documentId === "string" && selectedDocumentIds.has(job.documentId)));
       setNotice(undefined);
@@ -328,7 +344,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
         const [storedProviders, storedCatalog, storedPreferences, storedSettings, conversationPage] = await Promise.all([
           repositories.providerConfigs.listAll(),
           repositories.modelCatalog.listAll(),
-          repositories.modelPreferences.get("model-preferences"),
+          repositories.modelPreferences.get("model-preferences").catch(() => undefined),
           repositories.assistantSettings.get(DEFAULT_ASSISTANT_SETTINGS.id),
           repositories.conversations.list({ limit: CONVERSATION_PAGE_SIZE }),
         ]);
@@ -341,7 +357,8 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
         assistantSettingsRef.current = repairedSettings;
         setProviderConfigs(storedProviders);
         setModelCatalog(storedCatalog);
-        if (storedPreferences) setModelPreferences(storedPreferences as unknown as ModelPreferences);
+        const repairedPreferences = asModelPreferences(storedPreferences);
+        if (repairedPreferences) setModelPreferences(repairedPreferences);
         setAssistantSettings(repairedSettings);
         setConversations(restoredConversations);
         setConversationCursor(conversationPage.nextCursor);
@@ -584,9 +601,10 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     setNotice(undefined);
     setError(undefined);
     const createdAt = now();
+    const enabledProviderIds = new Set(providerConfigs.filter((provider) => provider.enabled).map((provider) => provider.id));
     const lastProviderId = modelCatalog.find((entry) => entry.id === modelPreferences.lastCatalogEntryId)?.providerId;
-    const preferredEntry = modelCatalog.find((entry) => entry.id === modelPreferences.lastCatalogEntryId && entry.availability === "available" && entry.capabilities.chat === true)
-      ?? modelCatalog.find((entry) => entry.providerId === lastProviderId && entry.availability === "available" && entry.capabilities.chat === true);
+    const preferredEntry = modelCatalog.find((entry) => entry.id === modelPreferences.lastCatalogEntryId && enabledProviderIds.has(entry.providerId) && generalModelCompatibility(entry).selectable)
+      ?? modelCatalog.find((entry) => entry.providerId === lastProviderId && enabledProviderIds.has(entry.providerId) && generalModelCompatibility(entry).selectable);
     const created: Conversation = {
       id: createId("conversation"), type: "general", title: "Consulta general", associatedPersonIds: [], ...(preferredEntry ? { providerId: preferredEntry.providerId, modelId: preferredEntry.canonicalModelId } : {}),
       responseMode: assistantSettingsRef.current.responseMode, contextStrategy: assistantSettingsRef.current.contextStrategy, status: "active", createdAt, updatedAt: createdAt,
@@ -617,7 +635,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       }
       if (mountedRef.current && selectionIntentRef.current === selectionIntent && contentGeneration === contentGenerationRef.current) setSelectionLoading(false);
     }
-  }, [invalidateConversationRun, modelCatalog, modelPreferences.lastCatalogEntryId]);
+  }, [invalidateConversationRun, modelCatalog, modelPreferences.lastCatalogEntryId, providerConfigs]);
 
   const loadMoreConversations = useCallback(async () => {
     if (!conversationCursor || conversationPageLoadingRef.current) return;
@@ -1187,16 +1205,16 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
   const selectConversationModel = useCallback(async (providerId: string, modelId: string) => {
     const entry = modelCatalog.find((item) => item.providerId === providerId && item.canonicalModelId === modelId);
     const selected = conversationRef.current;
-    if (!entry || !selected) return;
-    const compatible = entry.availability === "available" && entry.capabilities.chat === true && (selected.type === "general" || entry.capabilities.tools === true);
-    if (!compatible) {
+    if (!entry || !selected || !providerConfigs.some((provider) => provider.id === providerId && provider.enabled)) return;
+    const compatibility = modelCompatibility(entry, selected.type);
+    if (!compatibility.selectable) {
       if (selected.type === "analysis" && entry.capabilities.tools === "unknown") await checkModelCompatibility(entry);
       return;
     }
     await updateSelectedConversation({ providerId, modelId });
     const recent = [entry.id, ...modelPreferences.recentCatalogEntryIds.filter((id) => id !== entry.id)].slice(0, 12);
     await persistModelPreferences({ ...modelPreferences, recentCatalogEntryIds: recent, lastCatalogEntryId: entry.id, updatedAt: now() });
-  }, [checkModelCompatibility, modelCatalog, modelPreferences, persistModelPreferences, updateSelectedConversation]);
+  }, [checkModelCompatibility, modelCatalog, modelPreferences, persistModelPreferences, providerConfigs, updateSelectedConversation]);
   const openModelSettings = useCallback(() => onNavigate?.({ type: "settings_ai" }), [onNavigate]);
 
   const availablePersonIds = useMemo(() => conversation?.type === "analysis" && activeAnalysis && activeAnalysis.id === conversation.analysisId
@@ -1209,9 +1227,9 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     ready, conversations, hasMoreConversations: Boolean(conversationCursor), conversation, messages, repeatableMessageIds, hasMoreMessages: Boolean(messageCursor), sources, revealedSourceIds, events, actions, actionOutputs, resolvingActionIds, snapshots, documents, indexJobs,
     streaming, selectionLoading, conversationTransitionPending, announcement, notice, error, createGeneralConversation, loadMoreConversations, selectConversation, renameConversation, archiveConversation, deleteConversation,
     loadMoreMessages, send, stop, retryResponse, regenerateResponse, copyResponse, acceptAction, rejectAction, convertToActiveAnalysis, associatePerson, continuePersonInAssistant, addPerson, removePerson, setPrimaryPerson,
-    requestPersonProfile, openModelSettings, updateConversationPreferences, selectConversationModel, availablePersonIds, people: conversation?.type === "analysis" ? activeAnalysis?.result.people ?? [] : [], canSend: Boolean(adapter) || Boolean(conversation && modelCatalog.some((entry) => entry.providerId === conversation.providerId && entry.canonicalModelId === conversation.modelId && entry.availability === "available" && entry.capabilities.chat === true && (conversation.type === "general" || entry.capabilities.tools === true))), providerConfigs, modelCatalog, modelPreferences, saveProviderConfig, deleteProviderConfig, checkProvider, refreshProviderCatalog, checkModelCompatibility, toggleModelFavorite, assistantSettings,
+    requestPersonProfile, openModelSettings, updateConversationPreferences, selectConversationModel, availablePersonIds, people: conversation?.type === "analysis" && activeAnalysis && activeAnalysis.id === conversation.analysisId ? activeAnalysis.result.people : [], canSend: Boolean(adapter) || Boolean(conversation && providerConfigs.some((provider) => provider.id === conversation.providerId && provider.enabled) && modelCatalog.some((entry) => entry.providerId === conversation.providerId && entry.canonicalModelId === conversation.modelId && modelCompatibility(entry, conversation.type).selectable)), providerConfigs, modelCatalog, modelPreferences, saveProviderConfig, deleteProviderConfig, checkProvider, refreshProviderCatalog, checkModelCompatibility, toggleModelFavorite, assistantSettings,
     updateAssistantSettings, clearAssistantContent,
-  }), [acceptAction, actionOutputs, actions, addPerson, announcement, archiveConversation, assistantSettings, associatePerson, availablePersonIds, checkModelCompatibility, checkProvider, clearAssistantContent, conversation, conversationCursor, conversations, deleteProviderConfig, documents,
+  }), [acceptAction, actionOutputs, actions, activeAnalysis, adapter, addPerson, announcement, archiveConversation, assistantSettings, associatePerson, availablePersonIds, checkModelCompatibility, checkProvider, clearAssistantContent, conversation, conversationCursor, conversations, deleteProviderConfig, documents,
     convertToActiveAnalysis, continuePersonInAssistant, copyResponse, createGeneralConversation, deleteConversation, error, events, loadMoreConversations,
     loadMoreMessages, messageCursor, messages, modelCatalog, modelPreferences, notice, openModelSettings, providerConfigs, refreshProviderCatalog, regenerateResponse, removePerson, renameConversation, repeatableMessageIds, requestPersonProfile, retryResponse,
     conversationTransitionPending, indexJobs, rejectAction, revealedSourceIds, resolvingActionIds, saveProviderConfig, selectConversation, selectConversationModel, selectionLoading, send, setPrimaryPerson, snapshots, sources, stop, streaming, toggleModelFavorite, updateAssistantSettings, updateConversationPreferences]);
