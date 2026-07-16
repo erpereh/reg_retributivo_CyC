@@ -29,4 +29,17 @@ describe("immutable analysis scope snapshots", () => {
     expect(() => assertToolAllowedBySnapshot(full, "searchDocumentChunks", { analysisId: "a1", query: "diferencia", limit: 10 })).not.toThrow();
     expect(() => assertToolAllowedBySnapshot(full, "searchDocumentChunks", { analysisId: "a1", query: "", limit: 50 })).toThrow("tool_query_too_broad");
   });
+
+  it("uses the sole associated person for a pronoun-like request and requires clarification for several", async () => {
+    const sole = await createScopeSnapshot({ analysisId: "a1", analysisVersion: "v1", strategy: "associated_people", associatedPersonIds: ["10048"], documentIds: [], allowedTools: ["getPersonProfile"] });
+    expect(normalizeScopedToolArguments(sole, "getPersonProfile", { analysisId: "a1" })).toEqual({ analysisId: "a1", personId: "10048" });
+    const several = await createScopeSnapshot({ analysisId: "a1", analysisVersion: "v1", strategy: "associated_people", associatedPersonIds: ["10048", "10050"], documentIds: [], allowedTools: ["getPersonProfile"] });
+    expect(() => normalizeScopedToolArguments(several, "getPersonProfile", { analysisId: "a1" })).toThrow("person_clarification_required");
+  });
+
+  it("binds tool arguments to the authoritative analysis instead of trusting the model", async () => {
+    const snapshot = await createScopeSnapshot({ analysisId: "a1", analysisVersion: "v1", strategy: "associated_people", associatedPersonIds: ["10048"], primaryPersonId: "10048", documentIds: [], allowedTools: ["getPersonProfile"] });
+
+    expect(normalizeScopedToolArguments(snapshot, "getPersonProfile", { analysisId: "current-analysis", personId: "10048" })).toEqual({ analysisId: "a1", personId: "10048" });
+  });
 });

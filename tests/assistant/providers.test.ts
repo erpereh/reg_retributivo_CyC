@@ -155,6 +155,64 @@ describe("provider adapters", () => {
     }));
   });
 
+  test("preserves Gemini 3 thought signatures and groups parallel function responses in original order", async () => {
+    const generateContent = vi.fn()
+      .mockResolvedValueOnce({ candidates: [{ content: { role: "model", parts: [
+        { functionCall: { id: "call-1", name: "getPersonProfile", args: { analysisId: "a1", personId: "10048" } }, thoughtSignature: "signature-1" },
+        { functionCall: { id: "call-2", name: "getPersonConcepts", args: { analysisId: "a1", personId: "10048" } } },
+      ] } }], functionCalls: [] })
+      .mockResolvedValueOnce({ functionCalls: [] });
+    const models = { list: vi.fn(), get: vi.fn(), countTokens: vi.fn(), generateContent, generateContentStream: vi.fn() };
+    const adapter = new GeminiAdapter({ clientFactory: () => ({ models }) as never });
+    const plan = await adapter.planTools({ apiKey: "secret", modelId: "gemini-3.1-flash-lite", messages: [{ role: "user", content: "Consulta" }], tools: [] });
+    expect(plan.toolCalls).toEqual([
+      expect.objectContaining({ id: "call-1", providerContext: { kind: "gemini", partIndex: 0, thoughtSignature: "signature-1" } }),
+      expect.objectContaining({ id: "call-2", providerContext: { kind: "gemini", partIndex: 1 } }),
+    ]);
+
+    await adapter.planTools({ apiKey: "secret", modelId: "gemini-3.1-flash-lite", tools: [], messages: [
+      { role: "assistant", content: "", toolCalls: plan.toolCalls },
+      { role: "tool", toolCallId: "call-1", toolName: "getPersonProfile", content: JSON.stringify({ ok: true, data: { personId: "10048" } }) },
+      { role: "tool", toolCallId: "call-2", toolName: "getPersonConcepts", content: JSON.stringify({ ok: true, data: { personId: "10048", concepts: [] } }) },
+    ] });
+    const continuation = generateContent.mock.calls[1]![0];
+    expect(continuation.contents).toEqual([
+      { role: "model", parts: [
+        { functionCall: { id: "call-1", name: "getPersonProfile", args: { analysisId: "a1", personId: "10048" } }, thoughtSignature: "signature-1" },
+        { functionCall: { id: "call-2", name: "getPersonConcepts", args: { analysisId: "a1", personId: "10048" } } },
+      ] },
+      { role: "user", parts: [
+        { functionResponse: { id: "call-1", name: "getPersonProfile", response: { ok: true, data: { personId: "10048" } } } },
+        { functionResponse: { id: "call-2", name: "getPersonConcepts", response: { ok: true, data: { personId: "10048", concepts: [] } } } },
+      ] },
+    ]);
+  });
+
+  test("keeps tool declarations but disables new Gemini calls for the final response", async () => {
+    const generateContent = vi.fn(async () => ({ candidates: [{ content: { parts: [{ text: "Respuesta final" }] }, finishReason: "STOP" }] }));
+    const models = { list: vi.fn(), get: vi.fn(), countTokens: vi.fn(), generateContent, generateContentStream: vi.fn() };
+    const adapter = new GeminiAdapter({ clientFactory: () => ({ models }) as never });
+    for await (const _ of adapter.streamResponse({
+      apiKey: "secret",
+      modelId: "gemini-3.1-flash-lite",
+      tools: [{ name: "getPersonProfile", description: "Ficha", parameters: { type: "object" } }],
+      messages: [
+        { role: "assistant", content: "", toolCalls: [{ id: "call-1", name: "getPersonProfile", args: {}, providerContext: { kind: "gemini", partIndex: 0, thoughtSignature: "signature-1" } }] },
+        { role: "tool", toolCallId: "call-1", toolName: "getPersonProfile", content: JSON.stringify({ ok: true }) },
+      ],
+    })) { /* consume */ }
+
+    expect(generateContent).toHaveBeenCalledWith(expect.objectContaining({ config: expect.objectContaining({
+      tools: [{ functionDeclarations: [{ name: "getPersonProfile", description: "Ficha", parametersJsonSchema: { type: "object" } }] }],
+      toolConfig: { functionCallingConfig: { mode: "NONE" } },
+    }) }));
+  });
+
+  test("rejects a Gemini 3 function call without its mandatory thought signature", async () => {
+    const models = { list: vi.fn(), get: vi.fn(), countTokens: vi.fn(), generateContent: vi.fn(async () => ({ candidates: [{ content: { parts: [{ functionCall: { id: "call-1", name: "getPersonProfile", args: {} } }] } }] })), generateContentStream: vi.fn() };
+    await expect(new GeminiAdapter({ clientFactory: () => ({ models }) as never }).planTools({ apiKey: "secret", modelId: "gemini-3.1-flash-lite", messages: [{ role: "user", content: "Consulta" }], tools: [] })).rejects.toMatchObject({ code: "gemini_tool_context_missing" });
+  });
+
   test("sends Gemini system guidance as systemInstruction instead of a user turn", async () => {
     const generateContent = vi.fn(async () => ({ candidates: [{ content: { parts: [{ text: "Hola" }] }, finishReason: "STOP" }] }));
     const models = { list: vi.fn(), get: vi.fn(), countTokens: vi.fn(), generateContent, generateContentStream: vi.fn() };

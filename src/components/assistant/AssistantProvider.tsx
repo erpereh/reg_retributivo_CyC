@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  sanitizeChatContent, type AssistantSettings, type ChatAction, type ChatEvent, type ChatMessage,
+  resolveChatContent, type AssistantSettings, type ChatAction, type ChatEvent, type ChatMessage,
   type ContextStrategy, type Conversation, type ModelPreferences, type PersistedDocumentMetadata, type ResponseMode, type SourceReference,
 } from "@/lib/assistant/domain";
 import { applyCompleteCatalogRefresh, catalogKey, providerRuntimeDescriptor, type ModelCatalogEntry, type ProviderConfig } from "@/lib/assistant/catalog/domain";
@@ -137,6 +137,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
   const activeAnalysisRef = useRef(activeAnalysis);
   const configurationMutationRef = useRef<Promise<void>>(Promise.resolve());
   const conversationMutationRef = useRef<Promise<void>>(Promise.resolve());
+  const selectedConversationMutationRef = useRef<Promise<void>>(Promise.resolve());
   const selectionIntentSequenceRef = useRef(0);
   const selectionIntentRef = useRef<SelectionIntent | undefined>(undefined);
   const createInFlightRef = useRef<SelectionIntent | undefined>(undefined);
@@ -746,6 +747,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       if (conversationRef.current?.id === updated.id) { conversationRef.current = updated; setConversation(updated); }
     });
     conversationMutationRef.current = operation.catch(() => undefined);
+    selectedConversationMutationRef.current = operation.catch(() => undefined);
     return operation;
   }, []);
 
@@ -824,6 +826,8 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
 
   const send = useCallback(async (rawText: string) => {
     if (!conversation || !rawText.trim() || streaming || selectionLoading || deletedConversationsRef.current.has(conversation.id)) return;
+    await selectedConversationMutationRef.current;
+    if (conversationRef.current?.id !== conversation.id) return;
     const authoritative = await repositoriesRef.current?.conversations.get(conversation.id);
     if (!authoritative || authoritative.status !== "active") {
       if (authoritative) { conversationRef.current = authoritative; setConversation(authoritative); setNotice("Esta conversación es histórica y de solo lectura."); }
@@ -832,16 +836,23 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     }
     setError(undefined); setNotice(undefined);
     let content: string;
+    let explicitPersonIds: string[] = [];
     try {
-      const knownPeople = conversation.type === "analysis" && activeAnalysis && activeAnalysis.id === conversation.analysisId ? activeAnalysis.result.people : [];
-      content = sanitizeChatContent(rawText, knownPeople, conversation.type);
-    } catch {
-      setError("No se puede guardar la pregunta porque contiene una referencia personal no identificada.");
+      const knownPeople = authoritative.type === "analysis" && activeAnalysis && activeAnalysis.id === authoritative.analysisId ? activeAnalysis.result.people : [];
+      const fullAnalysis = authoritative.contextStrategy === "full_analysis" || authoritative.contextStrategy === "full";
+      const allowedPersonIds = authoritative.type === "analysis" ? (fullAnalysis ? knownPeople.map((person) => person.employeeNumber) : authoritative.associatedPersonIds) : undefined;
+      const resolved = resolveChatContent(rawText, knownPeople, authoritative.type, allowedPersonIds, authoritative.primaryPersonId);
+      content = resolved.content;
+      explicitPersonIds = resolved.explicitPersonIds;
+    } catch (error) {
+      if (error instanceof Error && error.message === "ambiguous_person_mention") setError("Hay varias personas que coinciden. Escribe el nombre completo, indica la matrícula o selecciónala en Personas asociadas.");
+      else if (error instanceof Error && error.message === "person_outside_authorized_scope") setError("La persona indicada no está dentro del alcance. Añádela en Personas asociadas o usa Análisis completo.");
+      else setError("No se puede guardar la pregunta porque contiene una referencia personal no identificada.");
       return;
     }
     const createdAt = now();
-    const selectedCatalogEntry = modelCatalog.find((entry) => entry.providerId === conversation.providerId && entry.canonicalModelId === conversation.modelId
-      && entry.availability === "available" && entry.capabilities.chat === true && (conversation.type === "general" || entry.capabilities.tools === true));
+    const selectedCatalogEntry = modelCatalog.find((entry) => entry.providerId === authoritative.providerId && entry.canonicalModelId === authoritative.modelId
+      && entry.availability === "available" && entry.capabilities.chat === true && (authoritative.type === "general" || entry.capabilities.tools === true));
     const selectedProviderConfig = selectedCatalogEntry ? providerConfigs.find((provider) => provider.id === selectedCatalogEntry.providerId && provider.enabled) : undefined;
     if ((!selectedCatalogEntry || !selectedProviderConfig) && !adapter) {
       setError("No hay modelos configurados.");
@@ -850,14 +861,13 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     const modelProfileId = selectedCatalogEntry?.id ?? TEST_MODEL_ID;
     const modelId = selectedCatalogEntry?.generationModelId ?? TEST_MODEL_ID;
     let analysisContext: Parameters<AssistantOrchestrator["send"]>[0]["analysisContext"];
-    if (conversation.type === "analysis" && conversation.analysisId && activeAnalysis) {
-      const explicitPersonIds = activeAnalysis.result.people.map((person) => person.employeeNumber).filter((employeeId) => new RegExp(`(?:^|[^\\p{L}\\p{N}])${employeeId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:$|[^\\p{L}\\p{N}])`, "u").test(content));
+    if (authoritative.type === "analysis" && authoritative.analysisId && activeAnalysis) {
       activeScopeSnapshotRef.current = await createScopeSnapshot({
-        analysisId: conversation.analysisId,
-        analysisVersion: conversation.analysisVersion ?? "current",
-        strategy: conversation.contextStrategy === "full_analysis" || conversation.contextStrategy === "full" ? "full_analysis" : "associated_people",
-        associatedPersonIds: conversation.associatedPersonIds,
-        ...(conversation.primaryPersonId ? { primaryPersonId: conversation.primaryPersonId } : {}),
+        analysisId: authoritative.analysisId,
+        analysisVersion: authoritative.analysisVersion ?? "current",
+        strategy: authoritative.contextStrategy === "full_analysis" || authoritative.contextStrategy === "full" ? "full_analysis" : "associated_people",
+        associatedPersonIds: authoritative.associatedPersonIds,
+        ...(authoritative.primaryPersonId ? { primaryPersonId: authoritative.primaryPersonId } : {}),
         explicitPersonIds,
         // Document discovery remains a paginated tool concern. Capturing every
         // document here would turn full_analysis into an eager corpus preload.
@@ -866,24 +876,24 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       });
       const summary = activeAnalysis.result.summary;
       analysisContext = {
-        associatedPersonIds: conversation.associatedPersonIds,
-        ...(conversation.primaryPersonId ? { primaryPersonId: conversation.primaryPersonId } : {}),
-        strategy: conversation.contextStrategy === "full_analysis" || conversation.contextStrategy === "full" ? "full_analysis" : "associated_people",
+        associatedPersonIds: authoritative.associatedPersonIds,
+        ...(authoritative.primaryPersonId ? { primaryPersonId: authoritative.primaryPersonId } : {}),
+        strategy: authoritative.contextStrategy === "full_analysis" || authoritative.contextStrategy === "full" ? "full_analysis" : "associated_people",
         periods: [...new Set(activeAnalysis.result.people.flatMap((person) => person.periods ?? []))].slice(0, 100),
-        sourceTypes: [...new Set(documents.filter((document) => document.scope.type === "analysis" && document.scope.analysisId === conversation.analysisId).map((document) => document.mediaType))],
+        sourceTypes: [...new Set(documents.filter((document) => document.scope.type === "analysis" && document.scope.analysisId === authoritative.analysisId).map((document) => document.mediaType))],
         aggregate: { uniquePeople: summary?.uniquePeople ?? activeAnalysis.result.people.length, peopleWithDifferences: summary?.peopleWithDifferences ?? 0, totalGlobalDifference: summary?.totalGlobalDifference ?? 0, conceptsPendingReview: summary?.conceptsPendingReview ?? 0, pdfsAnalyzed: summary?.pdfsAnalyzed ?? 0 },
       };
     } else activeScopeSnapshotRef.current = undefined;
     const userMessage: ChatMessage = {
-      id: createId("message"), conversationId: conversation.id, role: "user", content, status: "completed", contextOrigin: conversation.type,
-      ...(selectedCatalogEntry ? { providerId: selectedCatalogEntry.providerId } : {}), modelProfileId, modelId, responseMode: conversation.responseMode, contextStrategy: conversation.contextStrategy,
-      ...(conversation.analysisVersion ? { analysisVersion: conversation.analysisVersion } : {}), sourceRefIds: [], actionIds: [], createdAt,
+      id: createId("message"), conversationId: authoritative.id, role: "user", content, status: "completed", contextOrigin: authoritative.type,
+      ...(selectedCatalogEntry ? { providerId: selectedCatalogEntry.providerId } : {}), modelProfileId, modelId, responseMode: authoritative.responseMode, contextStrategy: authoritative.contextStrategy,
+      ...(authoritative.analysisVersion ? { analysisVersion: authoritative.analysisVersion } : {}), sourceRefIds: [], actionIds: [], createdAt,
     };
     let nextSources = sources;
     let sourceRefIds: string[] = [];
     const personMatch = /matrícula ([\p{L}\p{N}._-]+)/u.exec(content);
-    if (adapter && conversation.type === "analysis" && conversation.analysisId && activeAnalysis && personMatch) {
-      const profile = executeAssistantToolRequest({ tool: "getPersonProfile", args: { analysisId: conversation.analysisId, personId: personMatch[1] } }, activeAnalysis, conversation.id);
+    if (adapter && authoritative.type === "analysis" && authoritative.analysisId && activeAnalysis && personMatch) {
+      const profile = executeAssistantToolRequest({ tool: "getPersonProfile", args: { analysisId: authoritative.analysisId, personId: personMatch[1] } }, activeAnalysis, authoritative.id);
       pendingFakeRequestRef.current = { kind: "profile", request: { messageId: "pending", totals: profile.totals, source: profile.source } };
       nextSources = [...sources.filter((item) => item.id !== profile.source.id), profile.source];
       sourceRefIds = [profile.source.id];
@@ -893,7 +903,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     const assistantMessage: ChatMessage = {
       ...userMessage, id: createId("message"), role: "assistant", content: "", status: "streaming", sourceRefIds, createdAt: now(),
     };
-    const runToken = beginConversationRun(conversation.id);
+    const runToken = beginConversationRun(authoritative.id);
     const runIsCurrent = () => isConversationRunCurrent(runToken);
     const baseMessages = messages.filter((message) => message.status !== "streaming");
     setMessages([...baseMessages, userMessage, assistantMessage]);
@@ -925,9 +935,9 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
         repeatableRunsRef.current.set(assistantMessage.id, runPending);
       }
       const result = await orchestratorRef.current!.send({
-        conversationId: conversation.id, ...(conversation.type === "analysis" ? { analysisId: conversation.analysisId } : {}), question: content, assistantMessageId: assistantMessage.id,
+        conversationId: authoritative.id, ...(authoritative.type === "analysis" ? { analysisId: authoritative.analysisId } : {}), question: content, assistantMessageId: assistantMessage.id,
         ...(analysisContext ? { analysisContext } : {}), ...(selectedCatalogEntry && selectedProviderConfig ? { providerId: selectedCatalogEntry.providerId, provider: providerRuntimeDescriptor(selectedProviderConfig), modelMetadata: { contextWindow: selectedCatalogEntry.contextWindow ?? 8_192, ...(selectedCatalogEntry.maxOutputTokens ? { maxOutputTokens: selectedCatalogEntry.maxOutputTokens } : {}), generationModelId: selectedCatalogEntry.generationModelId } } : {}), modelProfileId, modelId,
-        responseMode: conversation.responseMode, contextStrategy: conversation.contextStrategy, onTextDelta,
+        responseMode: authoritative.responseMode, contextStrategy: authoritative.contextStrategy, onTextDelta,
       });
       if (!runIsCurrent()) return;
       nextSources = [...nextSources.filter((source) => !result.sources.some((recovered) => recovered.id === source.id)), ...result.sources];
@@ -945,7 +955,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
         createdAt: new Date(Date.parse(assistantMessage.createdAt) + index).toISOString(),
       }));
       const completed = producedMessages.at(-1) ?? { ...assistantMessage, content: result.text, status: "completed" as const };
-      const persisted = await persistRunRound(conversation.id, [...baseMessages, userMessage, ...producedMessages], nextSources, runIsCurrent);
+      const persisted = await persistRunRound(authoritative.id, [...baseMessages, userMessage, ...producedMessages], nextSources, runIsCurrent);
       if (persisted && runIsCurrent()) { setNotice("Respuesta completada"); setAnnouncement(`Respuesta completada: ${completed.content}`); }
     } catch (caught) {
       if (!runIsCurrent()) return;
@@ -953,7 +963,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       const stopped = caught instanceof AssistantRunStoppedError;
       const failureMessage = caught instanceof ProviderAdapterError ? caught.publicMessage : "No se pudo completar la respuesta del Asistente.";
       const terminal = { ...assistantMessage, content: stopped ? caught.partialText : partialText || failureMessage, status: stopped ? "stopped" as const : "failed" as const };
-      const persisted = await persistRunRound(conversation.id, [...baseMessages, userMessage, terminal], nextSources, runIsCurrent).catch(() => false);
+      const persisted = await persistRunRound(authoritative.id, [...baseMessages, userMessage, terminal], nextSources, runIsCurrent).catch(() => false);
       if (persisted && runIsCurrent()) {
         if (stopped) { setNotice("Respuesta detenida"); setAnnouncement(`Respuesta detenida: ${terminal.content}`); }
         else { setError(failureMessage); setAnnouncement("La respuesta ha fallado"); }
@@ -1017,6 +1027,31 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       runPending = pendingFakeRequestRef.current;
       repeatableRunsRef.current.set(target.id, runPending);
     }
+    let analysisContext: Parameters<AssistantOrchestrator["send"]>[0]["analysisContext"];
+    if (authoritative.type === "analysis" && authoritative.analysisId && activeAnalysis?.id === authoritative.analysisId) {
+      const fullAnalysis = authoritative.contextStrategy === "full_analysis" || authoritative.contextStrategy === "full";
+      const allowedPersonIds = fullAnalysis ? activeAnalysis.result.people.map((person) => person.employeeNumber) : authoritative.associatedPersonIds;
+      const resolved = resolveChatContent(precedingUser.content, activeAnalysis.result.people, authoritative.type, allowedPersonIds, authoritative.primaryPersonId);
+      activeScopeSnapshotRef.current = await createScopeSnapshot({
+        analysisId: authoritative.analysisId,
+        analysisVersion: authoritative.analysisVersion ?? "current",
+        strategy: fullAnalysis ? "full_analysis" : "associated_people",
+        associatedPersonIds: authoritative.associatedPersonIds,
+        ...(authoritative.primaryPersonId ? { primaryPersonId: authoritative.primaryPersonId } : {}),
+        explicitPersonIds: resolved.explicitPersonIds,
+        documentIds: [],
+        allowedTools: ANALYSIS_TOOL_NAMES,
+      });
+      const summary = activeAnalysis.result.summary;
+      analysisContext = {
+        associatedPersonIds: authoritative.associatedPersonIds,
+        ...(authoritative.primaryPersonId ? { primaryPersonId: authoritative.primaryPersonId } : {}),
+        strategy: fullAnalysis ? "full_analysis" : "associated_people",
+        periods: [...new Set(activeAnalysis.result.people.flatMap((person) => person.periods ?? []))].slice(0, 100),
+        sourceTypes: [...new Set(documents.filter((document) => document.scope.type === "analysis" && document.scope.analysisId === authoritative.analysisId).map((document) => document.mediaType))],
+        aggregate: { uniquePeople: summary?.uniquePeople ?? activeAnalysis.result.people.length, peopleWithDifferences: summary?.peopleWithDifferences ?? 0, totalGlobalDifference: summary?.totalGlobalDifference ?? 0, conceptsPendingReview: summary?.conceptsPendingReview ?? 0, pdfsAnalyzed: summary?.pdfsAnalyzed ?? 0 },
+      };
+    } else activeScopeSnapshotRef.current = undefined;
     const canContinue = mode === "retry" && (target.status === "stopped" || target.status === "interrupted")
       && target.content.trim().length > 0 && (modelProfileId !== TEST_MODEL_ID || Boolean(adapter));
     const runToken = beginConversationRun(selected.id);
@@ -1036,7 +1071,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     const onTextDelta = (delta: string) => { if (!runIsCurrent()) return; generated += delta; if (!timer) timer = setTimeout(flush, STREAM_BATCH_MS); };
     try {
       const result = await orchestrator.send({
-        conversationId: selected.id, ...(selected.type === "analysis" ? { analysisId: selected.analysisId } : {}), question: precedingUser.content,
+        conversationId: authoritative.id, ...(authoritative.type === "analysis" ? { analysisId: authoritative.analysisId, analysisContext } : {}), question: precedingUser.content,
         assistantMessageId: target.id, modelProfileId, modelId, ...(catalogEntry && providerConfig ? { providerId: catalogEntry.providerId, provider: providerRuntimeDescriptor(providerConfig), modelMetadata: { contextWindow: catalogEntry.contextWindow ?? 8_192, ...(catalogEntry.maxOutputTokens ? { maxOutputTokens: catalogEntry.maxOutputTokens } : {}), generationModelId: catalogEntry.generationModelId } } : {}),
         responseMode: target.responseMode, contextStrategy: target.contextStrategy,
         ...(canContinue ? { resumeFrom: { messageId: target.id, context: target.content } } : {}), onTextDelta,
@@ -1076,8 +1111,9 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       if (pendingFakeRequestRef.current === runPending) pendingFakeRequestRef.current = undefined;
       if (runIsCurrent()) setStreaming(false);
       if (activeRunTokenRef.current === runToken) activeRunTokenRef.current = undefined;
+      activeScopeSnapshotRef.current = undefined;
     }
-  }, [adapter, beginConversationRun, isConversationRunCurrent, persistRunRound, providerConfigs, resolveRepeatTarget, selectionLoading, sources, streaming]);
+  }, [activeAnalysis, adapter, beginConversationRun, documents, isConversationRunCurrent, persistRunRound, providerConfigs, resolveRepeatTarget, selectionLoading, sources, streaming]);
   const retryResponse = useCallback((messageId: string) => repeatResponse(messageId, "retry"), [repeatResponse]);
   const regenerateResponse = useCallback((messageId: string) => repeatResponse(messageId, "regenerate"), [repeatResponse]);
 

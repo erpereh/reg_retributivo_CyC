@@ -216,6 +216,46 @@ describe("Phase 5 reviewed provider behavior", () => {
     expect(chatBody).toMatchObject({ analysisId: "analysis-1", privacyBlockedTerms: [] });
   });
 
+  test("replaces an unambiguous person name before request and persistence", async () => {
+    const factory = new IDBFactory();
+    const selected = profile("profile-person", { analysisCompatible: true, supportsTools: true });
+    await seed(factory, "phase5-person-mention", conversation("conversation-person", {
+      type: "analysis", analysisId: "analysis-1", analysisVersion: createdAt, associatedPersonIds: ["10048"], primaryPersonId: "10048",
+      contextStrategy: "associated_people", modelProfileId: selected.id,
+    }), [selected]);
+    const activeAnalysis = { id: "analysis-1", createdAt, result: { summary: { uniquePeople: 1 }, people: [{ employeeNumber: "10048", person: "José Pérez", periods: [] }], payrollRecords: [], registroEmployees: [] } } as unknown as StoredAnalysis;
+    const bodies: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      bodies.push(body);
+      return new Response(`${JSON.stringify({ type: "text_delta", roundId: body.roundId, messageId: "remote", delta: "Respuesta segura" })}\n${JSON.stringify({ type: "done", roundId: body.roundId, finishReason: "stop" })}\n`);
+    }));
+
+    render(<AssistantProvider activeAnalysis={activeAnalysis} factory={factory} dbName="phase5-person-mention"><AssistantView /></AssistantProvider>);
+    await screen.findByRole("heading", { name: "conversation-person" });
+    const composer = screen.getByRole("textbox", { name: "Pregunta" });
+    fireEvent.change(composer, { target: { value: "Dime todo de JOSÉ PÉREZ" } });
+    fireEvent.keyDown(composer, { key: "Enter" });
+    expect(await screen.findByText("Respuesta segura")).toBeVisible();
+
+    expect(bodies.find((body) => body.phase === "plan")).toMatchObject({ question: "Dime todo de matrícula 10048" });
+    expect(JSON.stringify(bodies)).not.toContain("José Pérez");
+    const repositories = await createIndexedDbRepositories({ factory, dbName: "phase5-person-mention" });
+    const persisted = await repositories.messages.listByConversation("conversation-person", { limit: 10 });
+    expect(persisted.items.find((message) => message.role === "user")?.content).toBe("Dime todo de matrícula 10048");
+    expect(JSON.stringify(persisted.items)).not.toContain("José Pérez");
+    repositories.close();
+
+    fireEvent.click(screen.getByRole("button", { name: "Regenerar respuesta" }));
+    await waitFor(() => expect(bodies.filter((body) => body.phase === "plan")).toHaveLength(2));
+    expect(bodies.filter((body) => body.phase === "plan")[1]).toMatchObject({
+      question: "Dime todo de matrícula 10048",
+      analysisId: "analysis-1",
+      analysisContext: expect.objectContaining({ associatedPersonIds: ["10048"], primaryPersonId: "10048" }),
+      privacyBlockedTerms: ["josé pérez"],
+    });
+  });
+
   test("ignores stale conversation loads and preserves concurrent person and preference mutations", async () => {
     const factory = new IDBFactory();
     const repositories = await createIndexedDbRepositories({ factory, dbName: "phase5-races" });

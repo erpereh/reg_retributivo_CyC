@@ -52,5 +52,25 @@ function assertSafe(input: unknown): void {
   if (findings.length) throw new PrivacyBoundaryError(findings);
 }
 
+/**
+ * Thought signatures are provider-issued opaque bytes encoded as text. Their
+ * shape is validated at the chat contract boundary, but their contents must
+ * not be interpreted as user, tool, or model text by the privacy scanners.
+ */
+export function withoutOpaqueProviderSignatures(input: unknown): unknown {
+  if (Array.isArray(input)) return input.map(withoutOpaqueProviderSignatures);
+  if (!input || typeof input !== "object") return input;
+  const record = input as Record<string, unknown>;
+  const context = record.providerContext;
+  const isValidatedToolRecord = typeof record.requestId === "string" && typeof record.tool === "string"
+    && context && typeof context === "object" && !Array.isArray(context)
+    && (context as Record<string, unknown>).kind === "gemini"
+    && typeof (context as Record<string, unknown>).partIndex === "number"
+    && Object.keys(context).every((field) => ["kind", "partIndex", "thoughtSignature"].includes(field));
+  return Object.fromEntries(Object.entries(record).map(([key, value]) => isValidatedToolRecord && key === "providerContext"
+    ? [key, Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([field]) => field !== "thoughtSignature"))]
+    : [key, withoutOpaqueProviderSignatures(value)]));
+}
+
 export function assertSafeForProvider(input: unknown): void { assertSafe(input); }
 export function assertSafeForPersistence(input: unknown): void { assertSafe(input); }

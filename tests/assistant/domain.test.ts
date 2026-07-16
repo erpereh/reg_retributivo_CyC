@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { convertConversationToAnalysis, sanitizeChatContent } from "@/lib/assistant/domain";
+import { convertConversationToAnalysis, resolveChatContent, sanitizeChatContent } from "@/lib/assistant/domain";
 import {
   chatMessageSchema,
   conversationSchema,
@@ -102,6 +102,46 @@ describe("assistant domain", () => {
   test("replaces a known name only when explicitly supplied after conversion", () => {
     expect(sanitizeChatContent("Revisa a Ana García", [{ employeeNumber: "10048", person: "Ana García" }], "analysis"))
       .toBe("Revisa a matrícula 10048");
+  });
+
+  test("resolves a unicode-equivalent unique person mention once and returns the same explicit id", () => {
+    expect(resolveChatContent("Dime todo de JOSE\u0301  PE\u0301REZ", [
+      { employeeNumber: "10048", person: "José Pérez" },
+      { employeeNumber: "10050", person: "Ana García" },
+    ], "analysis", ["10048"])).toEqual({ content: "Dime todo de matrícula 10048", explicitPersonIds: ["10048"] });
+  });
+
+  test("rejects an ambiguous person fragment before producing provider content", () => {
+    expect(() => resolveChatContent("Revisa a García", [
+      { employeeNumber: "10048", person: "Ana García" },
+      { employeeNumber: "10050", person: "Marta García" },
+    ], "analysis", ["10048", "10050"])).toThrow("ambiguous_person_mention");
+  });
+
+  test("does not authorize a named person outside the associated scope", () => {
+    expect(() => resolveChatContent("Revisa a Ana García", [
+      { employeeNumber: "10048", person: "Ana García" },
+    ], "analysis", [])).toThrow("person_outside_authorized_scope");
+  });
+
+  test("does not authorize an explicit employee id outside the associated scope", () => {
+    expect(() => resolveChatContent("Consulta la matrícula 10048", [
+      { employeeNumber: "10048", person: "Ana García" },
+    ], "analysis", [])).toThrow("person_outside_authorized_scope");
+  });
+
+  test("resolves this worker to the primary person before persistence", () => {
+    expect(resolveChatContent("dime todo lo que puedas de este trabajador", [
+      { employeeNumber: "10048", person: "José Pérez" },
+      { employeeNumber: "10050", person: "José García" },
+    ], "analysis", ["10048", "10050"], "10048")).toEqual({ content: "dime todo lo que puedas de matrícula 10048", explicitPersonIds: ["10048"] });
+  });
+
+  test("requires clarification for this worker without one primary person", () => {
+    expect(() => resolveChatContent("háblame de este trabajador", [
+      { employeeNumber: "10048", person: "José Pérez" },
+      { employeeNumber: "10050", person: "José García" },
+    ], "analysis", ["10048", "10050"])).toThrow("ambiguous_person_mention");
   });
 
   test.each([

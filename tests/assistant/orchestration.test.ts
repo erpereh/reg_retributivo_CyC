@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { AssistantOrchestrator } from "@/lib/assistant/orchestration/assistantOrchestrator";
 import { ProviderAdapterError } from "@/lib/assistant/providers/types";
+import { assertSafeForProvider } from "@/lib/assistant/privacy/assertions";
 import type { AnalysisToolRegistry } from "@/lib/assistant/tools/registry";
 
 function ndjson(events: readonly unknown[]) { return new Response(events.map((event) => `${JSON.stringify(event)}\n`).join(""), { headers: { "content-type": "application/x-ndjson" } }); }
@@ -8,15 +9,52 @@ const validateRequestScope = vi.fn(async () => undefined);
 
 describe("assistant client orchestration", () => {
   it("runs plan -> local allowlisted tool -> respond and groups deltas without loss", async () => {
+    const providerContext = { kind: "gemini" as const, partIndex: 0, thoughtSignature: "signature-1" };
     const transport = vi.fn(async (body: Record<string, unknown>) => body.phase === "plan"
-      ? ndjson([{ type: "tool_request", roundId: String(body.roundId), requestId: "q1", tool: "getPersonProfile", args: { analysisId: "a1", personId: "10048" } }, { type: "done", roundId: String(body.roundId), finishReason: "tool_request" }])
+      ? ndjson([{ type: "tool_request", roundId: String(body.roundId), requestId: "q1", tool: "getPersonProfile", args: { analysisId: "a1", personId: "10048" }, providerContext }, { type: "done", roundId: String(body.roundId), finishReason: "tool_request" }])
       : ndjson([{ type: "tool_result_ack", roundId: String(body.roundId), requestId: "q1" }, { type: "text_delta", roundId: String(body.roundId), messageId: "m1", delta: "Res" }, { type: "text_delta", roundId: String(body.roundId), messageId: "m1", delta: "puesta" }, { type: "done", roundId: String(body.roundId), finishReason: "stop" }]));
     const registry = { names: ["getPersonProfile"], execute: vi.fn(async () => ({ safe: true })) } as unknown as AnalysisToolRegistry;
     const result = await new AssistantOrchestrator({ transport, registry, validateRequestScope }).send({ conversationId: "c1", analysisId: "a1", question: "Consulta matrícula 10048", modelProfileId: "p1", modelId: "fake", responseMode: "strict", contextStrategy: "automatic" });
     expect(result.text).toBe("Respuesta");
     expect(result.rounds).toBe(2);
     expect(registry.execute).toHaveBeenCalledWith("getPersonProfile", { analysisId: "a1", personId: "10048" });
-    expect(transport.mock.calls[1][0]).toEqual(expect.objectContaining({ phase: "respond", toolResults: [{ requestId: "q1", tool: "getPersonProfile", args: { analysisId: "a1", personId: "10048" }, status: "success", data: { safe: true }, sources: [] }] }));
+    const settled = { requestId: "q1", tool: "getPersonProfile", args: { analysisId: "a1", personId: "10048" }, providerContext, status: "success", data: { safe: true }, sources: [] };
+    expect(transport.mock.calls[1][0]).toEqual(expect.objectContaining({ phase: "respond", toolResults: [settled], toolHistory: [[settled]] }));
+  });
+
+  it("preserves ordered Gemini context across sequential tool rounds", async () => {
+    const contexts = [
+      { kind: "gemini" as const, partIndex: 0, thoughtSignature: "signature-1" },
+      { kind: "gemini" as const, partIndex: 0, thoughtSignature: "signature-2" },
+    ];
+    const transport = vi.fn(async (body: Record<string, unknown>) => {
+      if (body.phase === "plan") return ndjson([{ type: "tool_request", roundId: String(body.roundId), requestId: "q1", tool: "getPersonProfile", args: { analysisId: "a1", personId: "10048" }, providerContext: contexts[0] }, { type: "done", roundId: String(body.roundId), finishReason: "tool_request" }]);
+      if (body.phase === "respond") return ndjson([{ type: "tool_request", roundId: String(body.roundId), requestId: "q2", tool: "getPersonConcepts", args: { analysisId: "a1", personId: "10048" }, providerContext: contexts[1] }, { type: "done", roundId: String(body.roundId), finishReason: "tool_request" }]);
+      return ndjson([{ type: "text_delta", roundId: String(body.roundId), messageId: "m1", delta: "Respuesta" }, { type: "done", roundId: String(body.roundId), finishReason: "stop" }]);
+    });
+    const registry = { names: ["getPersonProfile", "getPersonConcepts"], execute: vi.fn(async (tool: string) => ({ tool })) } as unknown as AnalysisToolRegistry;
+    const result = await new AssistantOrchestrator({ transport, registry, validateRequestScope }).send({ conversationId: "c1", analysisId: "a1", question: "Consulta matrícula 10048", modelProfileId: "p1", modelId: "gemini-3.1-flash-lite", responseMode: "strict", contextStrategy: "automatic" });
+
+    expect(result.text).toBe("Respuesta");
+    const finalBody = transport.mock.calls[2][0] as Record<string, unknown>;
+    expect(finalBody).toEqual(expect.objectContaining({ phase: "continue", question: "Consulta matrícula 10048" }));
+    expect(finalBody).not.toHaveProperty("interruptedMessageId");
+    expect(finalBody).not.toHaveProperty("continuationContext");
+    expect(finalBody.toolHistory).toEqual([
+      [expect.objectContaining({ requestId: "q1", providerContext: contexts[0] })],
+      [expect.objectContaining({ requestId: "q2", providerContext: contexts[1] })],
+    ]);
+  });
+
+  it("does not audit an opaque Gemini signature as user or tool content", async () => {
+    const providerContext = { kind: "gemini" as const, partIndex: 0, thoughtSignature: "sk-opaqueTechnicalSignature123" };
+    const transport = vi.fn(async (body: Record<string, unknown>) => body.phase === "plan"
+      ? ndjson([{ type: "tool_request", roundId: String(body.roundId), requestId: "q1", tool: "getPersonProfile", args: { analysisId: "a1", personId: "10048" }, providerContext }, { type: "done", roundId: String(body.roundId), finishReason: "tool_request" }])
+      : ndjson([{ type: "text_delta", roundId: String(body.roundId), messageId: "m1", delta: "Respuesta" }, { type: "done", roundId: String(body.roundId), finishReason: "stop" }]));
+    const registry = { names: ["getPersonProfile"], execute: vi.fn(async () => ({ personId: "10048" })), assertSafeOutput: vi.fn((value: unknown) => assertSafeForProvider(value)) } as unknown as AnalysisToolRegistry;
+
+    await expect(new AssistantOrchestrator({ transport, registry, validateRequestScope }).send({ conversationId: "c1", analysisId: "a1", question: "Consulta matrícula 10048", modelProfileId: "p1", modelId: "gemini-3.1-flash-lite", responseMode: "strict", contextStrategy: "automatic" })).resolves.toMatchObject({ text: "Respuesta" });
+    expect(transport).toHaveBeenCalledTimes(2);
   });
 
   it("stops at three rounds, validates privacy client-side and honors AbortSignal", async () => {

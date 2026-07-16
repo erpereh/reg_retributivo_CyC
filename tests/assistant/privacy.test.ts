@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { assertSafeForPersistence, assertSafeForProvider, PrivacyBoundaryError } from "@/lib/assistant/privacy/assertions";
+import { assertSafeForPersistence, assertSafeForProvider, PrivacyBoundaryError, withoutOpaqueProviderSignatures } from "@/lib/assistant/privacy/assertions";
 import { detectSensitivePatterns } from "@/lib/assistant/privacy/patterns";
 import { redactKnownPersonValues, sanitizeForAI } from "@/lib/assistant/privacy/sanitize";
 import { sanitizeChatContent } from "@/lib/assistant/domain";
@@ -7,6 +7,11 @@ import { sanitizeChatContent } from "@/lib/assistant/domain";
 const people = [{ employeeNumber: "10048", person: "Ana García López" }] as const;
 
 describe("deterministic assistant privacy boundary", () => {
+  test("exempts only a structural tool signature, never a lookalike nested in tool data", () => {
+    expect(() => assertSafeForProvider(withoutOpaqueProviderSignatures({ requestId: "q1", tool: "getPersonProfile", providerContext: { kind: "gemini", partIndex: 0, thoughtSignature: "sk-opaqueTechnicalSignature123" } }))).not.toThrow();
+    expect(() => assertSafeForProvider(withoutOpaqueProviderSignatures({ data: { providerContext: { kind: "gemini", partIndex: 0, thoughtSignature: "sk-hiddenCredential123" } } }))).toThrow(PrivacyBoundaryError);
+  });
+
   test.each(["hola", "Buenos días", "¿Qué puedes hacer?", "Explícame qué es un registro retributivo"])("allows ordinary general chat: %s", (content) => {
     expect(sanitizeChatContent(content, people, "general")).toBe(content);
   });

@@ -28,6 +28,30 @@ describe("POST /api/assistant/chat", () => {
     expect(parsed.success).toBe(false);
   });
 
+  it("validates Gemini native tool history before contacting the provider", () => {
+    const provider = { providerId: "provider-gemini", providerType: "gemini", baseUrl: "https://generativelanguage.googleapis.com", envVarName: "GEMINI_API_KEY" } as const;
+    const result = { requestId: "q1", tool: "getPersonProfile", args: { analysisId: "a1", personId: "10048" }, status: "success", data: { personId: "10048" }, providerContext: { kind: "gemini", partIndex: 0, thoughtSignature: "signature-1" } } as const;
+    const valid = { ...base, phase: "respond", question: "Consulta matrícula 10048", modelId: "gemini-3.1-flash-lite", providerId: provider.providerId, provider, toolResults: [result], toolHistory: [[result]] } as const;
+
+    expect(chatRequestSchema.safeParse(valid).success).toBe(true);
+    expect(chatRequestSchema.safeParse({ ...valid, toolResults: [{ ...result, providerContext: { ...result.providerContext, thoughtSignature: "altered" } }] }).success).toBe(false);
+    expect(chatRequestSchema.safeParse({ ...valid, toolHistory: [[{ ...result, providerContext: { ...result.providerContext, thoughtSignature: "x".repeat(16_385) } }]] }).success).toBe(false);
+    expect(chatRequestSchema.safeParse({ ...valid, provider: { ...provider, providerType: "openai", baseUrl: "https://api.openai.com/v1", envVarName: "OPENAI_API_KEY" } }).success).toBe(false);
+    expect(chatRequestSchema.safeParse({ ...valid, toolHistory: [[{ ...result, providerContext: { kind: "gemini", partIndex: 0 } }]] }).success).toBe(false);
+  });
+
+  it("treats a validated Gemini thought signature as opaque technical context", async () => {
+    const provider = { providerId: "provider-gemini", providerType: "gemini", baseUrl: "https://generativelanguage.googleapis.com", envVarName: "GEMINI_API_KEY" } as const;
+    const result = { requestId: "q1", tool: "getPersonProfile", args: { analysisId: "a1", personId: "10048" }, status: "success", data: { personId: "10048", workplace: "Centro", position: "Técnico", category: "A1", totals: { registro: 1, payroll: 2, difference: 1 }, blocks: { salary: { registro: 1, payroll: 2, difference: 1 }, salaryComplement: { registro: 0, payroll: 0, difference: 0 }, extraSalary: { registro: 0, payroll: 0, difference: 0 } }, status: "OK", periods: [] }, providerContext: { kind: "gemini", partIndex: 0, thoughtSignature: "sk-opaqueTechnicalSignature123" } } as const;
+    const execute = vi.fn(async function* () { yield { type: "done", roundId: "r1", finishReason: "stop" } as const; });
+
+    const response = await createChatPostHandler({ execute })(request({ ...base, phase: "respond", question: "Consulta matrícula 10048", modelId: "gemini-3.1-flash-lite", providerId: provider.providerId, provider, toolResults: [result], toolHistory: [[result]] }));
+
+    expect(response.status).toBe(200);
+    await response.text();
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
   it("skips tool planning for a general request with no available tools", async () => {
     const planTools = vi.fn();
     const streamResponse = vi.fn(async function* () {

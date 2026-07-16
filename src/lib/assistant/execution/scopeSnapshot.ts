@@ -53,9 +53,11 @@ const PERSON_TOOLS = new Set([
 
 export function normalizeScopedToolArguments(snapshot: ScopeSnapshot, toolName: string, input: unknown): Record<string, unknown> {
   const args = input && typeof input === "object" && !Array.isArray(input) ? { ...(input as Record<string, unknown>) } : {};
+  args.analysisId = snapshot.analysisId;
   if (!PERSON_TOOLS.has(toolName)) return args;
   if (snapshot.explicitPersonIds.length === 1) args.personId = snapshot.explicitPersonIds[0];
   else if (!args.personId && snapshot.primaryPersonId) args.personId = snapshot.primaryPersonId;
+  else if (!args.personId && snapshot.associatedPersonIds.length === 1) args.personId = snapshot.associatedPersonIds[0];
   else if (!args.personId && snapshot.associatedPersonIds.length > 1) throw new Error("person_clarification_required");
   return args;
 }

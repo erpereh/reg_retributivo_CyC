@@ -84,6 +84,7 @@ const analysisToolRequestSchema = z.object({
   requestId: id,
   tool: z.enum(ANALYSIS_TOOL_NAMES),
   args: z.unknown(),
+  providerContext: z.object({ kind: z.literal("gemini"), partIndex: z.number().int().min(0).max(255), thoughtSignature: z.string().min(1).max(16_384).optional() }).strict().optional(),
 }).strict();
 
 export const assistantStreamEventSchema = z.discriminatedUnion("type", [

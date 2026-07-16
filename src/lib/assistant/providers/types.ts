@@ -36,7 +36,8 @@ export interface ProviderTool {
   readonly description: string;
   readonly parameters: Readonly<Record<string, unknown>>;
 }
-export interface ProviderToolCall { readonly id: string; readonly name: string; readonly args: unknown }
+export interface ProviderToolContext { readonly kind: "gemini"; readonly partIndex: number; readonly thoughtSignature?: string }
+export interface ProviderToolCall { readonly id: string; readonly name: string; readonly args: unknown; readonly providerContext?: ProviderToolContext }
 export interface ToolPlan { readonly toolCalls: readonly ProviderToolCall[] }
 
 export type ProviderStreamEvent =
@@ -51,6 +52,7 @@ export interface ToolPlanRequest extends ModelRequest { readonly messages: reado
 export interface StreamResponseRequest extends ModelRequest {
   readonly messages: readonly ProviderMessage[];
   readonly maxOutputTokens?: number;
+  readonly tools?: readonly ProviderTool[];
 }
 
 export interface BehavioralProbeResult {
@@ -82,6 +84,10 @@ const PUBLIC_MESSAGES: Readonly<Record<ProviderErrorClassification, string>> = {
   provider: "El proveedor devolvió una respuesta no válida.",
 };
 const PUBLIC_MESSAGES_BY_CODE: Readonly<Record<string, string>> = {
+  gemini_tool_context_missing: "Gemini no devolvió el contexto técnico necesario para continuar con las herramientas. Puedes reintentar la consulta.",
+  gemini_tool_context_invalid: "El contexto técnico de Gemini no es válido. Puedes reintentar la consulta.",
+  ambiguous_person_mention: "Hay varias personas que coinciden. Escribe el nombre completo, indica la matrícula o selecciónala en Personas asociadas.",
+  person_outside_authorized_scope: "La persona indicada no está dentro del alcance autorizado.",
   privacy_scope_too_large: "El alcance contiene demasiadas identidades para procesarlo de forma segura. Reduce el alcance o utiliza Personas asociadas.",
   empty_response: "El modelo no devolvió contenido.",
   tool_round_limit: "El asistente necesitó demasiadas rondas de herramientas.",

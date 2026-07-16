@@ -30,7 +30,7 @@ interface GeminiResponseLike {
   readonly text?: string;
   readonly functionCalls?: readonly { readonly id?: string; readonly name?: string; readonly args?: unknown }[];
   readonly usageMetadata?: { readonly promptTokenCount?: number; readonly candidatesTokenCount?: number; readonly totalTokenCount?: number };
-  readonly candidates?: readonly { readonly finishReason?: string; readonly content?: { readonly parts?: readonly { readonly text?: string }[] } }[];
+  readonly candidates?: readonly { readonly finishReason?: string; readonly content?: { readonly role?: string; readonly parts?: readonly { readonly text?: string; readonly functionCall?: { readonly id?: string; readonly name?: string; readonly args?: unknown }; readonly thoughtSignature?: string }[] } }[];
   readonly promptFeedback?: { readonly blockReason?: string };
 }
 interface GeminiClientLike {
@@ -73,14 +73,22 @@ function supportsGenerateContent(methods: readonly string[]): boolean {
 }
 
 export function geminiNativeContents(messages: readonly ProviderMessage[]) {
-  return messages.filter((message) => message.role !== "system").map((message) => {
-    if (message.role === "assistant" && message.toolCalls?.length) return { role: "model", parts: message.toolCalls.map((call) => ({ functionCall: { id: call.id, name: call.name, args: call.args } })) };
+  const contents: Array<{ role: string; parts: unknown[] }> = [];
+  for (const message of messages.filter((entry) => entry.role !== "system")) {
+    if (message.role === "assistant" && message.toolCalls?.length) {
+      contents.push({ role: "model", parts: message.toolCalls.map((call) => ({ functionCall: { id: call.id, name: call.name, args: call.args }, ...(call.providerContext?.thoughtSignature ? { thoughtSignature: call.providerContext.thoughtSignature } : {}) })) });
+      continue;
+    }
     if (message.role === "tool" && message.toolCallId && message.toolName) {
       let response: unknown;
       try { response = JSON.parse(message.content); } catch { response = { ok: false, error: { code: "tool_result_invalid", message: "Resultado local no válido." } }; }
-      return { role: "user", parts: [{ functionResponse: { id: message.toolCallId, name: message.toolName, response } }] };
+      const part = { functionResponse: { id: message.toolCallId, name: message.toolName, response } };
+      const previous = contents.at(-1);
+      if (previous?.role === "user" && previous.parts.every((entry) => typeof entry === "object" && entry !== null && "functionResponse" in entry)) previous.parts.push(part);
+      else contents.push({ role: "user", parts: [part] });
+      continue;
     }
-    if (message.role !== "tool") return { role: message.role === "assistant" ? "model" : "user", parts: [{ text: message.content }] };
+    if (message.role !== "tool") { contents.push({ role: message.role === "assistant" ? "model" : "user", parts: [{ text: message.content }] }); continue; }
     try {
       const results = JSON.parse(message.content) as unknown;
       if (!Array.isArray(results) || !results.length) throw new Error("invalid tool results");
@@ -90,11 +98,12 @@ export function geminiNativeContents(messages: readonly ProviderMessage[]) {
         if (typeof entry.tool !== "string" || !entry.tool) throw new Error("invalid tool name");
         return { functionResponse: { name: entry.tool, response: { requestId: typeof entry.requestId === "string" ? entry.requestId : undefined, result: entry.data ?? entry.result ?? {} } } };
       });
-      return { role: "user", parts };
+      contents.push({ role: "user", parts });
     } catch {
-      return { role: "user", parts: [{ text: message.content }] };
+      contents.push({ role: "user", parts: [{ text: message.content }] });
     }
-  });
+  }
+  return contents;
 }
 
 const geminiContents = geminiNativeContents;
@@ -195,7 +204,13 @@ export class GeminiAdapter implements AIProviderAdapter {
         },
       });
       if (response.promptFeedback?.blockReason) throw new ProviderAdapterError("provider", "gemini_response_blocked");
-      return { toolCalls: (response.functionCalls ?? []).map((call, index) => ({ id: call.id ?? `gemini-call-${index}`, name: call.name ?? "", args: call.args })) };
+      const parts = response.candidates?.[0]?.content?.parts ?? [];
+      const nativeCalls = parts.flatMap((part, partIndex) => part.functionCall ? [{ ...part.functionCall, partIndex, thoughtSignature: part.thoughtSignature }] : []);
+      const calls = nativeCalls.length ? nativeCalls : (response.functionCalls ?? []).map((call, partIndex) => ({ ...call, partIndex, thoughtSignature: undefined }));
+      const generationModelId = resolveGeminiModelIdentity(request.modelId, request.providerModelName).generationModelId;
+      if (/^gemini-3(?:[.-]|$)/i.test(generationModelId) && calls.length && !calls[0]?.thoughtSignature) throw new ProviderAdapterError("provider", "gemini_tool_context_missing");
+      if (calls.some((call) => call.thoughtSignature && call.thoughtSignature.length > 16_384)) throw new ProviderAdapterError("provider", "gemini_tool_context_invalid");
+      return { toolCalls: calls.map((call, index) => ({ id: call.id ?? `gemini-call-${index}`, name: call.name ?? "", args: call.args, providerContext: { kind: "gemini", partIndex: call.partIndex, ...(call.thoughtSignature ? { thoughtSignature: call.thoughtSignature } : {}) } })) };
     } catch (error) { throw sanitizeGeminiError(error); }
   }
 
@@ -205,7 +220,7 @@ export class GeminiAdapter implements AIProviderAdapter {
       const response = await this.client(request.apiKey).models.generateContent({
         model: resolveGeminiModelIdentity(request.modelId, request.providerModelName).generationModelId,
         contents: geminiContents(request.messages),
-        config: { maxOutputTokens: request.maxOutputTokens, abortSignal: request.signal, ...(geminiSystemInstruction(request.messages) ? { systemInstruction: geminiSystemInstruction(request.messages) } : {}) },
+        config: { maxOutputTokens: request.maxOutputTokens, abortSignal: request.signal, ...(geminiSystemInstruction(request.messages) ? { systemInstruction: geminiSystemInstruction(request.messages) } : {}), ...(request.tools?.length ? { tools: [{ functionDeclarations: request.tools.map((tool) => ({ name: tool.name, description: tool.description, parametersJsonSchema: tool.parameters })) }], toolConfig: { functionCallingConfig: { mode: "NONE" } } } : {}) },
       });
       if (request.signal?.aborted) throw new ProviderAdapterError("cancelled");
       if (response.promptFeedback?.blockReason) throw new ProviderAdapterError("provider", "gemini_response_blocked");

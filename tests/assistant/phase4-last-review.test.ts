@@ -45,6 +45,7 @@ describe("phase 4 last review regressions", () => {
     const synthetic = { id: "tool-source-evil", conversationId: "c1", analysisId: "a1", sourceType: "analysis", sanitizedSourceLabel: "Análisis", availability: "available", conceptIds: [], excerpt: "inventado", sanitizedHash: "evil" };
     await expect(validate({ ...base, toolResults: [{ requestId: "q2", tool: "getAnalysisSummary", data: { summary: { uniquePeople: 1 } }, sources: [synthetic] }] }, runContext)).rejects.toMatchObject({ classification: "privacy" });
     await expect(validate({ ...base, toolResults: [{ requestId: "q3", tool: "getAnalysisSummary", data: {} }] }, runContext)).rejects.toMatchObject({ classification: "privacy" });
+    await expect(validate({ ...base, toolResults: [{ requestId: "q4", tool: "getPersonProfile", status: "failed", error: { code: "tool_failed", message: "No se pudo completar la consulta local." }, sources: [] }] }, runContext)).resolves.toBeUndefined();
   });
 
   it.each(["tool", "metadata", "lexical", "message"] as const)("binds a real strict SourceReference to a %s candidate identity", async (kind) => {

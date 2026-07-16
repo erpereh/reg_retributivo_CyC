@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { assistantStreamEventSchema, contextSnapshotSchema, documentScopeSchema, modelProfileSchema, sourceReferenceSchema, type AssistantStreamEvent } from "@/lib/assistant/schemas";
-import { assertSafeForProvider } from "@/lib/assistant/privacy/assertions";
+import { assertSafeForProvider, withoutOpaqueProviderSignatures } from "@/lib/assistant/privacy/assertions";
 import { ANALYSIS_TOOL_NAMES, ANALYSIS_TOOL_SCHEMAS, type AnalysisToolName } from "@/lib/assistant/tools/registry";
 import { ContextPlanner, responseModeInstructions, type ContextCandidate } from "@/lib/assistant/context/contextPlanner";
 import { ProviderAdapterError, sanitizeProviderError, type AIProviderAdapter, type ProviderMessage, type ProviderStreamEvent, type ProviderTool } from "@/lib/assistant/providers/types";
@@ -18,15 +18,34 @@ const analysisContextSchema = z.object({ associatedPersonIds: z.array(id).max(20
 const providerDescriptorSchema = z.object({ providerId: id, providerType: z.enum(["gemini", "openai", "openrouter", "cerebras", "groq", "openai-compatible"]), baseUrl: z.string().url().max(2_048), envVarName: z.string().min(1).max(128) }).strict();
 const common = { executionId: z.string().uuid().optional(), conversationId: id, analysisId: id.optional(), analysisContext: analysisContextSchema.optional(), roundId: id, roundNumber: z.number().int().min(1).max(3), providerId: id.optional(), provider: providerDescriptorSchema.optional(), modelProfileId: id, modelId: id, modelMetadata: modelMetadataSchema.optional(), profile: modelProfileSchema.optional(), privacyBlockedTerms: z.array(z.string().min(2).max(256)).max(MAX_PRIVACY_BLOCKED_TERMS).optional(), responseMode: z.enum(["strict", "flexible"]), contextStrategy: z.enum(["associated_people", "full_analysis", "automatic", "full", "optimized"]), contextCandidates: z.array(contextCandidateSchema).max(256).optional(), compactedContext: compactedContextSchema.optional(), compactionLineage: compactionLineageSchema.optional(), safetyMarginPercent: z.number().min(0).max(50).optional(), warningThresholdPercent: z.number().min(1).max(99).optional(), compactionThresholdPercent: z.number().min(1).max(100).optional() };
 const plan = z.object({ phase: z.literal("plan"), ...common, question: z.string().min(1).max(16_384), tools: z.array(z.enum(ANALYSIS_TOOL_NAMES)).max(19) }).strict();
-const toolResult = z.object({ requestId: id, tool: z.enum(ANALYSIS_TOOL_NAMES), args: z.unknown().optional(), status: z.enum(["success", "empty", "failed", "cancelled"]).optional(), data: z.unknown().optional(), result: z.unknown().optional(), error: z.object({ code: id, message: z.string().min(1).max(200) }).strict().optional(), sources: z.array(sourceReferenceSchema).max(100).optional() }).strict().superRefine((value, context) => { if ((!value.status || value.status === "success" || value.status === "empty") && value.data === undefined && value.result === undefined) context.addIssue({ code: z.ZodIssueCode.custom, message: "Falta el resultado de la herramienta." }); if ((value.status === "failed" || value.status === "cancelled") && !value.error) context.addIssue({ code: z.ZodIssueCode.custom, message: "Falta el error sanitizado." }); });
-const respond = z.object({ phase: z.literal("respond"), ...common, question: z.string().min(1).max(16_384), tools: z.array(z.enum(ANALYSIS_TOOL_NAMES)).max(19).optional(), toolResults: z.array(toolResult).min(1).max(19) }).strict();
-const continuation = z.object({ phase: z.literal("continue"), ...common, question: z.string().min(1).max(16_384).optional(), tools: z.array(z.enum(ANALYSIS_TOOL_NAMES)).max(19).optional(), toolResults: z.array(toolResult).max(19).optional(), interruptedMessageId: id, continuationContext: z.string().min(1).max(16_384) }).strict();
+const providerToolContext = z.object({ kind: z.literal("gemini"), partIndex: z.number().int().min(0).max(255), thoughtSignature: z.string().min(1).max(16_384).optional() }).strict();
+const toolResult = z.object({ requestId: id, tool: z.enum(ANALYSIS_TOOL_NAMES), args: z.unknown().optional(), providerContext: providerToolContext.optional(), status: z.enum(["success", "empty", "failed", "cancelled"]).optional(), data: z.unknown().optional(), result: z.unknown().optional(), error: z.object({ code: id, message: z.string().min(1).max(200) }).strict().optional(), sources: z.array(sourceReferenceSchema).max(100).optional() }).strict().superRefine((value, context) => { if ((!value.status || value.status === "success" || value.status === "empty") && value.data === undefined && value.result === undefined) context.addIssue({ code: z.ZodIssueCode.custom, message: "Falta el resultado de la herramienta." }); if ((value.status === "failed" || value.status === "cancelled") && !value.error) context.addIssue({ code: z.ZodIssueCode.custom, message: "Falta el error sanitizado." }); });
+const toolHistory = z.array(z.array(toolResult).min(1).max(19)).max(3);
+const respond = z.object({ phase: z.literal("respond"), ...common, question: z.string().min(1).max(16_384), tools: z.array(z.enum(ANALYSIS_TOOL_NAMES)).max(19).optional(), toolResults: z.array(toolResult).min(1).max(19), toolHistory: toolHistory.optional() }).strict();
+const continuation = z.object({ phase: z.literal("continue"), ...common, question: z.string().min(1).max(16_384).optional(), tools: z.array(z.enum(ANALYSIS_TOOL_NAMES)).max(19).optional(), toolResults: z.array(toolResult).max(19).optional(), toolHistory: toolHistory.optional(), interruptedMessageId: id.optional(), continuationContext: z.string().min(1).max(16_384).optional() }).strict();
 export const chatRequestSchema = z.discriminatedUnion("phase", [plan, respond, continuation]).superRefine((value, context) => {
+  if (value.phase === "continue") {
+    const hasInterrupted = Boolean(value.interruptedMessageId);
+    const hasContinuationText = Boolean(value.continuationContext);
+    if (hasInterrupted !== hasContinuationText || (!hasInterrupted && !value.toolHistory?.length)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["interruptedMessageId"], message: "La continuación no tiene un origen válido." });
+  }
   if (Boolean(value.providerId) !== Boolean(value.provider) || (value.providerId && value.provider?.providerId !== value.providerId)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["provider"], message: "El descriptor no pertenece al proveedor seleccionado." });
+  const rounds = value.phase === "plan" ? [] : value.toolHistory ?? (value.toolResults?.length ? [value.toolResults] : []);
+  if (value.phase !== "plan" && value.toolHistory?.length && JSON.stringify(value.toolResults ?? []) !== JSON.stringify(value.toolHistory.at(-1))) context.addIssue({ code: z.ZodIssueCode.custom, path: ["toolResults"], message: "Los resultados actuales no corresponden a la última ronda." });
+  for (const [roundIndex, round] of rounds.entries()) {
+    let previousPartIndex = -1;
+    for (const [callIndex, result] of round.entries()) {
+      const native = result.providerContext;
+      if (native && value.provider?.providerType !== "gemini") context.addIssue({ code: z.ZodIssueCode.custom, path: ["toolHistory", roundIndex, callIndex, "providerContext"], message: "El contexto nativo no pertenece al proveedor seleccionado." });
+      if (native && native.partIndex <= previousPartIndex) context.addIssue({ code: z.ZodIssueCode.custom, path: ["toolHistory", roundIndex, callIndex, "providerContext", "partIndex"], message: "El orden del contexto nativo no es válido." });
+      if (native) previousPartIndex = native.partIndex;
+    }
+    if (/^gemini-3(?:[.-]|$)/i.test(value.modelMetadata?.generationModelId ?? value.modelId) && round.length && !round[0]?.providerContext?.thoughtSignature) context.addIssue({ code: z.ZodIssueCode.custom, path: ["toolHistory", roundIndex, 0, "providerContext"], message: "Falta el contexto nativo requerido." });
+  }
   const expected = value.analysisId ? { type: "analysis", analysisId: value.analysisId } as const : { type: "conversation", conversationId: value.conversationId } as const;
   for (const [index, candidate] of (value.contextCandidates ?? []).entries()) if (!sameScope(candidate.scope, expected)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["contextCandidates", index, "scope"], message: "El contexto no pertenece a esta ronda." });
   if (value.compactedContext && (value.compactedContext.snapshot.conversationId !== value.conversationId || value.compactedContext.snapshot.analysisId !== value.analysisId || value.compactedContext.snapshot.actualStrategy !== value.contextStrategy || value.compactedContext.snapshot.actualResponseMode !== value.responseMode)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["compactedContext"], message: "El snapshot no pertenece a esta ronda." });
-  for (const [resultIndex, result] of (value.phase === "plan" ? [] : value.toolResults ?? []).entries()) for (const [sourceIndex, source] of (result.sources ?? []).entries()) if (source.availability !== "available" || source.conversationId !== value.conversationId || source.analysisId !== value.analysisId) context.addIssue({ code: z.ZodIssueCode.custom, path: ["toolResults", resultIndex, "sources", sourceIndex], message: "La fuente no pertenece al scope disponible de la ronda." });
+  for (const [resultIndex, result] of rounds.flat().entries()) for (const [sourceIndex, source] of (result.sources ?? []).entries()) if (source.availability !== "available" || source.conversationId !== value.conversationId || source.analysisId !== value.analysisId) context.addIssue({ code: z.ZodIssueCode.custom, path: ["toolHistory", resultIndex, "sources", sourceIndex], message: "La fuente no pertenece al scope disponible de la ronda." });
 });
 export type ChatRequest = z.infer<typeof chatRequestSchema>;
 export interface ChatExecutionService { execute(input: ChatRequest, signal: AbortSignal): AsyncIterable<AssistantStreamEvent> }
@@ -42,7 +61,7 @@ function safeError(roundId: string, error: unknown): AssistantStreamEvent {
 }
 
 function assertNoBlockedTerms(value: unknown, terms: readonly string[]): void { const serialized = canonicalizePrivacyText(JSON.stringify(value)); if (terms.some((term) => { const canonical = canonicalizePrivacyText(term); return canonical.length > 1 && serialized.includes(canonical); })) throw new ProviderAdapterError("privacy", "privacy_known_name"); }
-function assertRequestSafe(input: ChatRequest): void { const { privacyBlockedTerms = [], ...providerInput } = input; assertSafeForProvider(providerInput); assertNoBlockedTerms(providerInput, privacyBlockedTerms); }
+function assertRequestSafe(input: ChatRequest): void { const { privacyBlockedTerms = [], ...providerInput } = input; const audited = withoutOpaqueProviderSignatures(providerInput); assertSafeForProvider(audited); assertNoBlockedTerms(audited, privacyBlockedTerms); }
 
 async function readLimitedJson(request: Request): Promise<unknown> {
   if (!request.body) return undefined;
@@ -59,7 +78,7 @@ export function createChatPostHandler(service: ChatExecutionService, options: { 
     const declared = Number(request.headers.get("content-length")); if (Number.isFinite(declared) && declared > MAX_CHAT_REQUEST_BYTES) return Response.json({ error: "Solicitud de chat no válida." }, { status: 413 });
     let body: unknown; try { body = await readLimitedJson(request); } catch (error) { return Response.json({ error: "Solicitud de chat no válida." }, { status: error instanceof RangeError ? 413 : 400 }); }
     const parsed = chatRequestSchema.safeParse(body); if (!parsed.success) return Response.json({ error: "Solicitud de chat no válida." }, { status: 400 });
-    try { assertRequestSafe(parsed.data); for (const entry of parsed.data.phase === "plan" ? [] : parsed.data.toolResults ?? []) if (!entry.status || entry.status === "success" || entry.status === "empty") ANALYSIS_TOOL_SCHEMAS[entry.tool].output.parse(entry.data ?? entry.result); } catch { return Response.json({ error: "La solicitud fue bloqueada por privacidad o validación." }, { status: 400 }); }
+    try { assertRequestSafe(parsed.data); const results = parsed.data.phase === "plan" ? [] : (parsed.data.toolHistory ?? [parsed.data.toolResults ?? []]).flat(); for (const entry of results) if (!entry.status || entry.status === "success" || entry.status === "empty") ANALYSIS_TOOL_SCHEMAS[entry.tool].output.parse(entry.data ?? entry.result); } catch { return Response.json({ error: "La solicitud fue bloqueada por privacidad o validación." }, { status: 400 }); }
     const deadline = deadlineSignal(request.signal, options.deadlineMs ?? DEFAULT_CHAT_DEADLINE_MS); const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({ async start(controller) {
       const blocked = parsed.data.privacyBlockedTerms ?? []; const messageId = `${parsed.data.executionId ?? "legacy"}:message:${parsed.data.roundNumber}`; let eventCount = 0;
@@ -73,7 +92,7 @@ export function createChatPostHandler(service: ChatExecutionService, options: { 
           if (event.roundId !== parsed.data.roundId) throw new ProviderAdapterError("provider", "round_mismatch");
           if (event.type === "text_delta") { for (const delta of buffer.push(event.delta)) emit({ type: "text_delta", roundId: event.roundId, messageId, delta }); continue; }
           if (event.type === "done" || event.type === "error") flush();
-          assertSafeForProvider(event); assertNoBlockedTerms(event, blocked); emit(event);
+          const auditedEvent = withoutOpaqueProviderSignatures(event); assertSafeForProvider(auditedEvent); assertNoBlockedTerms(auditedEvent, blocked); emit(event);
         }
         flush();
       } catch (error) {
@@ -133,13 +152,14 @@ async function counted(adapter: AIProviderAdapter, input: ChatRequest, apiKey: s
 function nativeToolMessages(results: readonly z.infer<typeof toolResult>[]): ProviderMessage[] {
   if (!results.length) return [];
   return [
-    { role: "assistant", content: "", toolCalls: results.map((entry) => ({ id: entry.requestId, name: entry.tool, args: entry.args ?? {} })) },
+    { role: "assistant", content: "", toolCalls: results.map((entry) => ({ id: entry.requestId, name: entry.tool, args: entry.args ?? {}, ...(entry.providerContext ? { providerContext: entry.providerContext } : {}) })) },
     ...results.map((entry): ProviderMessage => ({
       role: "tool", toolCallId: entry.requestId, toolName: entry.tool,
       content: JSON.stringify(entry.status === "failed" || entry.status === "cancelled" ? { ok: false, error: entry.error } : { ok: true, data: entry.data ?? entry.result ?? null, sources: (entry.sources ?? []).map((source) => ({ id: source.id, label: source.sanitizedSourceLabel })), ...(entry.status === "empty" ? { empty: true, message: "No se encontraron datos para los criterios indicados." } : {}) }),
     })),
   ];
 }
+function nativeToolHistory(rounds: readonly (readonly z.infer<typeof toolResult>[])[]): ProviderMessage[] { return rounds.flatMap((round) => nativeToolMessages(round)); }
 async function messagesFor(input: ChatRequest, adapter: AIProviderAdapter, apiKey: string, tools: readonly ProviderTool[], signal: AbortSignal) {
   const instruction = responseModeInstructions(input.responseMode); const continuationInstruction = "Continúa exactamente desde el contenido parcial anterior, sin repetirlo ni reiniciar la respuesta."; const question = input.phase === "continue" ? continuationInstruction : input.question;
   const promptTokens = await counted(adapter, input, apiKey, `${instruction}\n${question}`, signal); const toolSchemaTokens = await counted(adapter, input, apiKey, JSON.stringify(tools), signal);
@@ -166,11 +186,10 @@ async function messagesFor(input: ChatRequest, adapter: AIProviderAdapter, apiKe
     ? "\n\nPara consultas sobre datos del análisis, debes usar primero la herramienta local adecuada y responder únicamente con los resultados devueltos. Para una matrícula concreta, no respondas todavía: solicita primero su ficha mediante una herramienta."
     : "";
   const messages: ProviderMessage[] = [{ role: "system", content: `${instruction}${analysisSummary}${toolInstruction}${context ? `\n\nContexto sanitizado:\n${context}` : ""}` }];
-  if (input.phase === "respond") { messages.push({ role: "user", content: input.question }, ...nativeToolMessages(input.toolResults)); }
+  if (input.phase === "respond") { messages.push({ role: "user", content: input.question }, ...nativeToolHistory(input.toolHistory ?? [input.toolResults])); }
   else if (input.phase === "continue") {
-    messages.push({ role: "assistant", content: input.continuationContext });
-    if (input.toolResults?.length) messages.push(...nativeToolMessages(input.toolResults));
-    messages.push({ role: "user", content: continuationInstruction });
+    if (input.toolHistory?.length && input.question) messages.push({ role: "user", content: input.question }, ...nativeToolHistory(input.toolHistory));
+    else { messages.push({ role: "assistant", content: input.continuationContext ?? continuationInstruction }); if (input.toolResults?.length) messages.push(...nativeToolMessages(input.toolResults)); messages.push({ role: "user", content: continuationInstruction }); }
   }
   else messages.push({ role: "user", content: input.question });
   const finalTokens = await counted(adapter, input, apiKey, messages.map((message) => message.content).join("\n") + JSON.stringify(tools), signal); if (finalTokens + 2_048 + Math.ceil(contextWindow * ((input.safetyMarginPercent ?? 10) / 100)) > contextWindow) throw new ProviderAdapterError("context", "context_overflow");
@@ -183,9 +202,9 @@ export function createChatService(resolveAdapter: ChatAdapterResolver = createPr
     if (tools.length) {
       yield { type: "status", roundId: input.roundId, label: "Planificando herramientas" };
       const result = await adapter.planTools({ apiKey, signal, modelId: input.modelId, providerModelName: input.profile?.providerModelName, messages, tools });
-      if (result.toolCalls.length) { for (const call of result.toolCalls) { if (!ANALYSIS_TOOL_NAMES.includes(call.name as AnalysisToolName)) throw new ProviderAdapterError("provider", "tool_not_allowed"); const tool = call.name as AnalysisToolName; ANALYSIS_TOOL_SCHEMAS[tool].input.parse(call.args); assertSafeForProvider(call.args); yield { type: "tool_request", roundId: input.roundId, requestId: call.id, tool, args: call.args }; } yield { type: "done", roundId: input.roundId, finishReason: "tool_request" }; return; }
+      if (result.toolCalls.length) { for (const call of result.toolCalls) { if (!ANALYSIS_TOOL_NAMES.includes(call.name as AnalysisToolName)) throw new ProviderAdapterError("provider", "tool_not_allowed"); const tool = call.name as AnalysisToolName; ANALYSIS_TOOL_SCHEMAS[tool].input.parse(call.args); assertSafeForProvider(call.args); yield { type: "tool_request", roundId: input.roundId, requestId: call.id, tool, args: call.args, ...(call.providerContext ? { providerContext: call.providerContext } : {}) }; } yield { type: "done", roundId: input.roundId, finishReason: "tool_request" }; return; }
     }
-    for await (const event of adapter.streamResponse({ apiKey, signal, modelId: input.modelMetadata?.generationModelId ?? input.modelId, providerModelName: input.profile?.providerModelName, messages, maxOutputTokens: Math.min(2_048, input.modelMetadata?.maxOutputTokens ?? input.profile?.maxOutputTokens ?? 2_048) })) { const converted = providerEvent(input, event); if (converted) yield converted; }
+    for await (const event of adapter.streamResponse({ apiKey, signal, modelId: input.modelMetadata?.generationModelId ?? input.modelId, providerModelName: input.profile?.providerModelName, messages, tools, maxOutputTokens: Math.min(2_048, input.modelMetadata?.maxOutputTokens ?? input.profile?.maxOutputTokens ?? 2_048) })) { const converted = providerEvent(input, event); if (converted) yield converted; }
   } };
 }
 function providerEvent(input: ChatRequest, event: ProviderStreamEvent): AssistantStreamEvent | undefined { if (event.type === "text_delta") return { type: "text_delta", roundId: input.roundId, messageId: `${input.executionId ?? "legacy"}:message:${input.roundNumber}`, delta: event.delta }; if (event.type === "usage") return { type: "usage", roundId: input.roundId, usage: event.usage }; return { type: "done", roundId: input.roundId, finishReason: event.finishReason }; }

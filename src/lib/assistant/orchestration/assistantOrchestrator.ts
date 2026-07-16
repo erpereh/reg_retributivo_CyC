@@ -1,4 +1,4 @@
-import { assertSafeForProvider } from "@/lib/assistant/privacy/assertions";
+import { assertSafeForProvider, withoutOpaqueProviderSignatures } from "@/lib/assistant/privacy/assertions";
 import { IncrementalNdjsonDecoder, StreamProtocolError } from "@/lib/assistant/streamProtocol";
 import type { AssistantStreamEvent } from "@/lib/assistant/schemas";
 import type { AnalysisToolRegistry, AnalysisToolName } from "@/lib/assistant/tools/registry";
@@ -69,6 +69,8 @@ export function createRepositoryRequestScopeValidator(repositories: Pick<Assista
     }
     const toolResults = Array.isArray(body.toolResults) ? body.toolResults : [];
     for (const result of toolResults) {
+      const status = (result as { status?: unknown }).status;
+      if (status === "failed" || status === "cancelled") continue;
       const sourceList = Array.isArray((result as { sources?: unknown }).sources) ? (result as { sources: Record<string, unknown>[] }).sources : [];
       if (!sourceList.length) throw new ProviderAdapterError("privacy", "local_tool_sources_required");
       for (const source of sourceList) {
@@ -154,17 +156,17 @@ export class AssistantOrchestrator {
       await beforeRun?.(runContext); assertActive();
       const current = { id: input.modelProfileId, modelId: input.modelId };
       const profiles = [current, current];
-      let continuation: { messageId: string; context: string } | undefined = input.resumeFrom; let lastError: unknown; let attempt = 0; let posts = 0; let phase: "plan" | "respond" | "continue" = continuation ? "continue" : "plan"; let toolResults: unknown[] = [];
+      let continuation: { messageId: string; context: string } | undefined = input.resumeFrom; let lastError: unknown; let attempt = 0; let posts = 0; let phase: "plan" | "respond" | "continue" = continuation ? "continue" : "plan"; let toolResults: unknown[] = []; const toolHistory: unknown[][] = [];
       while (attempt < profiles.length && posts < 3) {
         const producer = profiles[attempt]!; let text = ""; posts += 1; const roundId = `${executionId}:round:${posts}`; const messageId = posts === 1 && input.assistantMessageId ? input.assistantMessageId : `${executionId}:message:${posts}`;
         try {
           const legacyContextWindow = input.profile?.detectedContextWindow ?? input.profile?.manualContextWindow;
           const modelMetadata = input.modelMetadata ?? (legacyContextWindow ? { contextWindow: legacyContextWindow, ...(input.profile?.maxOutputTokens ? { maxOutputTokens: input.profile.maxOutputTokens } : {}) } : undefined);
           const privacyBlockedTerms = canonicalPrivacyTerms(input.privacyBlockedTerms ?? this.dependencies.registry.privacyBlockedTerms ?? []);
-          const body: Record<string, unknown> = { phase, executionId, conversationId: input.conversationId, analysisId: input.analysisId, analysisContext: input.analysisContext, roundId, roundNumber: posts, providerId: input.providerId, provider: input.provider, modelProfileId: producer.id, modelId: producer.modelId, modelMetadata, privacyBlockedTerms, contextCandidates: input.contextCandidates, responseMode: input.responseMode, contextStrategy: input.contextStrategy, tools: this.dependencies.registry.names, ...(phase === "plan" ? { question: input.question } : phase === "respond" ? { question: input.question, toolResults } : { toolResults, interruptedMessageId: continuation?.messageId ?? `${executionId}:message:${posts - 1}`, continuationContext: continuation?.context ?? "Continuación de herramientas sin texto previo." }) };
+          const body: Record<string, unknown> = { phase, executionId, conversationId: input.conversationId, analysisId: input.analysisId, analysisContext: input.analysisContext, roundId, roundNumber: posts, providerId: input.providerId, provider: input.provider, modelProfileId: producer.id, modelId: producer.modelId, modelMetadata, privacyBlockedTerms, contextCandidates: input.contextCandidates, responseMode: input.responseMode, contextStrategy: input.contextStrategy, tools: this.dependencies.registry.names, ...(phase === "plan" ? { question: input.question } : phase === "respond" ? { question: input.question, toolResults, toolHistory } : { question: input.question, toolResults, toolHistory, ...(continuation ? { interruptedMessageId: continuation.messageId, continuationContext: continuation.context } : {}) }) };
           if (input.compaction) body.compactionLineage = { decisions: input.compaction.decisions, figures: input.compaction.figures, sourceIds: input.compaction.sourceIds, actionIds: input.compaction.actionIds, personIds: input.compaction.personIds, analysisVersion: input.compaction.analysisVersion };
-          Object.keys(body).forEach((key) => body[key] === undefined && delete body[key]); assertRequestWithinPrivacyEnvelope(body, privacyBlockedTerms); const { apiKey: _key, privacyBlockedTerms: _blocked, ...audited } = body; void _key; void _blocked; assertSafeForProvider(audited); await this.dependencies.validateRequestScope(body, runContext); assertActive();
-          const events: AssistantStreamEvent[] = []; await readEvents(await this.dependencies.transport(body, controller.signal), (event) => { if (event.roundId !== roundId) throw new Error("El evento no pertenece a la ejecución activa."); this.dependencies.registry.assertSafeOutput?.(event); const normalized = event.type === "text_delta" ? { ...event, messageId } : event; events.push(normalized); allEvents.push(normalized); if (normalized.type === "text_delta") { text += normalized.delta; input.onTextDelta?.(normalized.delta); } }); assertActive();
+          Object.keys(body).forEach((key) => body[key] === undefined && delete body[key]); assertRequestWithinPrivacyEnvelope(body, privacyBlockedTerms); const { apiKey: _key, privacyBlockedTerms: _blocked, ...audited } = body; void _key; void _blocked; assertSafeForProvider(withoutOpaqueProviderSignatures(audited)); await this.dependencies.validateRequestScope(body, runContext); assertActive();
+          const events: AssistantStreamEvent[] = []; await readEvents(await this.dependencies.transport(body, controller.signal), (event) => { if (event.roundId !== roundId) throw new Error("El evento no pertenece a la ejecución activa."); this.dependencies.registry.assertSafeOutput?.(withoutOpaqueProviderSignatures(event)); const normalized = event.type === "text_delta" ? { ...event, messageId } : event; events.push(normalized); allEvents.push(normalized); if (normalized.type === "text_delta") { text += normalized.delta; input.onTextDelta?.(normalized.delta); } }); assertActive();
           for (const status of events) if (status.type === "status" && status.code === "context_compacted" && status.snapshot) { await this.dependencies.persistSnapshot?.(status.snapshot, runContext); assertActive(); }
           const errorEvent = events.find((event): event is Extract<AssistantStreamEvent, { type: "error" }> => event.type === "error"); if (errorEvent) throw new ProviderAdapterError(errorEvent.classification ?? (errorEvent.retryable ? "transient" : "provider"), errorEvent.code);
           const requests = events.filter((event): event is Extract<AssistantStreamEvent, { type: "tool_request" }> => event.type === "tool_request");
@@ -172,8 +174,9 @@ export class AssistantOrchestrator {
             if (!text.trim()) throw new ProviderAdapterError("provider", "empty_response");
             const completed = { id: messageId, status: "completed" as const, content: text, modelProfileId: producer.id, modelId: producer.modelId }; producedMessages.push(completed); await this.dependencies.persistMessage?.(completed, runContext); assertActive(); const snapshotId = events.find((event): event is Extract<AssistantStreamEvent, { type: "status" }> & { snapshot: ContextSnapshot } => event.type === "status" && event.code === "context_compacted" && Boolean(event.snapshot))?.snapshot.id; await this.dependencies.persistRunMetadata?.({ conversationId: input.conversationId, actualStrategy: input.contextStrategy, actualResponseMode: input.responseMode, ...(snapshotId ? { snapshotId } : {}) }, runContext); assertActive(); this.lastProducedMessageId = messageId; this.lastInterrupted = undefined; return { text, events: allEvents, rounds: posts, producedMessages, sources: [...recoveredSources.values()] };
           }
-          const settledTools = await executeAtomicToolRound(this.dependencies.registry, requests.map((request) => ({ requestId: request.requestId, tool: request.tool as AnalysisToolName, args: request.args })), { signal: controller.signal });
+          const settledTools = await executeAtomicToolRound(this.dependencies.registry, requests.map((request) => ({ requestId: request.requestId, tool: request.tool as AnalysisToolName, args: request.args, ...(request.providerContext ? { providerContext: request.providerContext } : {}) })), { signal: controller.signal });
           toolResults = [...settledTools];
+          toolHistory.push(toolResults);
           for (const source of settledTools.flatMap((result) => result.sources)) if (source && typeof source === "object" && typeof (source as SourceReference).id === "string") recoveredSources.set((source as SourceReference).id, source as SourceReference);
           assertActive();
           phase = phase === "plan" ? "respond" : "continue";
@@ -181,7 +184,7 @@ export class AssistantOrchestrator {
           lastError = error; if (controller.signal.aborted) throw error;
           if (text) { const interrupted = { id: messageId, status: "interrupted" as const, content: text, modelProfileId: producer.id, modelId: producer.modelId }; producedMessages.push(interrupted); producedMessageIds.add(messageId); await this.dependencies.persistMessage?.(interrupted, runContext); assertActive(); continuation = { messageId, context: `${continuation?.context ?? ""}${text}` }; this.lastInterrupted = continuation; }
           const classification = error instanceof ProviderAdapterError ? error.classification : "provider";
-          if (classification !== "transient") throw error; attempt += 1; phase = continuation ? "continue" : "plan"; toolResults = [];
+          if (classification !== "transient") throw error; attempt += 1; phase = continuation || toolHistory.length > 1 ? "continue" : toolHistory.length === 1 ? "respond" : "plan"; toolResults = toolHistory.at(-1) ?? [];
         }
       }
       throw lastError ?? new ProviderAdapterError("provider", "tool_round_limit");

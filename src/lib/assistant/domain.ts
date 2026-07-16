@@ -1,4 +1,4 @@
-import { detectSensitivePatterns } from "@/lib/assistant/privacy/patterns";
+import { detectSensitivePatterns, normalizeSensitiveKey } from "@/lib/assistant/privacy/patterns";
 
 export type ConversationType = "general" | "analysis";
 export type ConversationStatus = "active" | "archived" | "archived_analysis_deleted";
@@ -151,24 +151,67 @@ export interface EphemeralLocalDocumentMetadata extends Omit<PersistedDocumentMe
 export interface ConversionResult { conversation: Conversation; messages: ChatMessage[]; event: ChatEvent }
 
 export interface KnownPersonReference { employeeNumber: string; person?: string }
+export interface ResolvedChatContent { content: string; explicitPersonIds: string[] }
 const SENSITIVE_CHAT_CONTENT_ERROR = "El contenido contiene datos sensibles no permitidos.";
 
 function escapeRegularExpression(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-export function sanitizeChatContent(rawContent: string, knownPeople: readonly KnownPersonReference[], conversationType: ConversationType): string {
+function personTokens(value: string): Array<{ value: string; start: number; end: number }> {
+  return [...value.matchAll(/(?:[\p{L}\p{N}]\p{M}*)+/gu)]
+    .map((match) => ({ value: normalizeSensitiveKey(match[0]), start: match.index, end: match.index + match[0].length }))
+    .filter((token) => token.value.length > 0);
+}
+
+export function resolveChatContent(rawContent: string, knownPeople: readonly KnownPersonReference[], conversationType: ConversationType, allowedPersonIds?: readonly string[], primaryPersonId?: string): ResolvedChatContent {
   let content = rawContent.trim();
   if (conversationType === "analysis") {
-    for (const person of knownPeople) {
-      if (!person.person?.trim()) continue;
-      content = content.replace(new RegExp(escapeRegularExpression(person.person), "giu"), `matrícula ${person.employeeNumber}`);
+    content = content.replace(/(?:^|[^\p{L}\p{N}])((?:este|esta)\s+(?:trabajador(?:a)?|persona))(?![\p{L}\p{N}])/giu, (match, _mention: string, offset: number) => {
+      const allowed = allowedPersonIds ?? knownPeople.map((person) => person.employeeNumber);
+      const resolved = primaryPersonId && allowed.includes(primaryPersonId) ? primaryPersonId : allowed.length === 1 ? allowed[0] : undefined;
+      if (!resolved) throw new Error("ambiguous_person_mention");
+      const prefix = match.slice(0, Number(offset) === 0 ? 0 : 1);
+      return `${prefix}matrícula ${resolved}`;
+    });
+    const inputTokens = personTokens(content);
+    const names = knownPeople.flatMap((person) => person.person?.trim() ? [{ person, tokens: personTokens(person.person).map((token) => token.value) }] : []);
+    const allowed = allowedPersonIds ? new Set(allowedPersonIds) : undefined;
+    const replacements: Array<{ start: number; end: number; personId: string }> = [];
+    for (let start = 0; start < inputTokens.length;) {
+      let bestLength = 0;
+      const candidates = new Set<string>();
+      for (const { person, tokens } of names) {
+        for (let nameStart = 0; nameStart < tokens.length; nameStart += 1) {
+          let length = 0;
+          while (start + length < inputTokens.length && nameStart + length < tokens.length && inputTokens[start + length]!.value === tokens[nameStart + length]) length += 1;
+          if (!length || (length === 1 && inputTokens[start]!.value.length < 3)) continue;
+          if (length > bestLength) { bestLength = length; candidates.clear(); }
+          if (length === bestLength) candidates.add(person.employeeNumber);
+        }
+      }
+      if (!bestLength) { start += 1; continue; }
+      if (candidates.size !== 1) throw new Error("ambiguous_person_mention");
+      const personId = [...candidates][0]!;
+      if (allowed && !allowed.has(personId)) throw new Error("person_outside_authorized_scope");
+      replacements.push({ start: inputTokens[start]!.start, end: inputTokens[start + bestLength - 1]!.end, personId });
+      start += bestLength;
     }
+    for (const replacement of replacements.reverse()) content = `${content.slice(0, replacement.start)}matrícula ${replacement.personId}${content.slice(replacement.end)}`;
   }
   const structuredMatch = /^(?:Revisa a|Consulta la) matrícula ([\p{L}\p{N}._-]+)$/u.exec(content);
-  if (structuredMatch && knownPeople.some((person) => person.employeeNumber === structuredMatch[1])) return content;
+  if (structuredMatch && knownPeople.some((person) => person.employeeNumber === structuredMatch[1])) {
+    if (allowedPersonIds && !allowedPersonIds.includes(structuredMatch[1])) throw new Error("person_outside_authorized_scope");
+    return { content, explicitPersonIds: [structuredMatch[1]] };
+  }
   if (detectSensitivePatterns(content).length) throw new Error(SENSITIVE_CHAT_CONTENT_ERROR);
-  return content;
+  const explicitPersonIds = [...new Set(knownPeople.map((person) => person.employeeNumber).filter((employeeId) => new RegExp(`(?:^|[^\\p{L}\\p{N}])${escapeRegularExpression(employeeId)}(?:$|[^\\p{L}\\p{N}])`, "u").test(content)))];
+  if (allowedPersonIds && explicitPersonIds.some((personId) => !allowedPersonIds.includes(personId))) throw new Error("person_outside_authorized_scope");
+  return { content, explicitPersonIds };
+}
+
+export function sanitizeChatContent(rawContent: string, knownPeople: readonly KnownPersonReference[], conversationType: ConversationType): string {
+  return resolveChatContent(rawContent, knownPeople, conversationType).content;
 }
 
 export function convertConversationToAnalysis(

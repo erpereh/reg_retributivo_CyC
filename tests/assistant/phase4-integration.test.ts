@@ -35,6 +35,27 @@ describe("phase 4 disconnected-path regressions", () => {
     expect(phases).toEqual(["plan", "respond", "continue"]);
   });
 
+  it("completes the primary-person flow with Gemini native tool context intact", async () => {
+    const planTools = vi.fn()
+      .mockResolvedValueOnce({ toolCalls: [{ id: "q-person", name: "getPersonProfile", args: { analysisId: "a1", personId: "10048" }, providerContext: { kind: "gemini", partIndex: 0, thoughtSignature: "signature-person" } }] })
+      .mockResolvedValueOnce({ toolCalls: [] });
+    const streamResponse = vi.fn(async function* (request: { messages: unknown }) {
+      expect(JSON.stringify(request.messages)).toContain("signature-person");
+      yield { type: "text_delta", delta: "Ficha preparada" } as const;
+      yield { type: "done", finishReason: "STOP" } as const;
+    });
+    const adapter = { countTokens: vi.fn(async () => ({ tokens: 1, estimated: true })), planTools, streamResponse } as unknown as AIProviderAdapter;
+    const handler = createChatPostHandler(createChatService(async () => ({ adapter, apiKey: "server-only" })));
+    const transport = async (body: Record<string, unknown>, signal?: AbortSignal) => handler(new Request("http://local/chat", { method: "POST", body: JSON.stringify(body), signal }));
+    const profileResult = { personId: "10048", workplace: "Centro", position: "Técnico", category: "A1", totals: { registro: 1, payroll: 2, difference: 1 }, blocks: { salary: { registro: 1, payroll: 2, difference: 1 }, salaryComplement: { registro: 0, payroll: 0, difference: 0 }, extraSalary: { registro: 0, payroll: 0, difference: 0 } }, status: "OK", periods: [] };
+    const registry = { names: ["getPersonProfile"], execute: vi.fn(async () => profileResult) } as unknown as AnalysisToolRegistry;
+    const provider = { providerId: "provider-gemini", providerType: "gemini", baseUrl: "https://generativelanguage.googleapis.com", envVarName: "GEMINI_API_KEY" } as const;
+
+    await expect(new AssistantOrchestrator({ transport, registry, validateRequestScope }).send({ conversationId: "c1", analysisId: "a1", question: "dime todo lo que puedas de matrícula 10048", providerId: provider.providerId, provider, modelProfileId: "p1", modelId: "gemini-3.1-flash-lite", modelMetadata: { contextWindow: 1_000_000 }, responseMode: "strict", contextStrategy: "associated_people" })).resolves.toMatchObject({ text: "Ficha preparada", rounds: 2 });
+    expect(planTools).toHaveBeenCalledTimes(2);
+    expect(streamResponse).toHaveBeenCalledWith(expect.objectContaining({ tools: [expect.objectContaining({ name: "getPersonProfile" })] }));
+  });
+
   it("rejects more than 5000 unique privacy terms before transport", async () => {
     const transport = vi.fn(async (body: Record<string, unknown>) => ndjson([
       { type: "text_delta", roundId: body.roundId, messageId: "m1", delta: "No debe ejecutarse" },
