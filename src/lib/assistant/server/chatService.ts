@@ -3,26 +3,23 @@ import { assistantStreamEventSchema, contextSnapshotSchema, documentScopeSchema,
 import { assertSafeForProvider } from "@/lib/assistant/privacy/assertions";
 import { ANALYSIS_TOOL_NAMES, ANALYSIS_TOOL_SCHEMAS, type AnalysisToolName } from "@/lib/assistant/tools/registry";
 import { ContextPlanner, responseModeInstructions, type ContextCandidate } from "@/lib/assistant/context/contextPlanner";
-import { GeminiAdapter } from "@/lib/assistant/providers/geminiAdapter";
-import { OpenAICompatibleAdapter } from "@/lib/assistant/providers/openAiCompatibleAdapter";
-import { createPinnedManualFetcher, validateManualEndpointUrl } from "@/lib/assistant/server/manualEndpoint";
-import { PROVIDER_PRESETS, ProviderAdapterError, sanitizeProviderError, type AIProviderAdapter, type ProviderId, type ProviderMessage, type ProviderStreamEvent, type ProviderTool } from "@/lib/assistant/providers/types";
+import { ProviderAdapterError, sanitizeProviderError, type AIProviderAdapter, type ProviderMessage, type ProviderStreamEvent, type ProviderTool } from "@/lib/assistant/providers/types";
 import { SafeDeltaBuffer } from "@/lib/assistant/streamProtocol";
 import { canonicalizePrivacyText } from "@/lib/assistant/privacy/patterns";
+import { providerRuntime } from "@/lib/assistant/server/providerRuntime";
 
 const id = z.string().min(1).max(256);
 const contextCandidateSchema = z.object({ id, kind: z.enum(["tool", "metadata", "lexical", "chunk", "message"]), content: z.string().max(32_768), tokens: z.number().int().nonnegative(), relevance: z.number().min(0).max(1), sourceId: id, sanitizedHash: id, factKey: id, facets: z.record(z.array(z.string())).optional(), scope: documentScopeSchema }).strict();
 const compactedContextSchema = z.object({ snapshot: contextSnapshotSchema, payloadMessages: z.array(z.object({ id, content: z.string().max(32_768), tokens: z.number().int().nonnegative() }).strict()).max(256) }).strict();
 const compactionLineageSchema = z.object({ decisions: z.array(z.string().max(1_000)).max(256), figures: z.array(z.number().finite()).max(256), sourceIds: z.array(id).max(256), actionIds: z.array(id).max(256), personIds: z.array(id).max(256), analysisVersion: id }).strict();
-const common = { executionId: z.string().uuid().optional(), conversationId: id, analysisId: id.optional(), roundId: id, roundNumber: z.number().int().min(1).max(3), modelProfileId: id, modelId: id, profile: modelProfileSchema.optional(), apiKey: z.string().min(1).max(4_096).optional(), privacyBlockedTerms: z.array(z.string().min(2).max(256)).max(200).optional(), responseMode: z.enum(["strict", "flexible"]), contextStrategy: z.enum(["automatic", "full", "optimized"]), contextCandidates: z.array(contextCandidateSchema).max(256).optional(), compactedContext: compactedContextSchema.optional(), compactionLineage: compactionLineageSchema.optional(), safetyMarginPercent: z.number().min(0).max(50).optional(), warningThresholdPercent: z.number().min(1).max(99).optional(), compactionThresholdPercent: z.number().min(1).max(100).optional() };
-const plan = z.object({ phase: z.literal("plan"), ...common, question: z.string().min(1).max(16_384), tools: z.array(z.enum(ANALYSIS_TOOL_NAMES)).max(18) }).strict();
-const toolResult = z.object({ requestId: id, tool: z.enum(ANALYSIS_TOOL_NAMES), data: z.unknown().optional(), result: z.unknown().optional(), sources: z.array(sourceReferenceSchema).max(100).optional() }).strict().superRefine((value, context) => { if (value.data === undefined && value.result === undefined) context.addIssue({ code: z.ZodIssueCode.custom, message: "Falta el resultado de la herramienta." }); });
-const respond = z.object({ phase: z.literal("respond"), ...common, question: z.string().min(1).max(16_384), tools: z.array(z.enum(ANALYSIS_TOOL_NAMES)).max(18).optional(), toolResults: z.array(toolResult).min(1).max(18) }).strict();
-const continuation = z.object({ phase: z.literal("continue"), ...common, question: z.string().min(1).max(16_384).optional(), tools: z.array(z.enum(ANALYSIS_TOOL_NAMES)).max(18).optional(), toolResults: z.array(toolResult).max(18).optional(), interruptedMessageId: id, continuationContext: z.string().min(1).max(16_384) }).strict();
+const modelMetadataSchema = z.object({ contextWindow: z.number().int().positive(), maxOutputTokens: z.number().int().positive().optional(), generationModelId: id.optional() }).strict();
+const analysisContextSchema = z.object({ associatedPersonIds: z.array(id).max(20), primaryPersonId: id.optional(), strategy: z.enum(["associated_people", "full_analysis"]), periods: z.array(z.string().min(1).max(64)).max(100), sourceTypes: z.array(z.string().min(1).max(64)).max(20), aggregate: z.record(z.number().finite()).refine((value) => Object.keys(value).length <= 50) }).strict();
+const common = { executionId: z.string().uuid().optional(), conversationId: id, analysisId: id.optional(), analysisContext: analysisContextSchema.optional(), roundId: id, roundNumber: z.number().int().min(1).max(3), providerId: id.optional(), modelProfileId: id, modelId: id, modelMetadata: modelMetadataSchema.optional(), profile: modelProfileSchema.optional(), privacyBlockedTerms: z.array(z.string().min(2).max(256)).max(200).optional(), responseMode: z.enum(["strict", "flexible"]), contextStrategy: z.enum(["associated_people", "full_analysis", "automatic", "full", "optimized"]), contextCandidates: z.array(contextCandidateSchema).max(256).optional(), compactedContext: compactedContextSchema.optional(), compactionLineage: compactionLineageSchema.optional(), safetyMarginPercent: z.number().min(0).max(50).optional(), warningThresholdPercent: z.number().min(1).max(99).optional(), compactionThresholdPercent: z.number().min(1).max(100).optional() };
+const plan = z.object({ phase: z.literal("plan"), ...common, question: z.string().min(1).max(16_384), tools: z.array(z.enum(ANALYSIS_TOOL_NAMES)).max(19) }).strict();
+const toolResult = z.object({ requestId: id, tool: z.enum(ANALYSIS_TOOL_NAMES), args: z.unknown().optional(), status: z.enum(["success", "empty", "failed", "cancelled"]).optional(), data: z.unknown().optional(), result: z.unknown().optional(), error: z.object({ code: id, message: z.string().min(1).max(200) }).strict().optional(), sources: z.array(sourceReferenceSchema).max(100).optional() }).strict().superRefine((value, context) => { if ((!value.status || value.status === "success" || value.status === "empty") && value.data === undefined && value.result === undefined) context.addIssue({ code: z.ZodIssueCode.custom, message: "Falta el resultado de la herramienta." }); if ((value.status === "failed" || value.status === "cancelled") && !value.error) context.addIssue({ code: z.ZodIssueCode.custom, message: "Falta el error sanitizado." }); });
+const respond = z.object({ phase: z.literal("respond"), ...common, question: z.string().min(1).max(16_384), tools: z.array(z.enum(ANALYSIS_TOOL_NAMES)).max(19).optional(), toolResults: z.array(toolResult).min(1).max(19) }).strict();
+const continuation = z.object({ phase: z.literal("continue"), ...common, question: z.string().min(1).max(16_384).optional(), tools: z.array(z.enum(ANALYSIS_TOOL_NAMES)).max(19).optional(), toolResults: z.array(toolResult).max(19).optional(), interruptedMessageId: id, continuationContext: z.string().min(1).max(16_384) }).strict();
 export const chatRequestSchema = z.discriminatedUnion("phase", [plan, respond, continuation]).superRefine((value, context) => {
-  if (value.profile && (value.profile.id !== value.modelProfileId || value.profile.modelId !== value.modelId)) context.addIssue({ code: z.ZodIssueCode.custom, message: "El perfil y el modelo no coinciden con la ronda." });
-  if (value.analysisId && value.profile && !value.profile.analysisCompatible) context.addIssue({ code: z.ZodIssueCode.custom, message: "El perfil no es compatible con análisis." });
-  if (!value.analysisId && value.profile && !value.profile.generalChatCompatible) context.addIssue({ code: z.ZodIssueCode.custom, message: "El perfil no es compatible con chat general." });
   const expected = value.analysisId ? { type: "analysis", analysisId: value.analysisId } as const : { type: "conversation", conversationId: value.conversationId } as const;
   for (const [index, candidate] of (value.contextCandidates ?? []).entries()) if (!sameScope(candidate.scope, expected)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["contextCandidates", index, "scope"], message: "El contexto no pertenece a esta ronda." });
   if (value.compactedContext && (value.compactedContext.snapshot.conversationId !== value.conversationId || value.compactedContext.snapshot.analysisId !== value.analysisId || value.compactedContext.snapshot.actualStrategy !== value.contextStrategy || value.compactedContext.snapshot.actualResponseMode !== value.responseMode)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["compactedContext"], message: "El snapshot no pertenece a esta ronda." });
@@ -42,7 +39,7 @@ function safeError(roundId: string, error: unknown): AssistantStreamEvent {
 }
 
 function assertNoBlockedTerms(value: unknown, terms: readonly string[]): void { const serialized = canonicalizePrivacyText(JSON.stringify(value)); if (terms.some((term) => { const canonical = canonicalizePrivacyText(term); return canonical.length > 1 && serialized.includes(canonical); })) throw new ProviderAdapterError("privacy", "privacy_known_name"); }
-function assertRequestSafe(input: ChatRequest): void { const { apiKey: _apiKey, privacyBlockedTerms = [], ...providerInput } = input; void _apiKey; assertSafeForProvider(providerInput); assertNoBlockedTerms(providerInput, privacyBlockedTerms); }
+function assertRequestSafe(input: ChatRequest): void { const { privacyBlockedTerms = [], ...providerInput } = input; assertSafeForProvider(providerInput); assertNoBlockedTerms(providerInput, privacyBlockedTerms); }
 
 async function readLimitedJson(request: Request): Promise<unknown> {
   if (!request.body) return undefined;
@@ -59,7 +56,7 @@ export function createChatPostHandler(service: ChatExecutionService, options: { 
     const declared = Number(request.headers.get("content-length")); if (Number.isFinite(declared) && declared > MAX_CHAT_REQUEST_BYTES) return Response.json({ error: "Solicitud de chat no válida." }, { status: 413 });
     let body: unknown; try { body = await readLimitedJson(request); } catch (error) { return Response.json({ error: "Solicitud de chat no válida." }, { status: error instanceof RangeError ? 413 : 400 }); }
     const parsed = chatRequestSchema.safeParse(body); if (!parsed.success) return Response.json({ error: "Solicitud de chat no válida." }, { status: 400 });
-    try { assertRequestSafe(parsed.data); for (const entry of parsed.data.phase === "plan" ? [] : parsed.data.toolResults ?? []) ANALYSIS_TOOL_SCHEMAS[entry.tool].output.parse(entry.data ?? entry.result); } catch { return Response.json({ error: "La solicitud fue bloqueada por privacidad o validación." }, { status: 400 }); }
+    try { assertRequestSafe(parsed.data); for (const entry of parsed.data.phase === "plan" ? [] : parsed.data.toolResults ?? []) if (!entry.status || entry.status === "success" || entry.status === "empty") ANALYSIS_TOOL_SCHEMAS[entry.tool].output.parse(entry.data ?? entry.result); } catch { return Response.json({ error: "La solicitud fue bloqueada por privacidad o validación." }, { status: 400 }); }
     const deadline = deadlineSignal(request.signal, options.deadlineMs ?? DEFAULT_CHAT_DEADLINE_MS); const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({ async start(controller) {
       const blocked = parsed.data.privacyBlockedTerms ?? []; const messageId = `${parsed.data.executionId ?? "legacy"}:message:${parsed.data.roundNumber}`; let eventCount = 0;
@@ -89,36 +86,63 @@ export function createAssistantChatRoute(resolveAdapter: ChatAdapterResolver = c
 
 export interface ChatAdapterBinding { readonly adapter: AIProviderAdapter; readonly apiKey: string }
 export type ChatAdapterResolver = (input: ChatRequest) => Promise<ChatAdapterBinding>;
-type ServerEnv = Readonly<Record<string, string | undefined>>;
-export function createProductionChatAdapterResolver(options: { env?: ServerEnv; resolveAdapter?: (provider: ProviderId, baseUrl: string) => AIProviderAdapter } = {}): ChatAdapterResolver {
-  const env = options.env ?? process.env;
-  const adapterFactory = options.resolveAdapter ?? ((provider, baseUrl) => provider === "gemini" ? new GeminiAdapter() : new OpenAICompatibleAdapter({ provider, baseUrl, ...(provider === "manual" ? { fetcher: createPinnedManualFetcher() } : {}) }));
+export function createProductionChatAdapterResolver(): ChatAdapterResolver {
   return async (input) => {
-    const profile = input.profile; if (!profile || !profile.enabled) throw new ProviderAdapterError("incompatible", "profile_unavailable");
-    let baseUrl = profile.provider === "manual" ? validateManualEndpointUrl(profile.baseUrl).toString().replace(/\/+$/, "") : (PROVIDER_PRESETS[profile.provider].baseUrl ?? "");
-    const apiKey = profile.provider === "manual" ? input.apiKey : env[PROVIDER_PRESETS[profile.provider].envName ?? ""];
-    if (!apiKey) throw new ProviderAdapterError("auth", "provider_auth");
-    return { adapter: adapterFactory(profile.provider, baseUrl), apiKey };
+    if (input.providerId) {
+      const binding = await providerRuntime.resolve(input.providerId);
+      return { adapter: binding.adapter, apiKey: binding.apiKey };
+    }
+    throw new ProviderAdapterError("incompatible", "provider_not_selected");
   };
 }
+
+const TOOL_DESCRIPTIONS: Readonly<Record<AnalysisToolName, string>> = {
+  getAnalysisSummary: "Devuelve únicamente agregados globales del análisis, sin cargar personas ni documentos.",
+  findPersonByEmployeeId: "Busca una matrícula exacta dentro del alcance autorizado y devuelve su identificador anonimizado.",
+  searchPeople: "Busca personas por criterios anonimizados, con límite estricto y orden por relevancia.",
+  getPersonProfile: "Obtiene la ficha retributiva anonimizada de una matrícula concreta. Úsala antes de responder sobre esa matrícula.",
+  getPersonPayrollPeriods: "Lista de forma acotada los periodos de nómina disponibles para una persona concreta.",
+  getPersonConcepts: "Recupera los conceptos retributivos de una persona concreta; no consulta el corpus completo.",
+  getPersonConceptDifferences: "Compara importes por concepto para una persona concreta y devuelve solo diferencias estructuradas.",
+  getPersonCuadreReg: "Obtiene el cuadre entre periodo y desglose del registro para una persona concreta.",
+  getPersonNormalizedData: "Obtiene los cálculos normalizados y sus diferencias para una persona concreta.",
+  getPersonGroupings: "Obtiene agrupaciones laborales anonimizadas de una persona concreta.",
+  comparePeople: "Compara entre dos y veinte identificadores de persona explícitamente indicados.",
+  getTopDifferences: "Devuelve un ranking limitado de las mayores diferencias del análisis.",
+  getDifferencesByCenter: "Agrega diferencias por centro de trabajo sin devolver fichas personales completas.",
+  getDifferencesByPosition: "Agrega diferencias por puesto sin devolver fichas personales completas.",
+  getDifferencesByConcept: "Agrega diferencias por concepto retributivo sin cargar documentos completos.",
+  getPendingConcepts: "Devuelve conceptos pendientes de revisión dentro del análisis actual.",
+  getDisabledConcepts: "Devuelve conceptos deshabilitados dentro del análisis actual.",
+  searchDocumentChunks: "Busca fragmentos relevantes en fuentes autorizadas, paginados y limitados; nunca carga un documento completo.",
+  getSourceDetails: "Recupera el detalle sanitizado de una fuente exacta ya identificada.",
+};
 
 export function providerTools(names: readonly AnalysisToolName[]): ProviderTool[] {
   return names.map((name) => ({
     name,
-    description: name === "getPersonProfile"
-      ? "Obtiene la ficha retributiva anonimizada de una matrícula concreta del análisis actual. Úsala antes de responder a una consulta sobre esa matrícula."
-      : `Consulta local ${name}`,
+    description: TOOL_DESCRIPTIONS[name],
     parameters: ANALYSIS_TOOL_SCHEMAS[name].provider,
   }));
 }
 
 async function counted(adapter: AIProviderAdapter, input: ChatRequest, apiKey: string, text: string, signal: AbortSignal): Promise<number> { const count = await adapter.countTokens({ apiKey, modelId: input.modelId, providerModelName: input.profile?.providerModelName, text, signal }); if (!Number.isInteger(count.tokens) || count.tokens < 0) throw new ProviderAdapterError("provider", "invalid_token_count"); return count.tokens; }
+function nativeToolMessages(results: readonly z.infer<typeof toolResult>[]): ProviderMessage[] {
+  if (!results.length) return [];
+  return [
+    { role: "assistant", content: "", toolCalls: results.map((entry) => ({ id: entry.requestId, name: entry.tool, args: entry.args ?? {} })) },
+    ...results.map((entry): ProviderMessage => ({
+      role: "tool", toolCallId: entry.requestId, toolName: entry.tool,
+      content: JSON.stringify(entry.status === "failed" || entry.status === "cancelled" ? { ok: false, error: entry.error } : { ok: true, data: entry.data ?? entry.result ?? null, sources: (entry.sources ?? []).map((source) => ({ id: source.id, label: source.sanitizedSourceLabel })), ...(entry.status === "empty" ? { empty: true, message: "No se encontraron datos para los criterios indicados." } : {}) }),
+    })),
+  ];
+}
 async function messagesFor(input: ChatRequest, adapter: AIProviderAdapter, apiKey: string, tools: readonly ProviderTool[], signal: AbortSignal) {
   const instruction = responseModeInstructions(input.responseMode); const continuationInstruction = "Continúa exactamente desde el contenido parcial anterior, sin repetirlo ni reiniciar la respuesta."; const question = input.phase === "continue" ? continuationInstruction : input.question;
   const promptTokens = await counted(adapter, input, apiKey, `${instruction}\n${question}`, signal); const toolSchemaTokens = await counted(adapter, input, apiKey, JSON.stringify(tools), signal);
   const scope = input.analysisId ? { type: "analysis", analysisId: input.analysisId } as const : { type: "conversation", conversationId: input.conversationId } as const;
   const candidates: ContextCandidate[] = []; for (const candidate of input.contextCandidates ?? []) candidates.push({ ...candidate, tokens: await counted(adapter, input, apiKey, candidate.content, signal) });
-  const contextWindow = input.profile?.detectedContextWindow ?? input.profile?.manualContextWindow; if (!contextWindow) throw new ProviderAdapterError("context", "context_window_unknown");
+  const contextWindow = input.modelMetadata?.contextWindow ?? input.profile?.detectedContextWindow ?? input.profile?.manualContextWindow; if (!contextWindow) throw new ProviderAdapterError("context", "context_window_unknown");
   let plan; try { plan = new ContextPlanner().plan({ strategy: input.contextStrategy, responseMode: input.responseMode, candidates, scope, contextWindow, promptTokens, toolSchemaTokens, safetyMarginPercent: input.safetyMarginPercent, warningThresholdPercent: input.warningThresholdPercent, compactionThresholdPercent: input.compactionThresholdPercent }); } catch { throw new ProviderAdapterError("context", "context_budget_invalid"); }
   const statuses: AssistantStreamEvent[] = []; if (plan.budget.warning) statuses.push({ type: "status", roundId: input.roundId, code: "context_warning", label: "El contexto supera el umbral de aviso." });
   let contextItems = plan.items.map((item) => item.content);
@@ -134,12 +158,17 @@ async function messagesFor(input: ChatRequest, adapter: AIProviderAdapter, apiKe
     statuses.push({ type: "status", roundId: input.roundId, code: "context_compacted", label: "El contexto fue compactado automáticamente.", snapshot });
   }
   const context = contextItems.join("\n\n");
+  const analysisSummary = input.analysisId && input.analysisContext ? `\n\nEstás en una aplicación de análisis retributivo. Análisis: ${input.analysisId}. Matrículas asociadas: ${input.analysisContext.associatedPersonIds.join(", ") || "ninguna"}. Matrícula principal: ${input.analysisContext.primaryPersonId ?? "ninguna"}. Estrategia: ${input.analysisContext.strategy}. Periodos disponibles: ${input.analysisContext.periods.join(", ") || "no informados"}. Tipos de fuentes: ${input.analysisContext.sourceTypes.join(", ") || "no informados"}. Resumen agregado: ${JSON.stringify(input.analysisContext.aggregate)}. En este contexto, matrícula es el identificador interno de una persona trabajadora. No debe interpretarse como matrícula de vehículo, universidad, aeronave, patente ni otro significado externo.` : "";
   const toolInstruction = tools.length
     ? "\n\nPara consultas sobre datos del análisis, debes usar primero la herramienta local adecuada y responder únicamente con los resultados devueltos. Para una matrícula concreta, no respondas todavía: solicita primero su ficha mediante una herramienta."
     : "";
-  const messages: ProviderMessage[] = [{ role: "system", content: `${instruction}${toolInstruction}${context ? `\n\nContexto sanitizado:\n${context}` : ""}` }];
-  if (input.phase === "respond") { messages.push({ role: "user", content: input.question }); messages.push({ role: "tool", content: JSON.stringify(input.toolResults.map((entry) => ({ requestId: entry.requestId, tool: entry.tool, data: entry.data ?? entry.result, sources: entry.sources ?? [] }))) }); }
-  else if (input.phase === "continue") { messages.push({ role: "assistant", content: input.continuationContext }); messages.push({ role: "user", content: continuationInstruction }); if (input.toolResults?.length) messages.push({ role: "tool", content: JSON.stringify(input.toolResults.map((entry) => ({ requestId: entry.requestId, tool: entry.tool, data: entry.data ?? entry.result, sources: entry.sources ?? [] }))) }); }
+  const messages: ProviderMessage[] = [{ role: "system", content: `${instruction}${analysisSummary}${toolInstruction}${context ? `\n\nContexto sanitizado:\n${context}` : ""}` }];
+  if (input.phase === "respond") { messages.push({ role: "user", content: input.question }, ...nativeToolMessages(input.toolResults)); }
+  else if (input.phase === "continue") {
+    messages.push({ role: "assistant", content: input.continuationContext });
+    if (input.toolResults?.length) messages.push(...nativeToolMessages(input.toolResults));
+    messages.push({ role: "user", content: continuationInstruction });
+  }
   else messages.push({ role: "user", content: input.question });
   const finalTokens = await counted(adapter, input, apiKey, messages.map((message) => message.content).join("\n") + JSON.stringify(tools), signal); if (finalTokens + 2_048 + Math.ceil(contextWindow * ((input.safetyMarginPercent ?? 10) / 100)) > contextWindow) throw new ProviderAdapterError("context", "context_overflow");
   return { messages, statuses };
@@ -153,7 +182,7 @@ export function createChatService(resolveAdapter: ChatAdapterResolver = createPr
       const result = await adapter.planTools({ apiKey, signal, modelId: input.modelId, providerModelName: input.profile?.providerModelName, messages, tools });
       if (result.toolCalls.length) { for (const call of result.toolCalls) { if (!ANALYSIS_TOOL_NAMES.includes(call.name as AnalysisToolName)) throw new ProviderAdapterError("provider", "tool_not_allowed"); const tool = call.name as AnalysisToolName; ANALYSIS_TOOL_SCHEMAS[tool].input.parse(call.args); assertSafeForProvider(call.args); yield { type: "tool_request", roundId: input.roundId, requestId: call.id, tool, args: call.args }; } yield { type: "done", roundId: input.roundId, finishReason: "tool_request" }; return; }
     }
-    for await (const event of adapter.streamResponse({ apiKey, signal, modelId: input.modelId, providerModelName: input.profile?.providerModelName, messages, maxOutputTokens: Math.min(2_048, input.profile?.maxOutputTokens ?? 2_048) })) { const converted = providerEvent(input, event); if (converted) yield converted; }
+    for await (const event of adapter.streamResponse({ apiKey, signal, modelId: input.modelMetadata?.generationModelId ?? input.modelId, providerModelName: input.profile?.providerModelName, messages, maxOutputTokens: Math.min(2_048, input.modelMetadata?.maxOutputTokens ?? input.profile?.maxOutputTokens ?? 2_048) })) { const converted = providerEvent(input, event); if (converted) yield converted; }
   } };
 }
 function providerEvent(input: ChatRequest, event: ProviderStreamEvent): AssistantStreamEvent | undefined { if (event.type === "text_delta") return { type: "text_delta", roundId: input.roundId, messageId: `${input.executionId ?? "legacy"}:message:${input.roundNumber}`, delta: event.delta }; if (event.type === "usage") return { type: "usage", roundId: input.roundId, usage: event.usage }; return { type: "done", roundId: input.roundId, finishReason: event.finishReason }; }

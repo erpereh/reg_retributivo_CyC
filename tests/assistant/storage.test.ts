@@ -33,12 +33,13 @@ describe("assistant IndexedDB repositories", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  test("creates the complete idempotent version 4 schema", async () => {
+  test("creates the complete idempotent version 5 schema while retaining legacy stores", async () => {
     const db = await openAssistantDatabase(factory, "schema-test");
     expect(Array.from(db.objectStoreNames)).toEqual([...ASSISTANT_STORES].sort());
     db.close();
     const reloaded = await openAssistantDatabase(factory, "schema-test");
-    expect(reloaded.version).toBe(4);
+    expect(reloaded.version).toBe(5);
+    expect(reloaded.objectStoreNames.contains("modelProfiles")).toBe(true);
     expect(Array.from(reloaded.objectStoreNames)).toEqual([...ASSISTANT_STORES].sort());
     reloaded.close();
   });
@@ -88,8 +89,8 @@ describe("assistant IndexedDB repositories", () => {
   test("exposes repositories for every required store", async () => {
     const repositories = await createIndexedDbRepositories({ factory, dbName: "surface-test" });
     expect(Object.keys(repositories).sort()).toEqual([
-      "actions", "analysisVersions", "assistantSettings", "cache", "chunks", "cleanupJobs", "conversations", "documents", "events",
-      "beginAnalysisIngestion", "buildSearchIndex", "cleanupAnalysis", "clearAssistantContent", "continueAnalysisPerson", "convertConversationToAnalysis", "copyDocumentCorpus", "deleteConversation", "deleteDocumentCorpus", "indexJobs", "messages", "modelProfiles", "replaceAnalysisCorpus", "resolveChatAction", "searchTerms", "snapshots", "sources", "syncAnalysisVersion", "transferDocumentCorpus", "updateActiveConversation", "writeConversationBlock", "writeIngestionBlock", "writeModelConfiguration", "close",
+      "actions", "analysisVersions", "assistantSettings", "cache", "chunks", "cleanupJobs", "conversations", "documents", "events", "executionAudits",
+      "beginAnalysisIngestion", "buildSearchIndex", "cleanupAnalysis", "clearAssistantContent", "continueAnalysisPerson", "convertConversationToAnalysis", "copyDocumentCorpus", "deleteConversation", "deleteDocumentCorpus", "deleteProviderConfiguration", "indexJobs", "messages", "modelCatalog", "modelPreferences", "modelProfiles", "providerConfigs", "replaceAnalysisCorpus", "replaceProviderCatalog", "resolveChatAction", "saveModelPreferences", "searchTerms", "snapshots", "sources", "syncAnalysisVersion", "transferDocumentCorpus", "updateActiveConversation", "writeConversationBlock", "writeIngestionBlock", "writeModelConfiguration", "close",
     ].sort());
     repositories.close();
   });

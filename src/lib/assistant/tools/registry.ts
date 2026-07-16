@@ -4,8 +4,9 @@ import { analysisToolHandlers, type AnalysisToolData, type ScopedChunkRecord, ty
 import { DirectSearchIndex, type SearchIndex } from "@/lib/assistant/search/directIndex";
 import type { SourceReference } from "@/lib/assistant/domain";
 import { canonicalizePrivacyText } from "@/lib/assistant/privacy/patterns";
+import { assertToolAllowedBySnapshot, normalizeScopedToolArguments, type ScopeSnapshot } from "@/lib/assistant/execution/scopeSnapshot";
 
-export const ANALYSIS_TOOL_NAMES = ["getAnalysisSummary", "findPersonByEmployeeId", "searchPeople", "getPersonProfile", "getPersonPayrollPeriods", "getPersonConceptDifferences", "getPersonCuadreReg", "getPersonNormalizedData", "getPersonGroupings", "comparePeople", "getTopDifferences", "getDifferencesByCenter", "getDifferencesByPosition", "getDifferencesByConcept", "getPendingConcepts", "getDisabledConcepts", "searchDocumentChunks", "getSourceDetails"] as const;
+export const ANALYSIS_TOOL_NAMES = ["getAnalysisSummary", "findPersonByEmployeeId", "searchPeople", "getPersonProfile", "getPersonPayrollPeriods", "getPersonConcepts", "getPersonConceptDifferences", "getPersonCuadreReg", "getPersonNormalizedData", "getPersonGroupings", "comparePeople", "getTopDifferences", "getDifferencesByCenter", "getDifferencesByPosition", "getDifferencesByConcept", "getPendingConcepts", "getDisabledConcepts", "searchDocumentChunks", "getSourceDetails"] as const;
 export type AnalysisToolName = typeof ANALYSIS_TOOL_NAMES[number];
 const analysisId = z.string().min(1).max(128); const personId = z.string().min(1).max(64);
 const scoped = z.object({ analysisId }).strict(); const person = z.object({ analysisId, personId }).strict();
@@ -22,10 +23,12 @@ const normalizedCuadre = z.object({ personId, salaryPeriod: z.number(), salaryNo
 const conceptDifference = z.object({ block: z.string(), blockKey: z.string(), registroCode: z.string(), pdfConcept: z.string().optional(), registroAmount: z.number(), pdfAmount: z.number(), difference: z.number(), status }).strict();
 const sourceResult = z.object({ sourceId: z.string(), chunkId: z.string().optional(), sanitizedSourceLabel: z.string(), sourceType: z.string(), excerpt: z.string(), sanitizedHash: z.string(), facets: z.record(z.array(z.string())).optional() }).strict();
 const normalizedData = z.object({ personId, normalizedPlusVariables: z.number(), normalized: z.number(), periodComplete: z.number(), realPdf: z.number(), diffPdfVsPeriodComplete: z.number(), diffPdfVsNormalizedPlusVariables: z.number(), diffPdfVsNormalized: z.number(), status }).strict();
-const inputSchemas: Record<AnalysisToolName, z.ZodTypeAny> = { getAnalysisSummary: scoped, findPersonByEmployeeId: person, searchPeople: query, getPersonProfile: person, getPersonPayrollPeriods: person, getPersonConceptDifferences: person, getPersonCuadreReg: person, getPersonNormalizedData: person, getPersonGroupings: person, comparePeople: people, getTopDifferences: limit, getDifferencesByCenter: scoped, getDifferencesByPosition: scoped, getDifferencesByConcept: scoped, getPendingConcepts: scoped, getDisabledConcepts: scoped, searchDocumentChunks: query, getSourceDetails: source };
+const personConcept = z.object({ origin: z.enum(["registro", "payroll"]), concept: z.string(), amount: z.number(), period: z.string().optional(), block: z.string().optional() }).strict();
+const inputSchemas: Record<AnalysisToolName, z.ZodTypeAny> = { getAnalysisSummary: scoped, findPersonByEmployeeId: person, searchPeople: query, getPersonProfile: person, getPersonPayrollPeriods: person, getPersonConcepts: person, getPersonConceptDifferences: person, getPersonCuadreReg: person, getPersonNormalizedData: person, getPersonGroupings: person, comparePeople: people, getTopDifferences: limit, getDifferencesByCenter: scoped, getDifferencesByPosition: scoped, getDifferencesByConcept: scoped, getPendingConcepts: scoped, getDisabledConcepts: scoped, searchDocumentChunks: query, getSourceDetails: source };
 const outputSchemas: Record<AnalysisToolName, z.ZodTypeAny> = {
   getAnalysisSummary: z.object({ summary }).strict(), findPersonByEmployeeId: z.object({ person: safePerson.optional() }).strict(), searchPeople: z.object({ people: z.array(safePerson) }).strict(), getPersonProfile: profile,
   getPersonPayrollPeriods: z.object({ personId, periods: z.array(z.object({ period: z.string(), totalDevengado: z.number().optional() }).strict()) }).strict(),
+  getPersonConcepts: z.object({ personId, concepts: z.array(personConcept).max(500) }).strict(),
   getPersonConceptDifferences: z.object({ personId, concepts: z.array(conceptDifference) }).strict(), getPersonCuadreReg: z.object({ personId, breakdown: breakdown.optional(), normalizedVariables: normalizedCuadre.optional() }).strict(),
   getPersonNormalizedData: z.object({ personId, data: normalizedData.optional() }).strict(), getPersonGroupings: z.object({ personId, groupings: z.object({ position: z.string().optional(), valuation: z.string().optional(), category: z.string().optional(), family: z.string().optional(), personalCategoryGroup: z.string().optional() }).strict().optional() }).strict(),
   comparePeople: z.object({ people: z.array(safePerson) }).strict(), getTopDifferences: z.object({ people: z.array(safePerson) }).strict(),
@@ -40,7 +43,7 @@ const stringProperty = { type: "string", minLength: 1, maxLength: 128 } as const
 const providerInputs: Record<AnalysisToolName, ProviderJsonSchema> = Object.fromEntries(ANALYSIS_TOOL_NAMES.map((name) => {
   const properties: Record<string, unknown> = { analysisId: stringProperty };
   const required = ["analysisId"];
-  if (["findPersonByEmployeeId", "getPersonProfile", "getPersonPayrollPeriods", "getPersonConceptDifferences", "getPersonCuadreReg", "getPersonNormalizedData", "getPersonGroupings"].includes(name)) { properties.personId = { type: "string", minLength: 1, maxLength: 64 }; required.push("personId"); }
+  if (["findPersonByEmployeeId", "getPersonProfile", "getPersonPayrollPeriods", "getPersonConcepts", "getPersonConceptDifferences", "getPersonCuadreReg", "getPersonNormalizedData", "getPersonGroupings"].includes(name)) { properties.personId = { type: "string", minLength: 1, maxLength: 64 }; required.push("personId"); }
   if (["searchPeople", "searchDocumentChunks"].includes(name)) { properties.query = { type: "string", minLength: 1, maxLength: 256 }; properties.limit = { type: "integer", minimum: 1, maximum: 50, default: 10 }; required.push("query"); }
   if (name === "comparePeople") { properties.personIds = { type: "array", items: { type: "string", minLength: 1, maxLength: 64 }, minItems: 2, maxItems: 20 }; required.push("personIds"); }
   if (name === "getTopDifferences") properties.limit = { type: "integer", minimum: 1, maximum: 50, default: 10 };
@@ -48,7 +51,7 @@ const providerInputs: Record<AnalysisToolName, ProviderJsonSchema> = Object.from
   return [name, { type: "object", properties, required, additionalProperties: false }];
 })) as unknown as Record<AnalysisToolName, ProviderJsonSchema>;
 export const ANALYSIS_TOOL_SCHEMAS = Object.fromEntries(ANALYSIS_TOOL_NAMES.map((name) => [name, { input: inputSchemas[name], output: outputSchemas[name], provider: providerInputs[name] }])) as Record<AnalysisToolName, { input: z.ZodTypeAny; output: z.ZodTypeAny; provider: ProviderJsonSchema }>;
-export interface AnalysisToolRegistryContext { readonly conversation: { readonly id: string; readonly type: "general" | "analysis"; readonly analysisId?: string }; readonly analysis: AnalysisToolData; readonly documents?: readonly ScopedDocumentRecord[]; readonly chunks: readonly ScopedChunkRecord[]; readonly searchIndex?: SearchIndex }
+export interface AnalysisToolRegistryContext { readonly conversation: { readonly id: string; readonly type: "general" | "analysis"; readonly analysisId?: string }; readonly analysis: AnalysisToolData; readonly documents?: readonly ScopedDocumentRecord[]; readonly chunks: readonly ScopedChunkRecord[]; readonly searchIndex?: SearchIndex; readonly searchDocuments?: (input: { analysisId: string; query: string; limit: number }) => Promise<readonly { documentId: string; chunkId: string; sanitizedSourceLabel: string; excerpt: string; sanitizedHash: string }[]>; readonly scopeSnapshot?: ScopeSnapshot }
 export interface ToolExecutionEnvelope { readonly data: unknown; readonly sources: readonly SourceReference[] }
 export interface AnalysisToolRegistry { readonly names: typeof ANALYSIS_TOOL_NAMES; readonly privacyBlockedTerms?: readonly string[]; execute(name: AnalysisToolName, args: unknown): Promise<unknown>; executeEnvelope?(name: AnalysisToolName, args: unknown, requestId?: string): Promise<ToolExecutionEnvelope>; assertSafeOutput?(value: unknown): void }
 function assertScope(context: AnalysisToolRegistryContext, requestedAnalysisId: string): void { if (context.conversation.type !== "analysis" || !context.conversation.analysisId) throw new Error("La conversación general no tiene acceso a herramientas de análisis."); if (context.conversation.analysisId !== requestedAnalysisId || context.analysis.id !== requestedAnalysisId) throw new Error("El análisis solicitado no pertenece a la conversación."); }
@@ -56,10 +59,16 @@ function assertScope(context: AnalysisToolRegistryContext, requestedAnalysisId: 
 export function createAnalysisToolRegistry(context: AnalysisToolRegistryContext): AnalysisToolRegistry {
   async function execute(name: AnalysisToolName, args: unknown): Promise<unknown> {
     if (!ANALYSIS_TOOL_NAMES.includes(name)) throw new Error("Herramienta no permitida.");
-    const parsed = ANALYSIS_TOOL_SCHEMAS[name].input.parse(args) as Record<string, unknown> & { analysisId: string }; assertScope(context, parsed.analysisId);
+    const normalized = context.scopeSnapshot ? normalizeScopedToolArguments(context.scopeSnapshot, name, args) : args;
+    const parsed = ANALYSIS_TOOL_SCHEMAS[name].input.parse(normalized) as Record<string, unknown> & { analysisId: string }; assertScope(context, parsed.analysisId);
+    if (context.scopeSnapshot) assertToolAllowedBySnapshot(context.scopeSnapshot, name, parsed);
     assertNoKnownNames(parsed, context.analysis);
     let value: unknown;
     if (name === "searchDocumentChunks") {
+      if (context.searchDocuments) {
+        const matches = await context.searchDocuments({ analysisId: parsed.analysisId, query: String(parsed.query), limit: Number(parsed.limit) });
+        value = { matches: matches.map((match) => ({ sourceId: match.documentId, chunkId: match.chunkId, sanitizedSourceLabel: match.sanitizedSourceLabel, sourceType: "document", excerpt: match.excerpt, sanitizedHash: match.sanitizedHash })) };
+      } else {
       const allowed = new Map((context.documents ?? []).filter((document) => document.scope.type === "analysis" && document.scope.analysisId === parsed.analysisId && document.availability === "available").map((document) => [document.id, document]));
       const authoritativeChunks = (context.chunks ?? []).filter((chunk) => chunk.scope.type === "analysis" && chunk.scope.analysisId === parsed.analysisId && chunk.availability === "available" && allowed.has(chunk.documentId));
       const indexRecords = authoritativeChunks.length ? authoritativeChunks.map((chunk) => { const document = allowed.get(chunk.documentId)!; return { ...chunk, facets: chunk.facets ?? {}, sanitizedSourceLabel: document.sanitizedSourceLabel, sourceType: document.sourceType, excerpt: chunk.content, chunkId: chunk.id }; }) : (context.searchIndex ? [] : [...allowed.values()].map((document) => ({ ...document, documentId: document.id, chunkId: document.id, facets: {} })));
@@ -67,18 +76,25 @@ export function createAnalysisToolRegistry(context: AnalysisToolRegistryContext)
       const matches = await searchIndex.search({ scope: { type: "analysis", analysisId: parsed.analysisId }, query: String(parsed.query), limit: Number(parsed.limit) });
       const chunkMap = new Map(authoritativeChunks.map((chunk) => [chunk.id, chunk]));
       value = { matches: matches.flatMap(({ documentId: sourceId, chunkId }) => { const document = allowed.get(sourceId); const chunk = chunkMap.get(chunkId); if (!document || !chunk || chunk.documentId !== sourceId) return []; return [{ sourceId, chunkId: chunk.id, sanitizedSourceLabel: document.sanitizedSourceLabel, sourceType: document.sourceType, excerpt: chunk.content, sanitizedHash: chunk.sanitizedHash, ...(chunk.facets ? { facets: chunk.facets } : {}) }]; }) };
+      }
     } else if (name === "getSourceDetails") {
       const document = (context.documents ?? []).find((candidate) => candidate.id === parsed.sourceId && candidate.scope.type === "analysis" && candidate.scope.analysisId === parsed.analysisId && candidate.availability === "available"); value = document ? { sourceId: document.id, sanitizedSourceLabel: document.sanitizedSourceLabel, sourceType: document.sourceType, excerpt: document.content, sanitizedHash: document.sanitizedHash } : undefined;
     } else { const handler = analysisToolHandlers[name as keyof typeof analysisToolHandlers] as (analysis: AnalysisToolData, input: Record<string, unknown>) => unknown; value = handler(context.analysis, parsed); }
+    if (context.scopeSnapshot?.strategy === "associated_people" && name === "searchPeople") {
+      const allowed = new Set(context.scopeSnapshot.associatedPersonIds);
+      value = { people: (value as { people: Array<{ personId: string }> }).people.filter((person) => allowed.has(person.personId)) };
+    }
     const clean = stripUndefined(value);
     const result = ANALYSIS_TOOL_SCHEMAS[name].output.parse(clean); assertNoKnownNames(result, context.analysis); assertSafeForProvider(result); return result;
   }
   return { names: ANALYSIS_TOOL_NAMES, privacyBlockedTerms: knownNames(context.analysis), execute, assertSafeOutput(value) { assertNoKnownNames(value, context.analysis); assertSafeForProvider(value); }, async executeEnvelope(name, args, requestId = "local") {
     const data = await execute(name, args);
     const parsed = ANALYSIS_TOOL_SCHEMAS[name].input.parse(args) as { analysisId: string };
-    const sourceIds = name === "searchDocumentChunks" ? (data as { matches: { sourceId: string }[] }).matches.map((item) => item.sourceId) : name === "getSourceDetails" && data ? [(data as { sourceId: string }).sourceId] : [];
+    const documentMatches = name === "searchDocumentChunks" ? (data as { matches: { sourceId: string; sanitizedSourceLabel: string; sourceType: string; excerpt: string; sanitizedHash: string }[] }).matches : [];
+    const sourceIds = documentMatches.map((item) => item.sourceId).concat(name === "getSourceDetails" && data ? [(data as { sourceId: string }).sourceId] : []);
     const documentMap = new Map((context.documents ?? []).map((document) => [document.id, document]));
-    const sources: SourceReference[] = sourceIds.map((sourceId) => { const document = documentMap.get(sourceId)!; return { id: `tool-source-${context.conversation.id}-${sourceId}`, conversationId: context.conversation.id, analysisId: parsed.analysisId, documentId: sourceId, sourceType: document.sourceType, sanitizedSourceLabel: document.sanitizedSourceLabel, availability: document.availability, conceptIds: [], excerpt: document.content.slice(0, 2_000), sanitizedHash: document.sanitizedHash }; });
+    const matchMap = new Map(documentMatches.map((match) => [match.sourceId, match]));
+    const sources: SourceReference[] = sourceIds.flatMap((sourceId) => { const document = documentMap.get(sourceId); const match = matchMap.get(sourceId); if (!document && !match) return []; return [{ id: `tool-source-${context.conversation.id}-${sourceId}`, conversationId: context.conversation.id, analysisId: parsed.analysisId, documentId: sourceId, sourceType: document?.sourceType ?? match!.sourceType, sanitizedSourceLabel: document?.sanitizedSourceLabel ?? match!.sanitizedSourceLabel, availability: document?.availability ?? "available", conceptIds: [], excerpt: (document?.content ?? match!.excerpt).slice(0, 2_000), sanitizedHash: document?.sanitizedHash ?? match!.sanitizedHash }]; });
     if (!sources.length) {
       const excerpt = canonicalJson(data);
       const factKey = `${name}:${requestId}`;

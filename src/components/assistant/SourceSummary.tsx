@@ -11,7 +11,7 @@ const labels = {
   deleted: "Eliminada",
 } as const;
 
-export function SourceSummary({ sources, revealedSourceIds = [] }: Readonly<{ sources: readonly SourceReference[]; revealedSourceIds?: readonly string[] }>) {
+export function SourceSummary({ sources, revealedSourceIds = [], onOpenSource }: Readonly<{ sources: readonly SourceReference[]; revealedSourceIds?: readonly string[]; onOpenSource?(source: SourceReference): void }>) {
   const [expanded, setExpanded] = useState<string>();
   useEffect(() => {
     const requested = revealedSourceIds.find((id) => sources.some((source) => source.id === id && source.availability === "available"));
@@ -39,7 +39,7 @@ export function SourceSummary({ sources, revealedSourceIds = [] }: Readonly<{ so
                   className="min-h-11 min-w-11 rounded-xl px-3 text-xs font-bold text-primary enabled:hover:bg-blue-50 disabled:cursor-not-allowed disabled:text-muted"
                   disabled={!available}
                   aria-label={available ? `Abrir fuente ${source.sanitizedSourceLabel}` : unavailableLabel}
-                  onClick={() => setExpanded((current) => current === source.id ? undefined : source.id)}
+                  onClick={() => { setExpanded(undefined); onOpenSource?.(source); }}
                 >
                   {available ? "Abrir" : "No disponible"}
                 </button>

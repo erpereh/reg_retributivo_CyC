@@ -8,6 +8,7 @@ import {
   type ModelMetadata,
   type ProviderId,
   type ProviderModel,
+  type ProviderMessage,
   type ProviderStreamEvent,
   type StreamResponseRequest,
   type TokenCount,
@@ -45,6 +46,20 @@ function asModel(input: z.infer<typeof modelSchema>): ProviderModel {
 
 function safeJson(response: Response): Promise<unknown> {
   return response.json().catch(() => { throw new ProviderAdapterError("provider"); });
+}
+
+export function openAiNativeMessages(messages: readonly ProviderMessage[]): readonly Record<string, unknown>[] {
+  return messages.map((message) => {
+    if (message.role === "assistant" && message.toolCalls?.length) return {
+      role: "assistant", content: message.content || null,
+      tool_calls: message.toolCalls.map((call) => ({ id: call.id, type: "function", function: { name: call.name, arguments: JSON.stringify(call.args) } })),
+    };
+    if (message.role === "tool") {
+      if (!message.toolCallId) throw new ProviderAdapterError("provider", "orphan_tool_result");
+      return { role: "tool", tool_call_id: message.toolCallId, content: message.content };
+    }
+    return { role: message.role, content: message.content };
+  });
 }
 
 export class OpenAICompatibleAdapter implements AIProviderAdapter {
@@ -100,7 +115,7 @@ export class OpenAICompatibleAdapter implements AIProviderAdapter {
     const response = await this.call("/chat/completions", request.apiKey, {
       method: "POST", signal: request.signal,
       body: JSON.stringify({
-        model: request.modelId, messages: request.messages,
+        model: request.modelId, messages: openAiNativeMessages(request.messages),
         tools: request.tools.map((tool) => ({ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.parameters, strict: true } })),
         tool_choice: "required", stream: false,
       }),
@@ -121,7 +136,7 @@ export class OpenAICompatibleAdapter implements AIProviderAdapter {
     if (request.signal?.aborted) throw new ProviderAdapterError("cancelled");
     const response = await this.call("/chat/completions", request.apiKey, {
       method: "POST", signal: request.signal,
-      body: JSON.stringify({ model: request.modelId, messages: request.messages, max_completion_tokens: request.maxOutputTokens, stream: true, stream_options: { include_usage: true } }),
+      body: JSON.stringify({ model: request.modelId, messages: openAiNativeMessages(request.messages), max_completion_tokens: request.maxOutputTokens, stream: true, stream_options: { include_usage: true } }),
     });
     if (!response.headers.get("content-type")?.toLowerCase().includes("text/event-stream")) {
       await response.body?.cancel().catch(() => undefined);

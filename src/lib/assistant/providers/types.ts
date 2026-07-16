@@ -1,7 +1,6 @@
-import type { DetectedModel, ModelProfile, TokenUsage } from "@/lib/assistant/domain";
+import type { DetectedModel, TokenUsage } from "@/lib/assistant/domain";
 
-export type ProviderId = ModelProfile["provider"];
-export type ModelProfileInput = ModelProfile;
+export type ProviderId = "gemini" | "openai" | "openrouter" | "cerebras" | "groq" | "manual";
 export type ProviderErrorClassification = "transient" | "auth" | "privacy" | "incompatible" | "context" | "cancelled" | "provider";
 
 export interface ProviderPreset {
@@ -25,7 +24,13 @@ export interface ProviderModel extends DetectedModel {
 
 export interface ModelMetadata extends ProviderModel {}
 export interface TokenCount { readonly tokens: number; readonly estimated: boolean }
-export interface ProviderMessage { readonly role: "system" | "user" | "assistant" | "tool"; readonly content: string }
+export interface ProviderMessage {
+  readonly role: "system" | "user" | "assistant" | "tool";
+  readonly content: string;
+  readonly toolCalls?: readonly ProviderToolCall[];
+  readonly toolCallId?: string;
+  readonly toolName?: string;
+}
 export interface ProviderTool {
   readonly name: string;
   readonly description: string;

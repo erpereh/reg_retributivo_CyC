@@ -133,8 +133,9 @@ function defaultAgentFactory(lookup: PinnedLookup, maxResponseBytes: number): Cl
   });
 }
 
-function boundedResponse(response: Response, dispatcher: ClosableDispatcher, maxBytes: number): Response {
+function boundedResponse(response: Response, dispatcher: ClosableDispatcher, maxBytes: number, onSettled: () => void): Response {
   if (!response.body) {
+    onSettled();
     void dispatcher.close();
     return response;
   }
@@ -144,6 +145,7 @@ function boundedResponse(response: Response, dispatcher: ClosableDispatcher, max
   const finish = (error?: Error) => {
     if (settled) return;
     settled = true;
+    onSettled();
     if (error) void dispatcher.destroy(error);
     else void dispatcher.close();
   };
@@ -180,29 +182,38 @@ export function createPinnedManualFetcher(options: {
   agentFactory?: AgentFactory;
   fetcher?: FetchWithDispatcher;
   maxResponseBytes?: number;
+  timeoutMs?: number;
 } = {}): FetchWithDispatcher {
   const resolver = options.lookup ?? defaultResolver;
   const agentFactory = options.agentFactory ?? defaultAgentFactory;
   const networkFetch = options.fetcher ?? (undiciFetch as unknown as FetchWithDispatcher);
   const maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MANUAL_RESPONSE_LIMIT;
+  const timeoutMs = options.timeoutMs ?? 15_000;
   return async (input, init = {}) => {
     const { url, addresses } = await resolveManualEndpoint(typeof input === "string" || input instanceof URL ? input : input.url, resolver);
     const dispatcher = agentFactory(pinnedLookup(addresses), maxResponseBytes);
+    const timeout = new AbortController();
+    const timeoutId = setTimeout(() => timeout.abort(new ManualEndpointPolicyError("La petición al proveedor agotó el tiempo permitido.")), timeoutMs);
+    const signal = init.signal ? AbortSignal.any([init.signal, timeout.signal]) : timeout.signal;
+    const clearDeadline = () => clearTimeout(timeoutId);
     try {
-      const response = await networkFetch(url, { ...init, redirect: "manual", dispatcher });
+      const response = await networkFetch(url, { ...init, signal, redirect: "manual", dispatcher });
       if (response.status >= 300 && response.status < 400) {
         const error = new ManualEndpointPolicyError("El endpoint Manual no puede usar redirecciones.");
         void dispatcher.destroy(error);
+        clearDeadline();
         throw error;
       }
       const contentLength = Number(response.headers.get("content-length"));
       if (Number.isFinite(contentLength) && contentLength > maxResponseBytes) {
         const error = new ManualEndpointPolicyError("La respuesta del proveedor supera el tamaño permitido.");
         void dispatcher.destroy(error);
+        clearDeadline();
         throw error;
       }
-      return boundedResponse(response, dispatcher, maxResponseBytes);
+      return boundedResponse(response, dispatcher, maxResponseBytes, clearDeadline);
     } catch (error) {
+      clearDeadline();
       void dispatcher.destroy(error instanceof Error ? error : undefined);
       throw error;
     }

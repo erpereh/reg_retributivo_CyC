@@ -11,6 +11,7 @@ import type { ChatMessage, Conversation, ModelProfile } from "@/lib/assistant/do
 import { createIndexedDbRepositories } from "@/lib/assistant/storage/indexedDbRepositories";
 import type { AssistantRepositories } from "@/lib/assistant/storage/repositories";
 import type { AnalysisResult, StoredAnalysis } from "@/lib/types";
+import { seedCatalogFixtures } from "./catalog-fixtures";
 
 const createdAt = "2026-07-13T10:00:00.000Z";
 const encoder = new TextEncoder();
@@ -44,9 +45,9 @@ const activeAnalysis = {
 
 async function seed(factory: IDBFactory, dbName: string, conversations: Conversation[], messages: ChatMessage[] = [], profiles: ModelProfile[] = []) {
   const repositories = await createIndexedDbRepositories({ factory, dbName });
-  for (const item of conversations) await repositories.conversations.put(item);
-  for (const item of messages) await repositories.messages.put(item);
-  for (const item of profiles) await repositories.modelProfiles.put(item);
+  const mappings = await seedCatalogFixtures(repositories, profiles, createdAt);
+  for (const item of conversations) { const mapping = item.modelProfileId ? mappings.get(item.modelProfileId) : undefined; await repositories.conversations.put(mapping ? { ...item, providerId: mapping.providerId, modelProfileId: mapping.entryId, modelId: mapping.modelId } : item); }
+  for (const item of messages) { const mapping = item.modelProfileId ? mappings.get(item.modelProfileId) : undefined; await repositories.messages.put(mapping ? { ...item, providerId: mapping.providerId, modelProfileId: mapping.entryId, modelId: mapping.modelId } : item); }
   repositories.close();
 }
 

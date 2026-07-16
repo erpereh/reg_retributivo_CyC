@@ -5,14 +5,10 @@ import { useAppState } from "@/components/app/AppState";
 import { AssistantProvider } from "@/components/assistant/AssistantProvider";
 import { AssistantE2EHarness } from "@/components/assistant/AssistantE2EHarness";
 import { createIndexedDbRepositories } from "@/lib/assistant/storage/indexedDbRepositories";
-import type { ModelProfile } from "@/lib/assistant/domain";
+import { catalogKey, type ModelCatalogEntry, type ProviderConfig } from "@/lib/assistant/catalog/domain";
 
-const profile = (id: string, modelId: string): ModelProfile => ({
-  id, name: id, provider: "openai", baseUrl: "https://api.openai.com/v1", modelId,
-  enabled: true, generalChatCompatible: true, analysisCompatible: true,
-  supportsStreaming: true, supportsTools: true, supportsStructuredOutput: true,
-  detectedContextWindow: 32_768, maxOutputTokens: 2_048, capabilitiesSource: "detected",
-});
+const provider: ProviderConfig = { id: "e2e-provider", providerType: "openai", displayName: "E2E", baseUrl: "https://api.openai.com/v1", envVarName: "OPENAI_API_KEY", enabled: true, connectionStatus: "connected", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" };
+const model = (modelId: string): ModelCatalogEntry => ({ id: catalogKey(provider.id, modelId), providerId: provider.id, canonicalModelId: modelId, apiModelId: modelId, generationModelId: modelId, displayName: modelId, contextWindow: 32_768, maxOutputTokens: 2_048, capabilities: { chat: true, tools: true, streaming: true, vision: false, documents: false }, availability: "available", metadataSource: "adapter", detectedAt: "2026-01-01T00:00:00.000Z" });
 
 export function AssistantE2EAppScope({ children }: Readonly<{ children: ReactNode }>) {
   const { activeAnalysis, navigateAssistantIntent } = useAppState();
@@ -21,12 +17,10 @@ export function AssistantE2EAppScope({ children }: Readonly<{ children: ReactNod
     let cancelled = false;
     void (async () => {
       const repositories = await createIndexedDbRepositories();
-      const settings = { id: "assistant-settings" as const, defaultGeneralModelProfileId: "e2e-default", defaultAnalysisModelProfileId: "e2e-default", responseMode: "strict" as const, contextStrategy: "automatic" as const, safetyMarginPercent: 10, warningThresholdPercent: 75, compactionThresholdPercent: 85 };
-      await repositories.writeModelConfiguration({ profile: profile("e2e-current", "e2e-current-model"), settings });
-      await repositories.writeModelConfiguration({
-        profile: profile("e2e-default", "e2e-default-model"),
-        settings,
-      });
+      await repositories.providerConfigs.put(provider);
+      const entries = [model("e2e-current-model"), model("e2e-default-model")];
+      await repositories.replaceProviderCatalog(provider.id, entries);
+      await repositories.saveModelPreferences({ id: "model-preferences", favoriteCatalogEntryIds: [], recentCatalogEntryIds: [entries[0]!.id], lastCatalogEntryId: entries[0]!.id, updatedAt: new Date().toISOString() });
       repositories.close();
       if (!cancelled) setSeeded(true);
     })();

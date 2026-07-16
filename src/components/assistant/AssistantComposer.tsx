@@ -1,89 +1,66 @@
 "use client";
 
-import { Bot, BrainCircuit, ChevronDown, CircleGauge, Cpu, Gem, Plug, Scale, Send, Sparkles, Square, Zap } from "lucide-react";
-import { useState, type FormEvent, type KeyboardEvent } from "react";
-import type { ContextStrategy, Conversation, ModelProfile, ResponseMode } from "@/lib/assistant/domain";
-import type { ProviderId } from "@/lib/assistant/providers/types";
+import { CircleGauge, Cpu, Heart, Search, Send, Square } from "lucide-react";
+import { useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
+import type { ContextStrategy, Conversation, ModelPreferences, ResponseMode } from "@/lib/assistant/domain";
+import type { ModelCatalogEntry, ProviderConfig } from "@/lib/assistant/catalog/domain";
 
 const responseModeLabels: Record<ResponseMode, string> = { strict: "Estricto", flexible: "Flexible" };
-const contextStrategyLabels: Record<ContextStrategy, string> = { automatic: "Automática", full: "Completa", optimized: "Optimizada" };
+const control = "inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2 text-xs font-bold text-ink hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:opacity-45";
 
-function formatTokens(value: number) {
-  if (value >= 1_000_000) return `${Math.round(value / 1_000_000)}M`;
-  if (value >= 1_000) return `${Math.round(value / 1_000)}k`;
-  return String(value);
+function tokens(value?: number) { if (!value) return "—"; return value >= 1_000_000 ? `${Math.round(value / 1_000_000)}M` : value >= 1_000 ? `${Math.round(value / 1_000)}k` : String(value); }
+function reason(entry: ModelCatalogEntry, analysis: boolean): string | undefined {
+  if (entry.availability !== "available") return "Este modelo ya no está disponible.";
+  if (entry.capabilities.chat !== true) return entry.capabilities.chat === "unknown" ? "La compatibilidad con chat no está confirmada." : entry.incompatibleReason ?? "No es un modelo de conversación.";
+  if (analysis && entry.capabilities.tools !== true) return entry.capabilities.tools === "unknown" ? "Es necesario comprobar la compatibilidad con herramientas." : "Este modelo no admite las herramientas necesarias para consultar datos retributivos.";
+  return undefined;
 }
 
-function providerIcon(provider: ProviderId) {
-  const props = { "aria-hidden": true, className: "size-3.5 shrink-0" };
-  switch (provider) {
-    case "gemini": return <Gem {...props} />;
-    case "openai": return <Sparkles {...props} />;
-    case "openrouter": return <Plug {...props} />;
-    case "cerebras": return <BrainCircuit {...props} />;
-    case "groq": return <Zap {...props} />;
-    default: return <Bot {...props} />;
-  }
-}
-
-function profileModelName(profile: ModelProfile) {
-  return profile.detectedModels?.find((model) => model.id === profile.selectedModelCatalogId || model.id === profile.modelId || model.baseModelId === profile.modelId)?.displayName ?? profile.modelId ?? profile.name;
-}
-
-const controlClassName = "inline-flex min-h-9 min-w-9 max-w-[12rem] items-center gap-1.5 rounded-lg px-2 text-xs font-bold text-ink hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-45";
-const menuClassName = "absolute bottom-[calc(100%+0.375rem)] left-0 z-20 max-h-56 min-w-52 overflow-y-auto rounded-xl border border-line bg-white p-1 shadow-lg";
-const menuItemClassName = "flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-semibold text-ink hover:bg-slate-50";
-
-export function AssistantComposer({ streaming, disabled = false, conversation, profiles, contextTokens, onSend, onStop, onPreferences, onConfigureModels, onShowContextUsage }: Readonly<{
-  streaming: boolean; disabled?: boolean; conversation: Conversation; profiles: readonly ModelProfile[]; contextTokens?: number;
-  onSend(value: string): Promise<void>; onStop(): void;
-  onPreferences(patch: { modelProfileId?: string; responseMode?: ResponseMode; contextStrategy?: ContextStrategy }): void;
-  onConfigureModels?(): void;
-  onShowContextUsage?(): void;
+export function AssistantComposer({ streaming, disabled = false, conversation, catalog, providers, preferences, contextTokens, onSend, onStop, onSelectModel, onToggleFavorite, onCheckCompatibility, onPreferences, onConfigureProviders, onShowContextUsage }: Readonly<{
+  streaming: boolean; disabled?: boolean; conversation: Conversation; catalog: readonly ModelCatalogEntry[]; providers: readonly ProviderConfig[]; preferences: ModelPreferences; contextTokens?: number;
+  onSend(value: string): Promise<void>; onStop(): void; onSelectModel(providerId: string, modelId: string): void; onToggleFavorite(entryId: string): void; onCheckCompatibility(entry: ModelCatalogEntry): void;
+  onPreferences(patch: { responseMode?: ResponseMode; contextStrategy?: ContextStrategy }): void; onConfigureProviders?(): void; onShowContextUsage?(): void;
 }>) {
   const [value, setValue] = useState("");
-  const [openMenu, setOpenMenu] = useState<"model" | "mode" | "strategy">();
-  const selectedProfile = profiles.find((profile) => profile.id === conversation.modelProfileId);
-  const selectedModelName = selectedProfile ? profileModelName(selectedProfile) : profiles.length ? "Selecciona un modelo" : "No hay modelos configurados";
-  const contextCapacity = selectedProfile?.detectedContextWindow ?? selectedProfile?.manualContextWindow ?? 1_000_000;
-  const contextUsage = `${formatTokens(contextTokens ?? 0)} / ${formatTokens(contextCapacity)}`;
-  const controlsDisabled = conversation.status !== "active";
+  const [modelOpen, setModelOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [providerFilter, setProviderFilter] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const analysis = conversation.type === "analysis";
+  const selected = catalog.find((entry) => entry.providerId === conversation.providerId && entry.canonicalModelId === conversation.modelId);
+  const providerName = (id: string) => providers.find((provider) => provider.id === id)?.displayName ?? id;
+  const visible = useMemo(() => catalog.filter((entry) => {
+    if (providerFilter && entry.providerId !== providerFilter) return false;
+    const haystack = `${entry.displayName} ${entry.canonicalModelId} ${providerName(entry.providerId)}`.toLocaleLowerCase("es");
+    if (!haystack.includes(query.trim().toLocaleLowerCase("es"))) return false;
+    return showAll || !reason(entry, analysis);
+  }), [analysis, catalog, providerFilter, query, showAll, providers]);
+  const favoriteSet = new Set(preferences.favoriteCatalogEntryIds);
+  const recentSet = new Set(preferences.recentCatalogEntryIds);
+  const sections = [
+    { label: "Favoritos", entries: visible.filter((entry) => favoriteSet.has(entry.id)) },
+    { label: "Recientes", entries: visible.filter((entry) => recentSet.has(entry.id) && !favoriteSet.has(entry.id)) },
+    ...providers.map((provider) => ({ label: provider.displayName, entries: visible.filter((entry) => entry.providerId === provider.id && !favoriteSet.has(entry.id) && !recentSet.has(entry.id)) })),
+  ].filter((section) => section.entries.length);
 
-  async function submit(event?: FormEvent) { event?.preventDefault(); const raw = value; if (!raw.trim() || streaming || disabled) return; setValue(""); await onSend(raw); }
-  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) { if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return; event.preventDefault(); void submit(); }
-  function toggle(menu: "model" | "mode" | "strategy") { setOpenMenu((current) => current === menu ? undefined : menu); }
+  async function submit(event?: FormEvent) { event?.preventDefault(); if (!value.trim() || streaming || disabled) return; const text = value; setValue(""); await onSend(text); }
+  function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); } }
 
   return <form onSubmit={(event) => void submit(event)} className="border-t border-line bg-white/95 p-3 backdrop-blur sm:p-4">
-    <label htmlFor="assistant-composer" className="sr-only">Pregunta</label>
     <div className="rounded-2xl bg-slate-50 p-2 ring-1 ring-line focus-within:ring-2 focus-within:ring-primary/40">
-      <textarea id="assistant-composer" className="max-h-40 min-h-11 w-full resize-y bg-transparent px-2 py-2.5 text-sm leading-6 outline-none placeholder:text-muted" rows={1} value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={onKeyDown} placeholder="Escribe una pregunta…" disabled={streaming || disabled} />
-      <div data-testid="assistant-composer-controls" className="flex min-w-0 items-end gap-2 px-1 pb-1">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 sm:flex-nowrap">
-          <div className="relative min-w-0">
-            <button type="button" className={controlClassName} aria-label={`Modelo de conversación: ${selectedModelName}`} title={selectedProfile ? `${selectedModelName} · ${selectedProfile.provider}` : selectedModelName} aria-expanded={openMenu === "model"} disabled={controlsDisabled || !profiles.length} onClick={() => toggle("model")}>
-              {selectedProfile ? providerIcon(selectedProfile.provider) : <Cpu aria-hidden="true" className="size-3.5 shrink-0" />}<span className="truncate">{selectedModelName}</span><ChevronDown aria-hidden="true" className="size-3.5 shrink-0" />
-            </button>
-            {openMenu === "model" ? <div role="menu" className={menuClassName}>{profiles.map((profile) => {
-              const name = profileModelName(profile);
-              const context = profile.detectedContextWindow ?? profile.manualContextWindow;
-              return <button key={profile.id} type="button" role="menuitem" className={menuItemClassName} title={`${name} · ${profile.provider}${context ? ` · ${context.toLocaleString("es-ES")} tokens` : " · Ventana no informada"}`} onClick={() => { onPreferences({ modelProfileId: profile.id }); setOpenMenu(undefined); }}>
-                {providerIcon(profile.provider)}<span className="min-w-0 flex-1 truncate">{name}</span><span className="shrink-0 text-[0.6875rem] text-muted">{context ? `${formatTokens(context)}` : "—"}</span>
-              </button>;
-            })}</div> : null}
-          </div>
-          <div className="relative">
-            <button type="button" className={controlClassName} aria-label={`Modo de respuesta: ${responseModeLabels[conversation.responseMode]}`} title="Modo de respuesta" aria-expanded={openMenu === "mode"} disabled={controlsDisabled} onClick={() => toggle("mode")}><Scale aria-hidden="true" className="size-3.5 shrink-0" /><span>{responseModeLabels[conversation.responseMode]}</span><ChevronDown aria-hidden="true" className="size-3.5 shrink-0" /></button>
-            {openMenu === "mode" ? <div role="menu" className={menuClassName}>{(Object.entries(responseModeLabels) as [ResponseMode, string][]).map(([mode, label]) => <button key={mode} type="button" role="menuitem" className={menuItemClassName} onClick={() => { onPreferences({ responseMode: mode }); setOpenMenu(undefined); }}>{label}</button>)}</div> : null}
-          </div>
-          <div className="relative">
-            <button type="button" className={controlClassName} aria-label={`Estrategia de contexto: ${contextStrategyLabels[conversation.contextStrategy]}`} title="Estrategia de contexto" aria-expanded={openMenu === "strategy"} disabled={controlsDisabled} onClick={() => toggle("strategy")}><CircleGauge aria-hidden="true" className="size-3.5 shrink-0" /><span>{contextStrategyLabels[conversation.contextStrategy]}</span><ChevronDown aria-hidden="true" className="size-3.5 shrink-0" /></button>
-            {openMenu === "strategy" ? <div role="menu" className={menuClassName}>{(Object.entries(contextStrategyLabels) as [ContextStrategy, string][]).map(([strategy, label]) => <button key={strategy} type="button" role="menuitem" className={menuItemClassName} onClick={() => { onPreferences({ contextStrategy: strategy }); setOpenMenu(undefined); }}>{label}</button>)}</div> : null}
-          </div>
-          <button type="button" className="inline-flex min-h-9 shrink-0 items-center rounded-lg px-2 text-xs font-bold text-muted hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50" aria-label="Abrir detalle del contexto" title="Ver uso de contexto" onClick={onShowContextUsage}>{contextUsage}</button>
-          {!profiles.length && onConfigureModels ? <button type="button" className="btn-secondary min-h-9 shrink-0 px-2 text-xs" onClick={onConfigureModels}>Configurar modelos</button> : null}
+      <label htmlFor="assistant-composer" className="sr-only">Pregunta</label><textarea id="assistant-composer" rows={1} className="max-h-40 min-h-11 w-full resize-y bg-transparent px-2 py-2.5 text-sm leading-6 outline-none" value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={keyDown} placeholder="Escribe una pregunta…" disabled={streaming || disabled} />
+      <div data-testid="assistant-composer-controls" className="flex items-end gap-2 px-1 pb-1"><div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+        <div className="relative"><button type="button" className={control} disabled={disabled} aria-expanded={modelOpen} aria-label={`Modelo de conversación: ${selected?.displayName ?? "sin seleccionar"}`} onClick={() => setModelOpen((open) => !open)}><Cpu className="size-3.5" aria-hidden="true" /><span className="max-w-40 truncate">{selected?.displayName ?? "Seleccionar modelo"}</span></button>
+          {modelOpen ? <div className="absolute bottom-[calc(100%+0.5rem)] left-0 z-30 w-[min(38rem,calc(100vw-2rem))] rounded-2xl border border-line bg-white p-3 shadow-xl" role="dialog" aria-label="Catálogo de modelos">
+            <div className="grid gap-2 sm:grid-cols-[1fr_10rem_auto]"><label className="relative"><Search className="absolute left-3 top-2.5 size-4 text-muted" aria-hidden="true" /><input className="filter-control pl-9" aria-label="Buscar modelos" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nombre, ID o proveedor" /></label><select className="filter-control" aria-label="Filtrar por proveedor" value={providerFilter} onChange={(event) => setProviderFilter(event.target.value)}><option value="">Todos</option>{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.displayName}</option>)}</select><label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={showAll} onChange={(event) => setShowAll(event.target.checked)} />Ver todos</label></div>
+            <div className="mt-3 max-h-80 overflow-y-auto pr-1">{sections.map((section) => <section key={section.label} className="mb-3"><h3 className="sticky top-0 bg-white py-1 text-[0.6875rem] font-bold uppercase tracking-wide text-muted">{section.label}</h3>{section.entries.map((entry) => { const disabledReason = reason(entry, analysis); return <div key={entry.id} className="flex items-center gap-2 rounded-xl px-2 py-2 hover:bg-slate-50"><button type="button" className="min-w-0 flex-1 text-left disabled:cursor-not-allowed disabled:opacity-50" disabled={Boolean(disabledReason)} title={disabledReason} onClick={() => { onSelectModel(entry.providerId, entry.canonicalModelId); setModelOpen(false); }}><span className="block truncate text-sm font-semibold text-ink">{entry.displayName}</span><span className="block truncate text-xs text-muted">{providerName(entry.providerId)} · {entry.canonicalModelId} · {tokens(entry.contextWindow)} tokens</span><span className="mt-1 flex flex-wrap gap-1 text-[0.625rem] font-bold uppercase">{entry.capabilities.chat === true ? <span className="rounded bg-blue-50 px-1.5 py-0.5 text-primary">Chat</span> : null}{entry.capabilities.tools === true ? <span className="rounded bg-violet-50 px-1.5 py-0.5 text-violet-700">Herramientas</span> : null}{entry.capabilities.vision === true ? <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700">Visión</span> : null}{entry.capabilities.streaming === true ? <span className="rounded bg-slate-100 px-1.5 py-0.5">Streaming</span> : null}</span>{disabledReason ? <span className="mt-1 block text-xs text-danger">{disabledReason}</span> : null}</button><button type="button" className="rounded-lg p-2 text-muted hover:bg-white hover:text-danger" aria-label={`${favoriteSet.has(entry.id) ? "Quitar de" : "Añadir a"} favoritos`} onClick={() => onToggleFavorite(entry.id)}><Heart className={`size-4 ${favoriteSet.has(entry.id) ? "fill-current text-danger" : ""}`} /></button>{analysis && entry.capabilities.tools === "unknown" ? <button type="button" className="btn-secondary px-2 text-xs" onClick={() => onCheckCompatibility(entry)}>Comprobar compatibilidad</button> : null}</div>; })}</section>)}{!sections.length ? <p className="p-4 text-center text-sm text-muted">No hay modelos que coincidan.</p> : null}</div>
+            {!catalog.length && onConfigureProviders ? <button type="button" className="btn-secondary mt-2" onClick={onConfigureProviders}>Configurar proveedores</button> : null}
+          </div> : null}
         </div>
-        {streaming ? <button type="button" className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl bg-ink text-white" aria-label="Detener respuesta" onClick={onStop}><Square aria-hidden="true" className="size-4 fill-current" /></button> : <button type="submit" className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl bg-primary text-white shadow-blue hover:bg-primary-dark disabled:opacity-40" aria-label="Enviar" disabled={disabled || !value.trim()}><Send aria-hidden="true" className="size-4" /></button>}
-      </div>
+        <select className={`${control} bg-transparent`} disabled={disabled} aria-label="Modo de respuesta" value={conversation.responseMode} onChange={(event) => onPreferences({ responseMode: event.target.value as ResponseMode })}>{Object.entries(responseModeLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select>
+        {analysis ? <label className="inline-flex items-center"><CircleGauge className="ml-2 size-3.5" aria-hidden="true" /><select className={`${control} bg-transparent`} disabled={disabled} aria-label="Estrategia de contexto" value={conversation.contextStrategy === "full" ? "full_analysis" : conversation.contextStrategy === "automatic" || conversation.contextStrategy === "optimized" ? "associated_people" : conversation.contextStrategy} onChange={(event) => onPreferences({ contextStrategy: event.target.value as ContextStrategy })}><option value="associated_people">Personas asociadas</option><option value="full_analysis">Análisis completo</option></select></label> : <span className="rounded-lg px-2 text-xs font-bold text-muted">Chat general · sin datos retributivos</span>}
+        <button type="button" className="px-2 text-xs font-bold text-muted" disabled={disabled} aria-label="Abrir detalle del contexto" onClick={onShowContextUsage}>{tokens(contextTokens)} / {tokens(selected?.contextWindow)}</button>
+      </div>{streaming ? <button type="button" className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-ink text-white" aria-label="Detener respuesta" onClick={onStop}><Square className="size-4 fill-current" /></button> : <button type="submit" className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary text-white disabled:opacity-40" aria-label="Enviar" disabled={disabled || !value.trim()}><Send className="size-4" /></button>}</div>
     </div>
   </form>;
 }

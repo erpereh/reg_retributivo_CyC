@@ -6,7 +6,7 @@ import { SafeMarkdown } from "@/components/assistant/SafeMarkdown";
 import { SourceSummary } from "@/components/assistant/SourceSummary";
 import type { ChatAction, ChatMessage, SourceReference } from "@/lib/assistant/domain";
 
-export function AssistantMessage({ message, sources, revealedSourceIds, actions, actionOutputs, resolvingActionIds, actionsDisabled, latestAssistant, repeatable, onCopy, onRetry, onRegenerate, onAcceptAction, onRejectAction }: Readonly<{
+export function AssistantMessage({ message, sources, revealedSourceIds, actions, actionOutputs, resolvingActionIds, actionsDisabled, latestAssistant, repeatable, onCopy, onRetry, onRegenerate, onAcceptAction, onRejectAction, onOpenSource }: Readonly<{
   message: ChatMessage;
   sources: readonly SourceReference[];
   revealedSourceIds: readonly string[];
@@ -21,14 +21,15 @@ export function AssistantMessage({ message, sources, revealedSourceIds, actions,
   onRegenerate(messageId: string): void;
   onAcceptAction(actionId: string): void;
   onRejectAction(actionId: string): void;
+  onOpenSource?(source: SourceReference): void;
 }>) {
   const assistant = message.role === "assistant";
   return (
     <li className={assistant ? "me-auto w-full max-w-[48rem]" : "ms-auto max-w-[85%] sm:max-w-[75%]"}>
       <article aria-label={assistant ? "Respuesta del Asistente" : "Tu pregunta"} className={assistant ? "rounded-2xl bg-white p-4 shadow-subtle ring-1 ring-line/80 sm:p-5" : "rounded-2xl rounded-br-md bg-ink px-4 py-3 text-white shadow-subtle"}>
-        {assistant ? <SafeMarkdown content={message.content || (message.status === "streaming" ? "Preparando respuesta…" : "Respuesta sin contenido.")} /> : <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>}
+        {assistant ? <SafeMarkdown content={message.content || (message.status === "streaming" ? "Preparando respuesta…" : "Respuesta sin contenido.")} onCitation={(index) => { const source = sources[index - 1]; if (source) onOpenSource?.(source); }} /> : <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>}
         {assistant ? actions.map((action) => <ActionProposal key={action.id} action={action} output={actionOutputs[action.id]} disabled={actionsDisabled || resolvingActionIds.includes(action.id)} onAccept={onAcceptAction} onReject={onRejectAction} />) : null}
-        {assistant ? <SourceSummary sources={sources} revealedSourceIds={revealedSourceIds} /> : null}
+        {assistant ? <SourceSummary sources={sources} revealedSourceIds={revealedSourceIds} onOpenSource={onOpenSource} /> : null}
         {assistant ? (
           <footer className="mt-3 flex flex-wrap items-center gap-1 border-t border-slate-100 pt-2">
             <span className="me-auto min-w-0 flex-1 text-xs font-medium text-muted">{message.status === "streaming" ? "Generando" : message.status === "stopped" ? "Detenida" : message.status === "interrupted" ? "Interrumpida" : message.status === "failed" ? "Fallida" : "Respuesta"}{message.modelId ? <span className="break-all" title={message.modelId}> · {message.modelId}</span> : null}</span>

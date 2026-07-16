@@ -3,12 +3,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   sanitizeChatContent, type AssistantSettings, type ChatAction, type ChatEvent, type ChatMessage,
-  type ContextStrategy, type Conversation, type ModelProfile, type PersistedDocumentMetadata, type ResponseMode, type SourceReference,
+  type ContextStrategy, type Conversation, type ModelPreferences, type PersistedDocumentMetadata, type ResponseMode, type SourceReference,
 } from "@/lib/assistant/domain";
-import { createEphemeralKeyVault, type EphemeralKeyScope } from "@/lib/assistant/providers/ephemeralKeyVault";
+import { applyCompleteCatalogRefresh, catalogKey, type ModelCatalogEntry, type ProviderConfig } from "@/lib/assistant/catalog/domain";
 import { ProviderAdapterError } from "@/lib/assistant/providers/types";
 import { GENERAL_RETRIBUTIVO_PROMPT, type FakeAssistantAdapter } from "@/lib/assistant/providers/fakeAdapter";
-import { DEFAULT_ASSISTANT_SETTINGS, assistantSettingsSchema, modelProfileSchema } from "@/lib/assistant/schemas";
+import { DEFAULT_ASSISTANT_SETTINGS, assistantSettingsSchema } from "@/lib/assistant/schemas";
 import { localIterableResponse } from "@/lib/assistant/providers/localNdjsonTransport";
 import { createIndexedDbRepositories } from "@/lib/assistant/storage/indexedDbRepositories";
 import type { AssistantRepositories, AssistantStoredRecord, ContextSnapshot } from "@/lib/assistant/storage/repositories";
@@ -20,6 +20,7 @@ import { executeChatAction, rejectChatAction, type AppNavigationIntent } from "@
 import { registerAnalysisCleanupListener } from "@/lib/assistant/integrations/analysisCleanupCoordinator";
 import { AssistantRunStoppedError, createRepositoryBoundAssistantOrchestrator, type AssistantOrchestrator } from "@/lib/assistant/orchestration/assistantOrchestrator";
 import { ANALYSIS_TOOL_NAMES, createAnalysisToolRegistry, type AnalysisToolName, type AnalysisToolRegistry } from "@/lib/assistant/tools/registry";
+import { createScopeSnapshot, type ScopeSnapshot } from "@/lib/assistant/execution/scopeSnapshot";
 
 const TEST_MODEL_ID = "injected-test-model";
 const TEST_SYSTEM_PROMPT = GENERAL_RETRIBUTIVO_PROMPT;
@@ -30,16 +31,6 @@ const now = () => new Date().toISOString();
 const createId = (prefix: string) => `${prefix}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`;
 const withoutUndefined = <T extends object>(value: T): T => Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T;
 const newestConversations = (items: readonly Conversation[]) => [...items].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id));
-
-function repairAssistantSettings(settings: AssistantSettings, profiles: readonly ModelProfile[]): AssistantSettings {
-  const general = profiles.find((profile) => profile.id === settings.defaultGeneralModelProfileId);
-  const analysis = profiles.find((profile) => profile.id === settings.defaultAnalysisModelProfileId);
-  return {
-    ...settings,
-    defaultGeneralModelProfileId: general?.enabled && general.generalChatCompatible ? general.id : undefined,
-    defaultAnalysisModelProfileId: analysis?.enabled && analysis.analysisCompatible ? analysis.id : undefined,
-  };
-}
 
 export interface AssistantContextValue {
   ready: boolean;
@@ -86,20 +77,23 @@ export interface AssistantContextValue {
   setPrimaryPerson(personId: string): Promise<void>;
   requestPersonProfile(): Promise<void>;
   openModelSettings(): void;
-  updateConversationPreferences(patch: { modelProfileId?: string; responseMode?: ResponseMode; contextStrategy?: ContextStrategy }): Promise<void>;
+  updateConversationPreferences(patch: { responseMode?: ResponseMode; contextStrategy?: ContextStrategy }): Promise<void>;
+  selectConversationModel(providerId: string, modelId: string): Promise<void>;
   availablePersonIds: string[];
   people: readonly { employeeNumber: string; person?: string; workplace?: string; position?: string; category?: string; status?: string; periods?: readonly string[] }[];
   canSend: boolean;
-  modelProfiles: ModelProfile[];
+  providerConfigs: ProviderConfig[];
+  modelCatalog: ModelCatalogEntry[];
+  modelPreferences: ModelPreferences;
+  saveProviderConfig(config: ProviderConfig): Promise<void>;
+  deleteProviderConfig(providerId: string): Promise<void>;
+  checkProvider(providerId: string): Promise<void>;
+  refreshProviderCatalog(providerId: string): Promise<void>;
+  checkModelCompatibility(entry: ModelCatalogEntry): Promise<void>;
+  toggleModelFavorite(entryId: string): Promise<void>;
   assistantSettings: AssistantSettings;
-  saveModelProfile(profile: ModelProfile): Promise<void>;
-  duplicateModelProfile(id: string): Promise<void>;
-  deleteModelProfile(id: string): Promise<void>;
   updateAssistantSettings(patch: Partial<Omit<AssistantSettings, "id">>): Promise<void>;
   clearAssistantContent(): Promise<void>;
-  setKey(scope: EphemeralKeyScope, value: string): void;
-  clearKey(): void;
-  withKey<T>(scope: EphemeralKeyScope, callback: (key: string | undefined) => T | Promise<T>): Promise<T>;
 }
 
 const AssistantContext = createContext<AssistantContextValue | undefined>(undefined);
@@ -122,9 +116,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
   const adapterRef = useRef<AssistantAdapter | undefined>(adapter);
   const pendingFakeRequestRef = useRef<PendingFakeRequest | undefined>(undefined);
   const repeatableRunsRef = useRef(new Map<string, PendingFakeRequest>());
-  const vaultRef = useRef(createEphemeralKeyVault());
   const assistantSettingsRef = useRef<AssistantSettings>(DEFAULT_ASSISTANT_SETTINGS);
-  const modelProfilesRef = useRef<ModelProfile[]>([]);
   const activeAnalysisRef = useRef(activeAnalysis);
   const configurationMutationRef = useRef<Promise<void>>(Promise.resolve());
   const conversationMutationRef = useRef<Promise<void>>(Promise.resolve());
@@ -138,6 +130,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
   const runGenerationsRef = useRef(new Map<string, number>());
   const deletedConversationsRef = useRef(new Set<string>());
   const activeRunTokenRef = useRef<RunToken | undefined>(undefined);
+  const activeScopeSnapshotRef = useRef<ScopeSnapshot | undefined>(undefined);
   const conversationRef = useRef<Conversation | undefined>(undefined);
   const conversationsRef = useRef<Conversation[]>([]);
   const messagesRef = useRef<ChatMessage[]>([]);
@@ -166,8 +159,11 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
   const [announcement, setAnnouncement] = useState("Asistente preparado");
   const [notice, setNotice] = useState<string>();
   const [error, setError] = useState<string>();
-  const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
   const [assistantSettings, setAssistantSettings] = useState<AssistantSettings>(DEFAULT_ASSISTANT_SETTINGS);
+  const [providerConfigs, setProviderConfigs] = useState<ProviderConfig[]>([]);
+  const [modelCatalog, setModelCatalog] = useState<ModelCatalogEntry[]>([]);
+  const [modelPreferences, setModelPreferences] = useState<ModelPreferences>({ id: "model-preferences", favoriteCatalogEntryIds: [], recentCatalogEntryIds: [], updatedAt: now() });
+  const registeredProviderIdsRef = useRef(new Set<string>());
 
   useEffect(() => { activeAnalysisRef.current = activeAnalysis; }, [activeAnalysis]);
   useEffect(() => { conversationRef.current = conversation; }, [conversation]);
@@ -305,7 +301,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
           const currentConversation = conversationRef.current;
           const currentAnalysis = activeAnalysisRef.current;
           if (!currentConversation || currentConversation.type !== "analysis" || !currentConversation.analysisId || !currentAnalysis || currentAnalysis.id !== currentConversation.analysisId) throw new ProviderAdapterError("incompatible", "analysis_tools_unavailable");
-          return createAnalysisToolRegistry({ conversation: currentConversation, analysis: currentAnalysis, chunks: [] });
+          return createAnalysisToolRegistry({ conversation: currentConversation, analysis: currentAnalysis, chunks: [], searchDocuments: async ({ analysisId, query, limit }) => repositories!.buildSearchIndex({ type: "analysis", analysisId }).then((index) => index.search({ scope: { type: "analysis", analysisId }, query, limit })), ...(activeScopeSnapshotRef.current ? { scopeSnapshot: activeScopeSnapshotRef.current } : {}) });
         };
         const registry = {
           get names() { const current = conversationRef.current; const analysis = activeAnalysisRef.current; return !adapterRef.current && current?.type === "analysis" && current.analysisId === analysis?.id ? ANALYSIS_TOOL_NAMES : []; },
@@ -317,13 +313,10 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
         orchestratorRef.current = createRepositoryBoundAssistantOrchestrator({
           transport: async (body, signal) => {
             if (!adapterRef.current) {
-              const profile = body.profile as ModelProfile | undefined;
-              if (!profile) throw new Error("No hay un perfil de modelo seleccionado.");
-              const scope = { profileId: String(body.modelProfileId), endpoint: profile?.baseUrl ?? "" };
-              return vaultRef.current.withKey(scope, (apiKey) => fetch("/api/assistant/chat", {
+              return fetch("/api/assistant/chat", {
                 method: "POST", headers: { "content-type": "application/json" },
-                body: JSON.stringify(withoutUndefined({ ...body, ...(apiKey ? { apiKey } : {}) })), signal,
-              }));
+                body: JSON.stringify(withoutUndefined(body)), signal,
+              });
             }
             const pending = pendingFakeRequestRef.current;
             if (!pending) throw new Error("No hay una solicitud local preparada.");
@@ -332,24 +325,23 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
           },
           registry,
         }, repositories);
-        const [storedProfiles, storedSettings, conversationPage] = await Promise.all([
-          repositories.modelProfiles.listAll(),
+        const [storedProviders, storedCatalog, storedPreferences, storedSettings, conversationPage] = await Promise.all([
+          repositories.providerConfigs.listAll(),
+          repositories.modelCatalog.listAll(),
+          repositories.modelPreferences.get("model-preferences"),
           repositories.assistantSettings.get(DEFAULT_ASSISTANT_SETTINGS.id),
           repositories.conversations.list({ limit: CONVERSATION_PAGE_SIZE }),
         ]);
-        const restoredProfiles = storedProfiles.flatMap((profile) => {
-          const parsed = modelProfileSchema.safeParse(profile);
-          return parsed.success ? [parsed.data] : [];
-        });
         const parsedSettings = assistantSettingsSchema.safeParse({ ...DEFAULT_ASSISTANT_SETTINGS, ...storedSettings });
-        const repairedSettings = repairAssistantSettings(parsedSettings.success ? parsedSettings.data : DEFAULT_ASSISTANT_SETTINGS, restoredProfiles);
+        const repairedSettings = parsedSettings.success ? parsedSettings.data : DEFAULT_ASSISTANT_SETTINGS;
         const restoredConversations = await Promise.all(conversationPage.items.map(async (item) => item.status === "archived"
           ? (await repositories!.updateActiveConversation(item.id, { status: "active" }, now())) ?? { ...item, status: "active" as const }
           : item));
         if (cancelled) return;
-        modelProfilesRef.current = restoredProfiles;
         assistantSettingsRef.current = repairedSettings;
-        setModelProfiles(restoredProfiles);
+        setProviderConfigs(storedProviders);
+        setModelCatalog(storedCatalog);
+        if (storedPreferences) setModelPreferences(storedPreferences as unknown as ModelPreferences);
         setAssistantSettings(repairedSettings);
         setConversations(restoredConversations);
         setConversationCursor(conversationPage.nextCursor);
@@ -367,7 +359,6 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       orchestratorRef.current = undefined;
       repositoriesRef.current?.close();
       repositoriesRef.current = undefined;
-      vaultRef.current.clearKey();
     };
   }, [adapter, dbName, factory, loadConversationData, repositoriesFactory]);
 
@@ -376,6 +367,98 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     configurationMutationRef.current = result.then(() => undefined, () => undefined);
     return result;
   }, []);
+
+  const providerOperation = useCallback(async (body: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>> => {
+    const response = await fetch("/api/assistant/providers", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal });
+    const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+    if (!response.ok) throw new Error(typeof payload.code === "string" ? payload.code : "provider_error");
+    return payload;
+  }, []);
+
+  const saveProviderConfig = useCallback((config: ProviderConfig) => serializeConfigurationMutation(async () => {
+    const repositories = repositoriesRef.current;
+    if (!repositories) throw new Error("storage_unavailable");
+    const result = await providerOperation({ operation: "register", config });
+    const status = result.keyStatus === "configured" ? (config.enabled ? "active" : "inactive") : result.keyStatus === "not_configured" ? "missing_key" : "error";
+    const saved = { ...config, connectionStatus: status, updatedAt: now() } as ProviderConfig;
+    await repositories.providerConfigs.put(saved);
+    setProviderConfigs((items) => [...items.filter((item) => item.id !== saved.id), saved].sort((a, b) => a.displayName.localeCompare(b.displayName)));
+  }), [providerOperation, serializeConfigurationMutation]);
+
+  const checkProvider = useCallback(async (providerId: string) => {
+    const config = providerConfigs.find((item) => item.id === providerId);
+    const repositories = repositoriesRef.current;
+    if (!config || !repositories) return;
+    const result = await providerOperation({ operation: "status", providerId });
+    const checked = { ...config, connectionStatus: result.keyStatus === "configured" ? "connected" : result.keyStatus === "not_configured" ? "missing_key" : "error", lastCheckedAt: now(), updatedAt: now() } as ProviderConfig;
+    await repositories.providerConfigs.put(checked);
+    setProviderConfigs((items) => items.map((item) => item.id === providerId ? checked : item));
+  }, [providerConfigs, providerOperation]);
+
+  const refreshProviderCatalog = useCallback(async (providerId: string) => {
+    const config = providerConfigs.find((item) => item.id === providerId);
+    const repositories = repositoriesRef.current;
+    if (!config || !repositories) return;
+    try {
+      await providerOperation({ operation: "register", config });
+      const payload = await providerOperation({ operation: "catalog", providerId });
+      const completion = payload.completion;
+      const entries = Array.isArray(payload.models) ? payload.models as ModelCatalogEntry[] : [];
+      if (completion !== "complete" && completion !== "valid_empty") throw new Error("catalog_refresh_incomplete");
+      const previous = modelCatalog.filter((entry) => entry.providerId === providerId);
+      const nextProvider = applyCompleteCatalogRefresh(previous, entries, { completion });
+      await repositories.replaceProviderCatalog(providerId, nextProvider);
+      const refreshed = { ...config, lastCatalogRefreshAt: now(), lastCatalogErrorCode: undefined, updatedAt: now() } as ProviderConfig;
+      await repositories.providerConfigs.put(withoutUndefined(refreshed));
+      setModelCatalog((items) => [...items.filter((entry) => entry.providerId !== providerId), ...nextProvider]);
+      setProviderConfigs((items) => items.map((item) => item.id === providerId ? refreshed : item));
+    } catch {
+      const failed = { ...config, lastCatalogErrorCode: "catalog_refresh_failed", updatedAt: now() } as ProviderConfig;
+      await repositories.providerConfigs.put(failed);
+      setProviderConfigs((items) => items.map((item) => item.id === providerId ? failed : item));
+      throw new Error("catalog_refresh_failed");
+    }
+  }, [modelCatalog, providerConfigs, providerOperation]);
+
+  const deleteProviderConfig = useCallback((providerId: string) => serializeConfigurationMutation(async () => {
+    const repositories = repositoriesRef.current;
+    if (!repositories) return;
+    await repositories.deleteProviderConfiguration(providerId);
+    setProviderConfigs((items) => items.filter((item) => item.id !== providerId));
+    setModelCatalog((items) => items.filter((item) => item.providerId !== providerId));
+  }), [serializeConfigurationMutation]);
+
+  const checkModelCompatibility = useCallback(async (entry: ModelCatalogEntry) => {
+    const repositories = repositoriesRef.current;
+    if (!repositories) return;
+    const result = await providerOperation({ operation: "compatibility", providerId: entry.providerId, modelId: entry.apiModelId });
+    const checked: ModelCatalogEntry = { ...entry, capabilities: { ...entry.capabilities, chat: Boolean(result.connection), streaming: Boolean(result.streaming), tools: Boolean(result.tools) }, metadataSource: "verified", compatibilityCheckedAt: now() };
+    await repositories.modelCatalog.put(checked);
+    setModelCatalog((items) => items.map((item) => item.id === checked.id ? checked : item));
+  }, [providerOperation]);
+
+  const persistModelPreferences = useCallback(async (next: ModelPreferences) => {
+    await repositoriesRef.current?.saveModelPreferences(next);
+    setModelPreferences(next);
+  }, []);
+
+  const toggleModelFavorite = useCallback(async (entryId: string) => {
+    const favorites = new Set(modelPreferences.favoriteCatalogEntryIds);
+    if (favorites.has(entryId)) favorites.delete(entryId); else favorites.add(entryId);
+    await persistModelPreferences({ ...modelPreferences, favoriteCatalogEntryIds: [...favorites], updatedAt: now() });
+  }, [modelPreferences, persistModelPreferences]);
+
+  useEffect(() => {
+    if (!ready) return;
+    for (const config of providerConfigs) {
+      if (registeredProviderIdsRef.current.has(config.id)) continue;
+      registeredProviderIdsRef.current.add(config.id);
+      void providerOperation({ operation: "register", config }).then(() => {
+        const last = config.lastCatalogRefreshAt ? Date.parse(config.lastCatalogRefreshAt) : 0;
+        if (config.enabled && Date.now() - last >= 24 * 60 * 60_000) return refreshProviderCatalog(config.id);
+      }).catch(() => undefined);
+    }
+  }, [providerConfigs, providerOperation, ready, refreshProviderCatalog]);
 
   const invalidateConversationRun = useCallback((conversationId: string) => {
     const activeToken = activeRunTokenRef.current;
@@ -400,47 +483,9 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     && conversationRef.current?.id === token.conversationId
   ), []);
 
-  const saveModelProfile = useCallback((profile: ModelProfile) => serializeConfigurationMutation(async () => {
-    const safe = withoutUndefined(modelProfileSchema.parse(profile));
-    const repositories = repositoriesRef.current;
-    if (!repositories) throw new Error("El almacenamiento local no está disponible.");
-    const nextProfiles = [...modelProfilesRef.current.filter((item) => item.id !== safe.id), safe];
-    const nextSettings = repairAssistantSettings(assistantSettingsRef.current, nextProfiles);
-    await repositories.writeModelConfiguration({ profile: safe, settings: withoutUndefined(nextSettings) });
-    modelProfilesRef.current = nextProfiles; assistantSettingsRef.current = nextSettings;
-    if (mountedRef.current) { setModelProfiles(nextProfiles); setAssistantSettings(nextSettings); }
-  }), [serializeConfigurationMutation]);
-
-  const duplicateModelProfile = useCallback((id: string) => serializeConfigurationMutation(async () => {
-    const original = modelProfilesRef.current.find((profile) => profile.id === id);
-    if (!original) return;
-    const { verifiedAt: _verifiedAt, lastVerificationError: _lastVerificationError, ...copyable } = original;
-    const safe = withoutUndefined(modelProfileSchema.parse({ ...copyable, id: createId("model-profile"), name: `${original.name} (copia)` }));
-    const repositories = repositoriesRef.current;
-    if (!repositories) throw new Error("El almacenamiento local no está disponible.");
-    const nextProfiles = [...modelProfilesRef.current, safe];
-    await repositories.writeModelConfiguration({ profile: safe, settings: withoutUndefined(assistantSettingsRef.current) });
-    modelProfilesRef.current = nextProfiles; if (mountedRef.current) setModelProfiles(nextProfiles);
-  }), [serializeConfigurationMutation]);
-
-  const deleteModelProfile = useCallback((id: string) => serializeConfigurationMutation(async () => {
-    const profile = modelProfilesRef.current.find((item) => item.id === id);
-    if (!profile) return;
-    const repositories = repositoriesRef.current;
-    if (!repositories) throw new Error("El almacenamiento local no está disponible.");
-    const nextProfiles = modelProfilesRef.current.filter((item) => item.id !== id);
-    const nextSettings = repairAssistantSettings(assistantSettingsRef.current, nextProfiles);
-    await repositories.writeModelConfiguration({ deleteProfileId: id, clearConversationModelProfileId: id, settings: withoutUndefined(nextSettings) });
-    modelProfilesRef.current = nextProfiles; assistantSettingsRef.current = nextSettings;
-    const clearProfile = (item: Conversation) => item.modelProfileId === id ? { ...item, modelProfileId: undefined, updatedAt: now() } : item;
-    conversationsRef.current = conversationsRef.current.map(clearProfile);
-    if (conversationRef.current?.modelProfileId === id) conversationRef.current = clearProfile(conversationRef.current);
-    if (mountedRef.current) { setModelProfiles(nextProfiles); setAssistantSettings(nextSettings); setConversations(conversationsRef.current); setConversation(conversationRef.current); }
-  }), [serializeConfigurationMutation]);
-
   const updateAssistantSettings = useCallback((patch: Partial<Omit<AssistantSettings, "id">>) => serializeConfigurationMutation(async () => {
     const parsed = assistantSettingsSchema.parse({ ...assistantSettingsRef.current, ...patch, id: DEFAULT_ASSISTANT_SETTINGS.id });
-    const next = repairAssistantSettings(parsed, modelProfilesRef.current);
+    const next = parsed;
     const repositories = repositoriesRef.current;
     if (!repositories) throw new Error("El almacenamiento local no está disponible.");
     await repositories.assistantSettings.put(withoutUndefined(next));
@@ -539,9 +584,11 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     setNotice(undefined);
     setError(undefined);
     const createdAt = now();
-    const defaultProfile = modelProfilesRef.current.find((profile) => profile.id === assistantSettingsRef.current.defaultGeneralModelProfileId && profile.enabled && profile.generalChatCompatible);
+    const lastProviderId = modelCatalog.find((entry) => entry.id === modelPreferences.lastCatalogEntryId)?.providerId;
+    const preferredEntry = modelCatalog.find((entry) => entry.id === modelPreferences.lastCatalogEntryId && entry.availability === "available" && entry.capabilities.chat === true)
+      ?? modelCatalog.find((entry) => entry.providerId === lastProviderId && entry.availability === "available" && entry.capabilities.chat === true);
     const created: Conversation = {
-      id: createId("conversation"), type: "general", title: "Consulta general", associatedPersonIds: [], ...(defaultProfile ? { modelProfileId: defaultProfile.id } : {}),
+      id: createId("conversation"), type: "general", title: "Consulta general", associatedPersonIds: [], ...(preferredEntry ? { providerId: preferredEntry.providerId, modelId: preferredEntry.canonicalModelId } : {}),
       responseMode: assistantSettingsRef.current.responseMode, contextStrategy: assistantSettingsRef.current.contextStrategy, status: "active", createdAt, updatedAt: createdAt,
     };
     const creation = conversationMutationRef.current.then(async () => {
@@ -570,7 +617,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       }
       if (mountedRef.current && selectionIntentRef.current === selectionIntent && contentGeneration === contentGenerationRef.current) setSelectionLoading(false);
     }
-  }, [invalidateConversationRun]);
+  }, [invalidateConversationRun, modelCatalog, modelPreferences.lastCatalogEntryId]);
 
   const loadMoreConversations = useCallback(async () => {
     if (!conversationCursor || conversationPageLoadingRef.current) return;
@@ -743,17 +790,42 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       return;
     }
     const createdAt = now();
-    const selectedProfile = modelProfilesRef.current.find((profile) => profile.id === conversation.modelProfileId && profile.enabled
-      && (conversation.type === "analysis" ? profile.analysisCompatible : profile.generalChatCompatible));
-    if (!selectedProfile && !adapter) {
+    const selectedCatalogEntry = modelCatalog.find((entry) => entry.providerId === conversation.providerId && entry.canonicalModelId === conversation.modelId
+      && entry.availability === "available" && entry.capabilities.chat === true && (conversation.type === "general" || entry.capabilities.tools === true));
+    if (!selectedCatalogEntry && !adapter) {
       setError("No hay modelos configurados.");
       return;
     }
-    const modelProfileId = selectedProfile?.id ?? TEST_MODEL_ID;
-    const modelId = selectedProfile?.modelId ?? TEST_MODEL_ID;
+    const modelProfileId = selectedCatalogEntry?.id ?? TEST_MODEL_ID;
+    const modelId = selectedCatalogEntry?.generationModelId ?? TEST_MODEL_ID;
+    let analysisContext: Parameters<AssistantOrchestrator["send"]>[0]["analysisContext"];
+    if (conversation.type === "analysis" && conversation.analysisId && activeAnalysis) {
+      const explicitPersonIds = activeAnalysis.result.people.map((person) => person.employeeNumber).filter((employeeId) => new RegExp(`(?:^|[^\\p{L}\\p{N}])${employeeId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:$|[^\\p{L}\\p{N}])`, "u").test(content));
+      activeScopeSnapshotRef.current = await createScopeSnapshot({
+        analysisId: conversation.analysisId,
+        analysisVersion: conversation.analysisVersion ?? "current",
+        strategy: conversation.contextStrategy === "full_analysis" || conversation.contextStrategy === "full" ? "full_analysis" : "associated_people",
+        associatedPersonIds: conversation.associatedPersonIds,
+        ...(conversation.primaryPersonId ? { primaryPersonId: conversation.primaryPersonId } : {}),
+        explicitPersonIds,
+        // Document discovery remains a paginated tool concern. Capturing every
+        // document here would turn full_analysis into an eager corpus preload.
+        documentIds: [],
+        allowedTools: ANALYSIS_TOOL_NAMES,
+      });
+      const summary = activeAnalysis.result.summary;
+      analysisContext = {
+        associatedPersonIds: conversation.associatedPersonIds,
+        ...(conversation.primaryPersonId ? { primaryPersonId: conversation.primaryPersonId } : {}),
+        strategy: conversation.contextStrategy === "full_analysis" || conversation.contextStrategy === "full" ? "full_analysis" : "associated_people",
+        periods: [...new Set(activeAnalysis.result.people.flatMap((person) => person.periods ?? []))].slice(0, 100),
+        sourceTypes: [...new Set(documents.filter((document) => document.scope.type === "analysis" && document.scope.analysisId === conversation.analysisId).map((document) => document.mediaType))],
+        aggregate: { uniquePeople: summary?.uniquePeople ?? activeAnalysis.result.people.length, peopleWithDifferences: summary?.peopleWithDifferences ?? 0, totalGlobalDifference: summary?.totalGlobalDifference ?? 0, conceptsPendingReview: summary?.conceptsPendingReview ?? 0, pdfsAnalyzed: summary?.pdfsAnalyzed ?? 0 },
+      };
+    } else activeScopeSnapshotRef.current = undefined;
     const userMessage: ChatMessage = {
       id: createId("message"), conversationId: conversation.id, role: "user", content, status: "completed", contextOrigin: conversation.type,
-      modelProfileId, modelId, responseMode: conversation.responseMode, contextStrategy: conversation.contextStrategy,
+      ...(selectedCatalogEntry ? { providerId: selectedCatalogEntry.providerId } : {}), modelProfileId, modelId, responseMode: conversation.responseMode, contextStrategy: conversation.contextStrategy,
       ...(conversation.analysisVersion ? { analysisVersion: conversation.analysisVersion } : {}), sourceRefIds: [], actionIds: [], createdAt,
     };
     let nextSources = sources;
@@ -801,13 +873,14 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
         runPending = pendingFakeRequestRef.current;
         repeatableRunsRef.current.set(assistantMessage.id, runPending);
       }
-      const compatibleDefaultProfile = modelProfilesRef.current.find((profile) => profile.id === (conversation.type === "analysis" ? assistantSettingsRef.current.defaultAnalysisModelProfileId : assistantSettingsRef.current.defaultGeneralModelProfileId));
       const result = await orchestratorRef.current!.send({
         conversationId: conversation.id, ...(conversation.type === "analysis" ? { analysisId: conversation.analysisId } : {}), question: content, assistantMessageId: assistantMessage.id,
-        modelProfileId, modelId, ...(selectedProfile ? { profile: selectedProfile } : {}), ...(compatibleDefaultProfile ? { compatibleDefaultProfile } : {}),
+        ...(analysisContext ? { analysisContext } : {}), ...(selectedCatalogEntry ? { providerId: selectedCatalogEntry.providerId, modelMetadata: { contextWindow: selectedCatalogEntry.contextWindow ?? 8_192, ...(selectedCatalogEntry.maxOutputTokens ? { maxOutputTokens: selectedCatalogEntry.maxOutputTokens } : {}), generationModelId: selectedCatalogEntry.generationModelId } } : {}), modelProfileId, modelId,
         responseMode: conversation.responseMode, contextStrategy: conversation.contextStrategy, onTextDelta,
       });
       if (!runIsCurrent()) return;
+      nextSources = [...nextSources.filter((source) => !result.sources.some((recovered) => recovered.id === source.id)), ...result.sources];
+      sourceRefIds = result.sources.map((source) => source.id);
       if (partialTimer) clearTimeout(partialTimer);
       partialTimer = undefined;
       const producedMessages = result.producedMessages.map((produced, index) => ({
@@ -817,6 +890,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
         status: produced.status,
         modelProfileId: produced.modelProfileId,
         modelId: produced.modelId,
+        sourceRefIds,
         createdAt: new Date(Date.parse(assistantMessage.createdAt) + index).toISOString(),
       }));
       const completed = producedMessages.at(-1) ?? { ...assistantMessage, content: result.text, status: "completed" as const };
@@ -842,8 +916,9 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       if (pendingFakeRequestRef.current === runPending) pendingFakeRequestRef.current = undefined;
       if (runIsCurrent()) setStreaming(false);
       if (activeRunTokenRef.current === runToken) activeRunTokenRef.current = undefined;
+      activeScopeSnapshotRef.current = undefined;
     }
-  }, [activeAnalysis, beginConversationRun, conversation, isConversationRunCurrent, messages, persistRunRound, selectionLoading, sources, streaming]);
+  }, [activeAnalysis, beginConversationRun, conversation, documents, isConversationRunCurrent, messages, modelCatalog, persistRunRound, selectionLoading, sources, streaming]);
 
   const stop = useCallback(() => {
     const token = activeRunTokenRef.current;
@@ -864,11 +939,14 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       return { selected, target, precedingUser, modelProfileId: TEST_MODEL_ID, modelId: TEST_MODEL_ID, pending };
     }
 
-    const selectedProfile = modelProfilesRef.current.find((profile) => profile.id === target.modelProfileId && profile.enabled
-      && (selected.type === "analysis" ? profile.analysisCompatible : profile.generalChatCompatible));
-    if (!selectedProfile || (adapter && !pending)) return undefined;
-    return { selected, target, precedingUser, modelProfileId: selectedProfile.id, modelId: selectedProfile.modelId, selectedProfile, pending };
-  }, [adapter]);
+    if (adapter) {
+      if (!pending && target.modelProfileId === "fake-retributivo-v1") return undefined;
+      return { selected, target, precedingUser, modelProfileId: target.modelProfileId ?? TEST_MODEL_ID, modelId: target.modelId ?? TEST_MODEL_ID, providerId: target.providerId, pending };
+    }
+    const catalogEntry = modelCatalog.find((entry) => entry.id === target.modelProfileId && entry.providerId === target.providerId && entry.availability === "available");
+    if (!catalogEntry) return undefined;
+    if (catalogEntry) return { selected, target, precedingUser, modelProfileId: catalogEntry.id, modelId: catalogEntry.generationModelId, providerId: catalogEntry.providerId, catalogEntry, pending };
+  }, [adapter, modelCatalog]);
 
   const repeatResponse = useCallback(async (messageId: string, mode: "retry" | "regenerate") => {
     const repeatTarget = resolveRepeatTarget(messageId);
@@ -876,7 +954,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     if (!repeatTarget || !orchestrator || streaming || selectionLoading) return;
     const authoritative = await repositoriesRef.current?.conversations.get(repeatTarget.selected.id);
     if (!authoritative || authoritative.status !== "active") return;
-    const { selected, target, precedingUser, modelProfileId, modelId, selectedProfile } = repeatTarget;
+    const { selected, target, precedingUser, modelProfileId, modelId, catalogEntry } = repeatTarget;
     const pending = repeatTarget.pending;
     let runPending: PendingFakeRequest | undefined;
     if (pending) {
@@ -886,7 +964,6 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       runPending = pendingFakeRequestRef.current;
       repeatableRunsRef.current.set(target.id, runPending);
     }
-    const compatibleDefaultProfile = modelProfilesRef.current.find((profile) => profile.id === (selected.type === "analysis" ? assistantSettingsRef.current.defaultAnalysisModelProfileId : assistantSettingsRef.current.defaultGeneralModelProfileId));
     const canContinue = mode === "retry" && (target.status === "stopped" || target.status === "interrupted")
       && target.content.trim().length > 0 && (modelProfileId !== TEST_MODEL_ID || Boolean(adapter));
     const runToken = beginConversationRun(selected.id);
@@ -907,8 +984,8 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     try {
       const result = await orchestrator.send({
         conversationId: selected.id, ...(selected.type === "analysis" ? { analysisId: selected.analysisId } : {}), question: precedingUser.content,
-        assistantMessageId: target.id, modelProfileId, modelId, ...(selectedProfile ? { profile: selectedProfile } : {}),
-        ...(compatibleDefaultProfile ? { compatibleDefaultProfile } : {}), responseMode: target.responseMode, contextStrategy: target.contextStrategy,
+        assistantMessageId: target.id, modelProfileId, modelId, ...(catalogEntry ? { providerId: catalogEntry.providerId, modelMetadata: { contextWindow: catalogEntry.contextWindow ?? 8_192, ...(catalogEntry.maxOutputTokens ? { maxOutputTokens: catalogEntry.maxOutputTokens } : {}), generationModelId: catalogEntry.generationModelId } } : {}),
+        responseMode: target.responseMode, contextStrategy: target.contextStrategy,
         ...(canContinue ? { resumeFrom: { messageId: target.id, context: target.content } } : {}), onTextDelta,
       });
       if (!runIsCurrent()) return;
@@ -1069,9 +1146,10 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     }
     const analysisVersion = await ensureActiveAnalysisVersion();
     if (!analysisVersion) { const message = "No se puede continuar en el Asistente porque el análisis ya no está disponible."; setError(message); throw new Error(message); }
+    const preferred = modelCatalog.find((entry) => entry.id === modelPreferences.lastCatalogEntryId && entry.capabilities.chat === true && entry.capabilities.tools === true && entry.availability === "available");
     const operation = conversationMutationRef.current.then(() => continuePerson({
       repositories, analysisId: activeAnalysis.id, analysisVersion, personId,
-      modelProfileId: assistantSettingsRef.current.defaultAnalysisModelProfileId ?? "", now: now(),
+      ...(preferred ? { providerId: preferred.providerId, modelId: preferred.canonicalModelId } : {}), now: now(),
     }));
     conversationMutationRef.current = operation.then(() => undefined, () => undefined);
     const selected = await operation;
@@ -1079,7 +1157,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     await loadConversationData(selected);
     setNotice(`Matrícula asociada: ${personId}`);
     setAnnouncement(`Matrícula ${personId} asociada al Asistente`);
-  }, [activeAnalysis, ensureActiveAnalysisVersion, loadConversationData, ready]);
+  }, [activeAnalysis, ensureActiveAnalysisVersion, loadConversationData, modelCatalog, modelPreferences.lastCatalogEntryId, ready]);
 
   const addPerson = useCallback(async (personId: string) => {
     await updateSelectedConversation((current) => current.type === "analysis" ? {
@@ -1103,33 +1181,40 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     await send(`Consulta la matrícula ${conversation.primaryPersonId}`);
   }, [conversation, send]);
 
-  const updateConversationPreferences = useCallback(async (patch: { modelProfileId?: string; responseMode?: ResponseMode; contextStrategy?: ContextStrategy }) => {
-    const previousModelProfileId = conversationRef.current?.modelProfileId;
+  const updateConversationPreferences = useCallback(async (patch: { responseMode?: ResponseMode; contextStrategy?: ContextStrategy }) => {
     await updateSelectedConversation(patch);
-    if (patch.modelProfileId && previousModelProfileId && patch.modelProfileId !== previousModelProfileId && conversationRef.current?.id) {
-      const event: ChatEvent = { id: createId("event"), conversationId: conversationRef.current.id, event: { type: "model_changed", previousModelProfileId, modelProfileId: patch.modelProfileId }, createdAt: now() };
-      await repositoriesRef.current?.events.put(event);
-      if (mountedRef.current) setEvents((items) => [...items, event]);
-    }
   }, [updateSelectedConversation]);
+  const selectConversationModel = useCallback(async (providerId: string, modelId: string) => {
+    const entry = modelCatalog.find((item) => item.providerId === providerId && item.canonicalModelId === modelId);
+    const selected = conversationRef.current;
+    if (!entry || !selected) return;
+    const compatible = entry.availability === "available" && entry.capabilities.chat === true && (selected.type === "general" || entry.capabilities.tools === true);
+    if (!compatible) {
+      if (selected.type === "analysis" && entry.capabilities.tools === "unknown") await checkModelCompatibility(entry);
+      return;
+    }
+    await updateSelectedConversation({ providerId, modelId });
+    const recent = [entry.id, ...modelPreferences.recentCatalogEntryIds.filter((id) => id !== entry.id)].slice(0, 12);
+    await persistModelPreferences({ ...modelPreferences, recentCatalogEntryIds: recent, lastCatalogEntryId: entry.id, updatedAt: now() });
+  }, [checkModelCompatibility, modelCatalog, modelPreferences, persistModelPreferences, updateSelectedConversation]);
   const openModelSettings = useCallback(() => onNavigate?.({ type: "settings_ai" }), [onNavigate]);
 
   const availablePersonIds = useMemo(() => conversation?.type === "analysis" && activeAnalysis && activeAnalysis.id === conversation.analysisId
     ? activeAnalysis.result.people.map((person) => person.employeeNumber) : [], [activeAnalysis, conversation]);
   const repeatableMessageIds = useMemo(() => streaming || selectionLoading ? [] : messages.flatMap((message) => (
     message.role === "assistant" && resolveRepeatTarget(message.id) ? [message.id] : []
-  )), [conversation, messages, modelProfiles, resolveRepeatTarget, selectionLoading, streaming]);
+  )), [conversation, messages, resolveRepeatTarget, selectionLoading, streaming]);
 
   const value = useMemo<AssistantContextValue>(() => ({
     ready, conversations, hasMoreConversations: Boolean(conversationCursor), conversation, messages, repeatableMessageIds, hasMoreMessages: Boolean(messageCursor), sources, revealedSourceIds, events, actions, actionOutputs, resolvingActionIds, snapshots, documents, indexJobs,
     streaming, selectionLoading, conversationTransitionPending, announcement, notice, error, createGeneralConversation, loadMoreConversations, selectConversation, renameConversation, archiveConversation, deleteConversation,
     loadMoreMessages, send, stop, retryResponse, regenerateResponse, copyResponse, acceptAction, rejectAction, convertToActiveAnalysis, associatePerson, continuePersonInAssistant, addPerson, removePerson, setPrimaryPerson,
-    requestPersonProfile, openModelSettings, updateConversationPreferences, availablePersonIds, people: conversation?.type === "analysis" ? activeAnalysis?.result.people ?? [] : [], canSend: Boolean(adapter) || Boolean(conversation && modelProfiles.some((profile) => profile.id === conversation.modelProfileId && profile.enabled && (conversation.type === "analysis" ? profile.analysisCompatible : profile.generalChatCompatible))), modelProfiles, assistantSettings, saveModelProfile, duplicateModelProfile,
-    deleteModelProfile, updateAssistantSettings, clearAssistantContent, setKey: vaultRef.current.setKey, clearKey: vaultRef.current.clearKey, withKey: vaultRef.current.withKey,
-  }), [acceptAction, actionOutputs, actions, addPerson, announcement, archiveConversation, assistantSettings, associatePerson, availablePersonIds, clearAssistantContent, conversation, conversationCursor, conversations, documents,
-    convertToActiveAnalysis, continuePersonInAssistant, copyResponse, createGeneralConversation, deleteConversation, deleteModelProfile, duplicateModelProfile, error, events, loadMoreConversations,
-    loadMoreMessages, messageCursor, messages, modelProfiles, notice, openModelSettings, regenerateResponse, removePerson, renameConversation, repeatableMessageIds, requestPersonProfile, retryResponse,
-    conversationTransitionPending, indexJobs, rejectAction, revealedSourceIds, resolvingActionIds, saveModelProfile, selectConversation, selectionLoading, send, setPrimaryPerson, snapshots, sources, stop, streaming, updateAssistantSettings, updateConversationPreferences]);
+    requestPersonProfile, openModelSettings, updateConversationPreferences, selectConversationModel, availablePersonIds, people: conversation?.type === "analysis" ? activeAnalysis?.result.people ?? [] : [], canSend: Boolean(adapter) || Boolean(conversation && modelCatalog.some((entry) => entry.providerId === conversation.providerId && entry.canonicalModelId === conversation.modelId && entry.availability === "available" && entry.capabilities.chat === true && (conversation.type === "general" || entry.capabilities.tools === true))), providerConfigs, modelCatalog, modelPreferences, saveProviderConfig, deleteProviderConfig, checkProvider, refreshProviderCatalog, checkModelCompatibility, toggleModelFavorite, assistantSettings,
+    updateAssistantSettings, clearAssistantContent,
+  }), [acceptAction, actionOutputs, actions, addPerson, announcement, archiveConversation, assistantSettings, associatePerson, availablePersonIds, checkModelCompatibility, checkProvider, clearAssistantContent, conversation, conversationCursor, conversations, deleteProviderConfig, documents,
+    convertToActiveAnalysis, continuePersonInAssistant, copyResponse, createGeneralConversation, deleteConversation, error, events, loadMoreConversations,
+    loadMoreMessages, messageCursor, messages, modelCatalog, modelPreferences, notice, openModelSettings, providerConfigs, refreshProviderCatalog, regenerateResponse, removePerson, renameConversation, repeatableMessageIds, requestPersonProfile, retryResponse,
+    conversationTransitionPending, indexJobs, rejectAction, revealedSourceIds, resolvingActionIds, saveProviderConfig, selectConversation, selectConversationModel, selectionLoading, send, setPrimaryPerson, snapshots, sources, stop, streaming, toggleModelFavorite, updateAssistantSettings, updateConversationPreferences]);
 
   return <AssistantContext.Provider value={value}>{children}</AssistantContext.Provider>;
 }

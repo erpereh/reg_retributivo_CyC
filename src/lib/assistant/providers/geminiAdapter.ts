@@ -8,6 +8,7 @@ import {
   type BehavioralProbeResult,
   type ModelMetadata,
   type ProviderModel,
+  type ProviderMessage,
   type ProviderStreamEvent,
   type StreamResponseRequest,
   type TokenCount,
@@ -71,8 +72,14 @@ function supportsGenerateContent(methods: readonly string[]): boolean {
   return methods.some((method) => method.replace(/[^a-z0-9]/giu, "").toLocaleLowerCase("en") === "generatecontent");
 }
 
-function geminiContents(messages: readonly { role: "system" | "user" | "assistant" | "tool"; content: string }[]) {
+export function geminiNativeContents(messages: readonly ProviderMessage[]) {
   return messages.filter((message) => message.role !== "system").map((message) => {
+    if (message.role === "assistant" && message.toolCalls?.length) return { role: "model", parts: message.toolCalls.map((call) => ({ functionCall: { id: call.id, name: call.name, args: call.args } })) };
+    if (message.role === "tool" && message.toolCallId && message.toolName) {
+      let response: unknown;
+      try { response = JSON.parse(message.content); } catch { response = { ok: false, error: { code: "tool_result_invalid", message: "Resultado local no válido." } }; }
+      return { role: "user", parts: [{ functionResponse: { id: message.toolCallId, name: message.toolName, response } }] };
+    }
     if (message.role !== "tool") return { role: message.role === "assistant" ? "model" : "user", parts: [{ text: message.content }] };
     try {
       const results = JSON.parse(message.content) as unknown;
@@ -90,7 +97,9 @@ function geminiContents(messages: readonly { role: "system" | "user" | "assistan
   });
 }
 
-function geminiSystemInstruction(messages: readonly { role: "system" | "user" | "assistant" | "tool"; content: string }[]): string | undefined {
+const geminiContents = geminiNativeContents;
+
+function geminiSystemInstruction(messages: readonly ProviderMessage[]): string | undefined {
   const content = messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n").trim();
   return content || undefined;
 }

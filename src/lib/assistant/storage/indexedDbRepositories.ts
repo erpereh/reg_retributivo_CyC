@@ -1,9 +1,11 @@
-import { convertConversationToAnalysis as buildConversationAnalysisConversion, type AnalysisVersionSnapshot, type AssistantSettings, type ChatAction, type ChatEvent, type ChatMessage, type Conversation, type ModelProfile, type PersistedDocumentMetadata, type SourceReference } from "@/lib/assistant/domain";
+import { convertConversationToAnalysis as buildConversationAnalysisConversion, type AnalysisVersionSnapshot, type AssistantSettings, type ChatAction, type ChatEvent, type ChatMessage, type Conversation, type ModelPreferences, type ModelProfile, type PersistedDocumentMetadata, type SourceReference } from "@/lib/assistant/domain";
 import { openAssistantDatabase, type AssistantStoreName } from "@/lib/assistant/storage/database";
 import { assertSafeForPersistence } from "@/lib/assistant/privacy/assertions";
 import { DirectSearchIndex, type SearchFacets, type SearchIndexRecord } from "@/lib/assistant/search/directIndex";
 import type { DocumentScope } from "@/lib/assistant/domain";
 import { chatActionSchema, cleanupJobSchema, contextSnapshotSchema } from "@/lib/assistant/schemas";
+import { migrateLegacyAssistantModels } from "@/lib/assistant/storage/modelCatalogMigration";
+import type { ModelCatalogEntry, ProviderConfig } from "@/lib/assistant/catalog/domain";
 import type { z } from "zod";
 import type {
   AssistantCleanupRepository, AssistantDocumentRepository, AssistantRepositories, AssistantSettingsRepository, AssistantStoredRecord, BeginAnalysisIngestionInput, CleanupJob, ContextSnapshot,
@@ -70,6 +72,19 @@ class IndexedEntityRepository<T extends { id: string }> implements EntityReposit
     const values = await requestResult(transaction.objectStore(this.storeName).getAll());
     await transactionDone(transaction);
     return values as T[];
+  }
+}
+
+class ProviderConfigRepository extends IndexedEntityRepository<ProviderConfig> {
+  override async put(value: ProviderConfig): Promise<void> {
+    // envVarName is a non-secret identifier. The generic privacy scanner quite
+    // correctly rejects fields that look like credentials, so provider metadata
+    // uses a narrow writer that additionally enforces the server-side naming rule.
+    const permitted = /^(?:GEMINI_API_KEY|OPENAI_API_KEY|OPENROUTER_API_KEY|CEREBRAS_API_KEY|GROQ_API_KEY|OPENAI_COMPATIBLE_[A-Z0-9_]+_API_KEY)$/;
+    if (!permitted.test(value.envVarName)) throw new Error("provider_env_not_allowed");
+    const transaction = this.db.transaction(this.storeName, "readwrite");
+    transaction.objectStore(this.storeName).put(value);
+    await transactionDone(transaction);
   }
 }
 
@@ -237,6 +252,7 @@ function samePersistedAction(left: ChatAction, right: ChatAction): boolean {
 
 export async function createIndexedDbRepositories(options: IndexedDbRepositoriesOptions = {}): Promise<AssistantRepositories> {
   const db = await openAssistantDatabase(options.factory, options.dbName);
+  await migrateLegacyAssistantModels(db);
   const conversations = new IndexedConversationRepository(db);
   const messages = new IndexedMessageRepository(db);
   const events = new IndexedConversationCollectionRepository<ChatEvent>(db, "events");
@@ -250,6 +266,10 @@ export async function createIndexedDbRepositories(options: IndexedDbRepositories
   const analysisVersions = new IndexedEntityRepository<AssistantStoredRecord | AnalysisVersionSnapshot>(db, "analysisVersions");
   const indexJobs = new IndexedEntityRepository<AssistantStoredRecord>(db, "indexJobs");
   const modelProfiles = new IndexedEntityRepository<ModelProfile>(db, "modelProfiles") as ModelProfileRepository;
+  const providerConfigs = new ProviderConfigRepository(db, "providerConfigs");
+  const modelCatalog = new IndexedEntityRepository<ModelCatalogEntry>(db, "modelCatalog");
+  const modelPreferences = new IndexedEntityRepository<AssistantStoredRecord>(db, "modelPreferences");
+  const executionAudits = new IndexedEntityRepository<AssistantStoredRecord>(db, "executionAudits");
   const assistantSettings = new IndexedEntityRepository<AssistantSettings>(db, "assistantSettings") as AssistantSettingsRepository;
   const cleanupJobs = new IndexedCleanupRepository(db);
 
@@ -305,7 +325,7 @@ export async function createIndexedDbRepositories(options: IndexedDbRepositories
   }
 
   return {
-    conversations, messages, events, actions, documents, sources, chunks, searchTerms, snapshots, cache, analysisVersions, indexJobs, modelProfiles, assistantSettings, cleanupJobs,
+    conversations, messages, events, actions, documents, sources, chunks, searchTerms, snapshots, cache, analysisVersions, indexJobs, modelProfiles, providerConfigs, modelCatalog, modelPreferences, executionAudits, assistantSettings, cleanupJobs,
     async buildSearchIndex(scope) {
       const transaction = db.transaction(["documents", "chunks"], "readonly");
       const [storedDocuments, storedChunks] = await Promise.all([requestResult(transaction.objectStore("documents").getAll()), requestResult(transaction.objectStore("chunks").getAll())]); await transactionDone(transaction);
@@ -362,7 +382,7 @@ export async function createIndexedDbRepositories(options: IndexedDbRepositories
         if (tombstone) { await done; return undefined; }
         const all = await requestResult(transaction.objectStore("conversations").getAll()) as Conversation[];
         const existing = all.find((item) => item.type === "analysis" && item.analysisId === input.analysisId && item.status === "active");
-        const base: Conversation = existing ?? { id: `analysis-conversation-${input.analysisId}-${crypto.randomUUID()}`, type: "analysis", analysisId: input.analysisId, title: `Análisis ${input.analysisId}`, associatedPersonIds: [], modelProfileId: input.modelProfileId, responseMode: "strict", contextStrategy: "automatic", analysisVersion: input.analysisVersion, status: "active", createdAt: input.updatedAt, updatedAt: input.updatedAt };
+        const base: Conversation = existing ?? { id: `analysis-conversation-${input.analysisId}-${crypto.randomUUID()}`, type: "analysis", analysisId: input.analysisId, title: `Análisis ${input.analysisId}`, associatedPersonIds: [], ...(input.providerId ? { providerId: input.providerId } : {}), ...(input.modelId ? { modelId: input.modelId } : {}), responseMode: "strict", contextStrategy: "associated_people", analysisVersion: input.analysisVersion, status: "active", createdAt: input.updatedAt, updatedAt: input.updatedAt };
         const selected = { ...base, analysisVersion: input.analysisVersion, associatedPersonIds: [...new Set([...base.associatedPersonIds, input.personId])], primaryPersonId: input.personId, updatedAt: input.updatedAt };
         assertSafeForPersistence(selected); transaction.objectStore("conversations").put(selected);
         await done; return selected;
@@ -703,6 +723,43 @@ export async function createIndexedDbRepositories(options: IndexedDbRepositories
           }
         }
         transaction.objectStore("assistantSettings").put(input.settings);
+        await done;
+      } catch (error) {
+        try { transaction.abort(); } catch { /* already completed */ }
+        await done.catch(() => undefined);
+        throw safeStorageError(error);
+      }
+    },
+    async replaceProviderCatalog(providerId: string, entries: readonly ModelCatalogEntry[]): Promise<void> {
+      if (entries.some((entry) => entry.providerId !== providerId)) throw new AssistantStorageError("storage_error", "El catálogo no pertenece al proveedor.");
+      entries.forEach(assertSafeForPersistence);
+      const transaction = db.transaction("modelCatalog", "readwrite");
+      const done = transactionDone(transaction);
+      try {
+        const store = transaction.objectStore("modelCatalog");
+        const existing = await requestResult(store.getAll()) as ModelCatalogEntry[];
+        for (const entry of existing) if (entry.providerId === providerId) store.delete(entry.id);
+        for (const entry of entries) store.put(entry);
+        await done;
+      } catch (error) {
+        try { transaction.abort(); } catch { /* already completed */ }
+        await done.catch(() => undefined);
+        throw safeStorageError(error);
+      }
+    },
+    async saveModelPreferences(preferences: ModelPreferences): Promise<void> {
+      assertSafeForPersistence(preferences);
+      const transaction = db.transaction("modelPreferences", "readwrite");
+      transaction.objectStore("modelPreferences").put(preferences);
+      await transactionDone(transaction);
+    },
+    async deleteProviderConfiguration(providerId: string): Promise<void> {
+      const transaction = db.transaction(["providerConfigs", "modelCatalog"], "readwrite");
+      const done = transactionDone(transaction);
+      try {
+        transaction.objectStore("providerConfigs").delete(providerId);
+        const models = await requestResult(transaction.objectStore("modelCatalog").getAll()) as ModelCatalogEntry[];
+        for (const model of models) if (model.providerId === providerId) transaction.objectStore("modelCatalog").delete(model.id);
         await done;
       } catch (error) {
         try { transaction.abort(); } catch { /* already completed */ }

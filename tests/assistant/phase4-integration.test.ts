@@ -10,8 +10,8 @@ const ndjson = (events: readonly unknown[]) => new Response(events.map((event) =
 const validateRequestScope = vi.fn(async () => undefined);
 
 describe("phase 4 disconnected-path regressions", () => {
-  it("publishes functional provider JSON schemas for all 18 tools", () => {
-    expect(ANALYSIS_TOOL_NAMES).toHaveLength(18);
+  it("publishes functional provider JSON schemas for all 19 tools", () => {
+    expect(ANALYSIS_TOOL_NAMES).toHaveLength(19);
     for (const name of ANALYSIS_TOOL_NAMES) {
       const schema = ANALYSIS_TOOL_SCHEMAS[name].provider;
       expect(schema).toMatchObject({ type: "object", additionalProperties: false });
@@ -75,7 +75,7 @@ describe("phase 4 disconnected-path regressions", () => {
     const source = { id: "s1", conversationId: "c1", analysisId: "a1", sourceType: "analysis", sanitizedSourceLabel: "Análisis retributivo", availability: "available", conceptIds: [], excerpt: "Resumen estructurado", sanitizedHash: "h1" };
     const registry = { names: ["getAnalysisSummary"], execute: vi.fn(), executeEnvelope: vi.fn(async () => ({ data: { summary: { uniquePeople: 1 } }, sources: [source] })) } as unknown as AnalysisToolRegistry;
     await new AssistantOrchestrator({ transport, registry, validateRequestScope }).send({ conversationId: "c1", analysisId: "a1", question: "Resumen", modelProfileId: "p1", modelId: "m1", responseMode: "strict", contextStrategy: "automatic" });
-    expect(transport.mock.calls[1][0]).toEqual(expect.objectContaining({ toolResults: [{ requestId: "req-1", tool: "getAnalysisSummary", data: { summary: { uniquePeople: 1 } }, sources: [source] }] }));
+    expect(transport.mock.calls[1][0]).toEqual(expect.objectContaining({ toolResults: [{ requestId: "req-1", tool: "getAnalysisSummary", args: { analysisId: "a1" }, status: "success", data: { summary: { uniquePeople: 1 } }, sources: [source] }] }));
   });
 
   it("rejects an event from another round and cancels an oversized NDJSON reader", async () => {

@@ -16,7 +16,7 @@ describe("assistant client orchestration", () => {
     expect(result.text).toBe("Respuesta");
     expect(result.rounds).toBe(2);
     expect(registry.execute).toHaveBeenCalledWith("getPersonProfile", { analysisId: "a1", personId: "10048" });
-    expect(transport.mock.calls[1][0]).toEqual(expect.objectContaining({ phase: "respond", toolResults: [{ requestId: "q1", tool: "getPersonProfile", data: { safe: true }, sources: [] }] }));
+    expect(transport.mock.calls[1][0]).toEqual(expect.objectContaining({ phase: "respond", toolResults: [{ requestId: "q1", tool: "getPersonProfile", args: { analysisId: "a1", personId: "10048" }, status: "success", data: { safe: true }, sources: [] }] }));
   });
 
   it("stops at three rounds, validates privacy client-side and honors AbortSignal", async () => {

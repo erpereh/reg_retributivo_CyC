@@ -6,13 +6,14 @@ interface ContinuePersonInput {
   analysisId: string;
   analysisVersion: string;
   personId: string;
-  modelProfileId: string;
+  providerId?: string;
+  modelId?: string;
   now: string;
   send?: (content: string) => unknown;
 }
 
 export async function continuePersonInAssistant(input: ContinuePersonInput): Promise<Conversation> {
-  const selected = await input.repositories.continueAnalysisPerson({ analysisId: input.analysisId, analysisVersion: input.analysisVersion, personId: input.personId, modelProfileId: input.modelProfileId, updatedAt: input.now });
+  const selected = await input.repositories.continueAnalysisPerson({ analysisId: input.analysisId, analysisVersion: input.analysisVersion, personId: input.personId, ...(input.providerId ? { providerId: input.providerId } : {}), ...(input.modelId ? { modelId: input.modelId } : {}), updatedAt: input.now });
   if (!selected) throw new Error("El análisis ya no está disponible para continuar en el Asistente.");
   return selected;
 }

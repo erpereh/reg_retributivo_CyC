@@ -1,6 +1,7 @@
-import type { AnalysisVersionSnapshot, AssistantSettings, ChatAction, ChatEvent, ChatMessage, Conversation, ModelProfile, PersistedDocumentMetadata, SourceReference } from "@/lib/assistant/domain";
+import type { AnalysisVersionSnapshot, AssistantSettings, ChatAction, ChatEvent, ChatMessage, Conversation, ModelPreferences, ModelProfile, PersistedDocumentMetadata, SourceReference } from "@/lib/assistant/domain";
 import type { ContextStrategy, DocumentScope, ResponseMode } from "@/lib/assistant/domain";
 import type { SearchFacets, SearchIndex } from "@/lib/assistant/search/directIndex";
+import type { ModelCatalogEntry, ProviderConfig } from "@/lib/assistant/catalog/domain";
 
 export interface PageOptions { limit: number; cursor?: string }
 export interface Page<T> { items: T[]; nextCursor?: string }
@@ -89,7 +90,7 @@ export interface ResolveChatActionResult {
 }
 export interface SyncAnalysisVersionInput { readonly snapshot: AnalysisVersionSnapshot; readonly analysisId: string; readonly updatedAt: string }
 export interface SyncAnalysisVersionResult { readonly changed: boolean; readonly updatedConversationIds: readonly string[] }
-export interface ContinueAnalysisPersonInput { readonly analysisId: string; readonly analysisVersion: string; readonly personId: string; readonly modelProfileId: string; readonly updatedAt: string }
+export interface ContinueAnalysisPersonInput { readonly analysisId: string; readonly analysisVersion: string; readonly personId: string; readonly providerId?: string; readonly modelId?: string; readonly updatedAt: string }
 
 export interface AssistantRepositories {
   conversations: ConversationRepository;
@@ -105,6 +106,10 @@ export interface AssistantRepositories {
   analysisVersions: EntityRepository<AssistantStoredRecord | AnalysisVersionSnapshot>;
   indexJobs: CollectionRepository<AssistantStoredRecord>;
   modelProfiles: ModelProfileRepository;
+  providerConfigs: CollectionRepository<ProviderConfig>;
+  modelCatalog: CollectionRepository<ModelCatalogEntry>;
+  modelPreferences: EntityRepository<AssistantStoredRecord>;
+  executionAudits: CollectionRepository<AssistantStoredRecord>;
   assistantSettings: AssistantSettingsRepository;
   cleanupJobs: AssistantCleanupRepository;
   writeConversationBlock(block: ConversationWriteBlock): Promise<void>;
@@ -123,6 +128,9 @@ export interface AssistantRepositories {
   clearAssistantContent(): Promise<void>;
   cleanupAnalysis(analysisId: string, policy: CleanupPolicy): Promise<void>;
   writeModelConfiguration(input: ModelConfigurationWrite): Promise<void>;
+  replaceProviderCatalog(providerId: string, entries: readonly ModelCatalogEntry[]): Promise<void>;
+  saveModelPreferences(preferences: ModelPreferences): Promise<void>;
+  deleteProviderConfiguration(providerId: string): Promise<void>;
   buildSearchIndex(scope: DocumentScope): Promise<SearchIndex>;
   close(): void;
 }

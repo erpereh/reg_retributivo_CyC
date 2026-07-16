@@ -58,19 +58,43 @@ function registry(type: "analysis" | "general" = "analysis", searchIndex?: Searc
 }
 
 describe("assistant analysis tool registry", () => {
-  it("exposes exactly the approved 18-tool allowlist", () => {
+  it("exposes exactly the approved 19-tool allowlist", () => {
     expect(ANALYSIS_TOOL_NAMES).toEqual([
       "getAnalysisSummary", "findPersonByEmployeeId", "searchPeople", "getPersonProfile", "getPersonPayrollPeriods",
-      "getPersonConceptDifferences", "getPersonCuadreReg", "getPersonNormalizedData", "getPersonGroupings", "comparePeople",
+      "getPersonConcepts", "getPersonConceptDifferences", "getPersonCuadreReg", "getPersonNormalizedData", "getPersonGroupings", "comparePeople",
       "getTopDifferences", "getDifferencesByCenter", "getDifferencesByPosition", "getDifferencesByConcept", "getPendingConcepts",
       "getDisabledConcepts", "searchDocumentChunks", "getSourceDetails",
     ]);
+  });
+
+  it("returns a person's complete sanitized payroll and registro concepts", async () => {
+    await expect(registry().execute("getPersonConcepts" as AnalysisToolName, { analysisId: "analysis-1", personId: "10048" })).resolves.toEqual({
+      personId: "10048",
+      concepts: expect.arrayContaining([
+        expect.objectContaining({ origin: "registro", concept: "SAL", amount: 100 }),
+        expect.objectContaining({ origin: "payroll", concept: "SALARIO", amount: 110, period: "2026-01" }),
+      ]),
+    });
   });
 
   it("rejects general scope, a different analysis and extra input fields", async () => {
     await expect(registry("general").execute("getAnalysisSummary", { analysisId: "analysis-1" })).rejects.toThrow(/conversación/i);
     await expect(registry().execute("getAnalysisSummary", { analysisId: "analysis-2" })).rejects.toThrow(/análisis/i);
     await expect(registry().execute("getPersonProfile", { analysisId: "analysis-1", personId: "10048", name: "Nombre Privado" })).rejects.toThrow();
+  });
+
+  it("enforces the immutable associated-people snapshot inside the registry", async () => {
+    const scoped = createAnalysisToolRegistry({
+      conversation: { id: "conversation-1", type: "analysis", analysisId: "analysis-1" },
+      analysis: { id: "analysis-1", result },
+      chunks: [],
+      scopeSnapshot: {
+        id: "scope-1", analysisId: "analysis-1", analysisVersion: "v1", strategy: "associated_people",
+        associatedPersonIds: ["10048"], explicitPersonIds: [], documentIds: [], allowedTools: ["getAnalysisSummary", "getPersonProfile"],
+      },
+    });
+    await expect(scoped.execute("getPersonProfile", { analysisId: "analysis-1", personId: "10049" })).rejects.toThrow("person_outside_authorized_scope");
+    await expect(scoped.execute("searchPeople", { analysisId: "analysis-1", query: "Centro", limit: 10 })).rejects.toThrow("tool_not_allowed");
   });
 
   it("keeps Person and Cuadre Reg. parity with shared projections of AnalysisResult", async () => {

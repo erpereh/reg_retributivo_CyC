@@ -163,7 +163,7 @@ describe("Phase 6 reviewed integration", () => {
       fireEvent.click(screen.getByRole("button", { name: "Seleccionar afectada" }));
       await waitFor(() => expect(screen.getByTestId("cache-current")).toHaveTextContent("analysis-c1:archived_analysis_deleted"));
       expect(screen.getByRole("textbox", { name: "Pregunta" })).toBeDisabled();
-      expect(screen.getByRole("button", { name: /Modo de respuesta:/ })).toBeDisabled();
+      expect(screen.getByRole("combobox", { name: "Modo de respuesta" })).toBeDisabled();
       expect(screen.getByRole("button", { name: "Aceptar Acción afectada" })).toBeDisabled();
     } else {
       await waitFor(() => {
@@ -204,7 +204,7 @@ describe("Phase 6 reviewed integration", () => {
     render(<AssistantProvider activeAnalysis={analysis()} factory={factory} dbName="phase6-readonly"><AssistantView /><Mutator /></AssistantProvider>);
     await screen.findByText("Resultado");
     expect(screen.getByRole("textbox", { name: "Pregunta" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /Modo de respuesta:/ })).toBeDisabled();
+    expect(screen.getByRole("combobox", { name: "Modo de respuesta" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Aceptar Comparar" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Intentar mutar" }));
     const check = await createIndexedDbRepositories({ factory, dbName: "phase6-readonly" });

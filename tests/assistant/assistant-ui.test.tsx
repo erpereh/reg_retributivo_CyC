@@ -264,10 +264,8 @@ describe("assistant conversation UI", () => {
     fireEvent.click(within(picker).getByRole("checkbox", { name: "Matrícula 10006" }));
     fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
 
-    fireEvent.click(screen.getByRole("button", { name: /Modo de respuesta: Estricto/ }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Flexible" }));
-    fireEvent.click(screen.getByRole("button", { name: /Estrategia de contexto: Automática/ }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Optimizada" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Modo de respuesta" }), { target: { value: "flexible" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Estrategia de contexto" }), { target: { value: "associated_people" } });
     const composer = screen.getByRole("textbox", { name: "Pregunta" }) as HTMLTextAreaElement;
     fireEvent.change(composer, { target: { value: "Consulta la matrícula 10006" } });
     fireEvent.keyDown(composer, { key: "Enter", shiftKey: true });

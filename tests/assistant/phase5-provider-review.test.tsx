@@ -8,6 +8,7 @@ import { AssistantProvider, useAssistant } from "@/components/assistant/Assistan
 import { AssistantView } from "@/components/assistant/AssistantView";
 import type { Conversation, ModelProfile } from "@/lib/assistant/domain";
 import { FakeAssistantAdapter } from "@/lib/assistant/providers/fakeAdapter";
+import { catalogKey } from "@/lib/assistant/catalog/domain";
 import { createIndexedDbRepositories } from "@/lib/assistant/storage/indexedDbRepositories";
 import type { AssistantRepositories } from "@/lib/assistant/storage/repositories";
 
@@ -30,8 +31,15 @@ function profile(id: string, overrides: Partial<ModelProfile> = {}): ModelProfil
 
 async function seed(factory: IDBFactory, dbName: string, selected = conversation(), profiles: ModelProfile[] = []) {
   const repositories = await createIndexedDbRepositories({ factory, dbName });
-  await repositories.conversations.put(selected);
   for (const item of profiles) await repositories.modelProfiles.put(item);
+  if (profiles.length) {
+    const providerId = "provider-openai-test";
+    await repositories.providerConfigs.put({ id: providerId, providerType: "openai", displayName: "OpenAI", baseUrl: "https://api.openai.com/v1", envVarName: "OPENAI_API_KEY", enabled: true, connectionStatus: "active", createdAt, updatedAt: createdAt });
+    for (const item of profiles) await repositories.modelCatalog.put({ id: catalogKey(providerId, item.modelId), providerId, canonicalModelId: item.modelId, apiModelId: item.modelId, generationModelId: item.modelId, displayName: item.name, capabilities: { chat: item.generalChatCompatible, tools: item.supportsTools, streaming: item.supportsStreaming, vision: "unknown", documents: "unknown" }, availability: item.enabled ? "available" : "retired", metadataSource: "official", detectedAt: createdAt });
+    const selectedProfile = profiles.find((item) => item.id === selected.modelProfileId);
+    selected = { ...selected, providerId, modelProfileId: selectedProfile ? catalogKey(providerId, selectedProfile.modelId) : selected.modelProfileId, modelId: selectedProfile?.modelId };
+  }
+  await repositories.conversations.put(selected);
   repositories.close();
 }
 
@@ -154,7 +162,7 @@ describe("Phase 5 reviewed provider behavior", () => {
     render(<AssistantProvider factory={factory} dbName="phase5-model-routing"><AssistantView /></AssistantProvider>);
     await screen.findByRole("heading", { name: "conversation-model" });
     fireEvent.click(screen.getByRole("button", { name: /Modelo de conversación:/ }));
-    const options = screen.getAllByRole("menuitem");
+    const options = screen.getAllByRole("button").filter((button) => button.textContent?.includes("-model"));
     const optionText = options.map((option) => option.textContent ?? "").join(" ");
     expect(optionText).toContain(selected.modelId);
     expect(optionText).toContain(fallback.modelId);
@@ -163,11 +171,13 @@ describe("Phase 5 reviewed provider behavior", () => {
     fireEvent.change(composer, { target: { value: "¿Qué es Retributivo?" } });
     fireEvent.keyDown(composer, { key: "Enter" });
     expect(await screen.findByText("Respuesta remota")).toBeVisible();
-    expect(bodies[0]).toMatchObject({ modelProfileId: selected.id, modelId: selected.modelId, profile: selected });
+    const chatBody = bodies.find((body) => typeof body.phase === "string");
+    expect(chatBody).toMatchObject({ providerId: "provider-openai-test", modelId: selected.modelId });
+    expect(chatBody).not.toHaveProperty("apiKey");
     expect(JSON.stringify(bodies)).not.toContain("apiKey");
     const persisted = await createIndexedDbRepositories({ factory, dbName: "phase5-model-routing" });
     const messages = await persisted.messages.listByConversation("conversation-model", { limit: 10 });
-    expect(messages.items.at(-1)).toMatchObject({ modelProfileId: selected.id, modelId: selected.modelId });
+    expect(messages.items.at(-1)).toMatchObject({ modelProfileId: chatBody?.modelProfileId, providerId: "provider-openai-test", modelId: selected.modelId });
     persisted.close();
   });
 

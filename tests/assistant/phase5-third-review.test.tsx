@@ -13,10 +13,12 @@ import { createIndexedDbRepositories } from "@/lib/assistant/storage/indexedDbRe
 import type { AssistantRepositories } from "@/lib/assistant/storage/repositories";
 import { localIterableResponse } from "@/lib/assistant/providers/localNdjsonTransport";
 import type { AnalysisResult, StoredAnalysis } from "@/lib/types";
+import { seedCatalogFixtures } from "./catalog-fixtures";
 
 const createdAt = "2026-07-13T10:00:00.000Z";
 const encoder = new TextEncoder();
-const contentStores = ASSISTANT_STORES.filter((name) => name !== "assistantSettings" && name !== "modelProfiles");
+const retainedConfigurationStores = new Set(["assistantSettings", "modelProfiles", "providerConfigs", "modelCatalog", "modelPreferences", "migrations"]);
+const contentStores = ASSISTANT_STORES.filter((name) => !retainedConfigurationStores.has(name));
 
 function conversation(id: string, overrides: Partial<Conversation> = {}): Conversation {
   return {
@@ -53,9 +55,9 @@ const activeAnalysis = {
 
 async function seed(factory: IDBFactory, dbName: string, conversations: Conversation[], messages: ChatMessage[] = [], profiles: ModelProfile[] = [], sources: SourceReference[] = []) {
   const repositories = await createIndexedDbRepositories({ factory, dbName });
-  for (const item of conversations) await repositories.conversations.put(item);
-  for (const item of messages) await repositories.messages.put(item);
-  for (const item of profiles) await repositories.modelProfiles.put(item);
+  const mappings = await seedCatalogFixtures(repositories, profiles, createdAt);
+  for (const item of conversations) { const mapping = item.modelProfileId ? mappings.get(item.modelProfileId) : undefined; await repositories.conversations.put(mapping ? { ...item, providerId: mapping.providerId, modelProfileId: mapping.entryId, modelId: mapping.modelId } : item); }
+  for (const item of messages) { const mapping = item.modelProfileId ? mappings.get(item.modelProfileId) : undefined; await repositories.messages.put(mapping ? { ...item, providerId: mapping.providerId, modelProfileId: mapping.entryId, modelId: mapping.modelId } : item); }
   for (const item of sources) await repositories.sources.put(item);
   repositories.close();
 }
@@ -270,9 +272,10 @@ describe("Phase 5 third-review regressions", () => {
     render(<AssistantProvider factory={factory} dbName={dbName}><AssistantView /></AssistantProvider>);
     fireEvent.click(await screen.findByRole("button", { name: "Reintentar respuesta" }));
     await screen.findByText("Respuesta reiniciada");
-    expect(bodies[0]).toMatchObject({ phase: "plan" });
-    expect(bodies[0]).not.toHaveProperty("continuationContext");
-    expect(bodies[0]).not.toHaveProperty("interruptedMessageId");
+    const chatBody = bodies.find((body) => body.phase === "plan")!;
+    expect(chatBody).toMatchObject({ phase: "plan" });
+    expect(chatBody).not.toHaveProperty("continuationContext");
+    expect(chatBody).not.toHaveProperty("interruptedMessageId");
   });
 
   test("retries a non-empty stopped production response as a continuation", async () => {
@@ -292,7 +295,7 @@ describe("Phase 5 third-review regressions", () => {
     render(<AssistantProvider factory={factory} dbName={dbName}><AssistantView /></AssistantProvider>);
     fireEvent.click(await screen.findByRole("button", { name: "Reintentar respuesta" }));
     await screen.findByText("Parcial completada");
-    expect(bodies[0]).toMatchObject({ phase: "continue", continuationContext: "Parcial", interruptedMessageId: "assistant-a" });
+    expect(bodies.find((body) => body.phase === "continue")).toMatchObject({ phase: "continue", continuationContext: "Parcial", interruptedMessageId: "assistant-a" });
   });
 
   test("hides repeat controls for a restored fake analysis response without its exact in-memory descriptor", async () => {

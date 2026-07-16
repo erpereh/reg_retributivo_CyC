@@ -4,7 +4,8 @@ export type ConversationType = "general" | "analysis";
 export type ConversationStatus = "active" | "archived" | "archived_analysis_deleted";
 export type MessageStatus = "streaming" | "completed" | "stopped" | "interrupted" | "failed";
 export type ResponseMode = "strict" | "flexible";
-export type ContextStrategy = "automatic" | "full" | "optimized";
+/** The first two values are the active UI contract. The remaining values are read-only legacy values. */
+export type ContextStrategy = "associated_people" | "full_analysis" | "automatic" | "full" | "optimized";
 export type ContextOrigin = "general" | "analysis";
 export type SourceAvailability = "available" | "historical_unavailable" | "deleted";
 export type DocumentScope = { type: "analysis"; analysisId: string } | { type: "conversation"; conversationId: string };
@@ -23,6 +24,9 @@ export interface Conversation {
   title: string;
   associatedPersonIds: string[];
   primaryPersonId?: string;
+  providerId?: string;
+  modelId?: string;
+  /** @deprecated Kept only while schema-v5 records are being migrated. */
   modelProfileId?: string;
   responseMode: ResponseMode;
   contextStrategy: ContextStrategy;
@@ -39,6 +43,8 @@ export interface ChatMessage {
   content: string;
   status: MessageStatus;
   contextOrigin: ContextOrigin;
+  providerId?: string;
+  /** @deprecated Kept only for historical messages. */
   modelProfileId: string;
   /** Optional only for records written before schema v2; every new assistant message sets it. */
   modelId?: string;
@@ -115,6 +121,14 @@ export interface AssistantSettings {
   safetyMarginPercent: number;
   warningThresholdPercent: number;
   compactionThresholdPercent: number;
+}
+
+export interface ModelPreferences {
+  id: "model-preferences";
+  favoriteCatalogEntryIds: string[];
+  recentCatalogEntryIds: string[];
+  lastCatalogEntryId?: string;
+  updatedAt: string;
 }
 
 export interface SourceReference {

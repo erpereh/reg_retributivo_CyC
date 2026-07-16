@@ -157,64 +157,24 @@ describe("Phase 5 second-review regressions", () => {
     expect(adapter.streamGeneral).not.toHaveBeenCalled();
   });
 
-  test("scopes transient fallback keys to each producer profile", async () => {
+  test("does not expose a client key vault or transient provider secrets", async () => {
     const factory = new IDBFactory();
-    const selected = profile("profile-a", "https://a.example/v1");
-    const fallback = profile("profile-b", "https://b.example/v1");
-    const repositories = await createIndexedDbRepositories({ factory, dbName: "phase5-fallback-key-scope" });
-    await repositories.conversations.put(conversation("conversation-key", createdAt, selected.id));
-    await repositories.modelProfiles.put(selected);
-    await repositories.modelProfiles.put(fallback);
-    await repositories.assistantSettings.put({ id: "assistant-settings", defaultGeneralModelProfileId: fallback.id, responseMode: "strict", contextStrategy: "automatic", safetyMarginPercent: 10, warningThresholdPercent: 75, compactionThresholdPercent: 85 });
-    repositories.close();
-    const bodies: Record<string, unknown>[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      bodies.push(body);
-      return bodies.length < 3
-        ? new Response(`${JSON.stringify({ type: "error", roundId: body.roundId, code: "temporary", message: "Temporal", retryable: true, classification: "transient" })}\n`)
-        : new Response(`${JSON.stringify({ type: "text_delta", roundId: body.roundId, messageId: "remote", delta: "Fallback correcto" })}\n${JSON.stringify({ type: "done", roundId: body.roundId, finishReason: "stop" })}\n`);
-    }));
-    function KeyProbe() {
-      const assistant = useAssistant();
-      return <><output>{assistant.conversation?.id}</output><button onClick={() => assistant.setKey({ profileId: selected.id, endpoint: selected.baseUrl }, "secret-a")}>Preparar clave</button><button onClick={() => void assistant.send("¿Qué es Retributivo?")}>Enviar</button><output>{assistant.messages.at(-1)?.content}</output><output>{assistant.error}</output></>;
+    function KeyBoundaryProbe() {
+      const assistant = useAssistant() as unknown as Record<string, unknown>;
+      return <output data-testid="key-boundary">{String("setKey" in assistant)}:{String("clearKey" in assistant)}</output>;
     }
-    render(<AssistantProvider factory={factory} dbName="phase5-fallback-key-scope"><KeyProbe /></AssistantProvider>);
-    await screen.findByText("conversation-key");
-    fireEvent.click(screen.getByRole("button", { name: "Preparar clave" }));
-    fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
-    await screen.findByText("Fallback correcto");
-    expect(bodies.map((body) => body.apiKey)).toEqual(["secret-a", "secret-a", undefined]);
-    expect(bodies.at(-1)).toMatchObject({ modelProfileId: fallback.id, profile: fallback });
+    render(<AssistantProvider factory={factory} dbName="phase5-key-boundary" adapter={new FakeAssistantAdapter()}><KeyBoundaryProbe /></AssistantProvider>);
+    await waitFor(() => expect(screen.getByTestId("key-boundary")).toHaveTextContent("false:false"));
   });
 
-  test("clearing the vault before regenerate prevents reuse of the prior request key", async () => {
+  test("persists only an allowlisted environment variable name for compatible providers", async () => {
     const factory = new IDBFactory();
-    const selected = profile("profile-clear", "https://clear.example/v1");
     const repositories = await createIndexedDbRepositories({ factory, dbName: "phase5-clear-before-repeat" });
-    await repositories.conversations.put(conversation("conversation-clear", createdAt, selected.id));
-    await repositories.modelProfiles.put(selected);
+    await repositories.providerConfigs.put({ id: "provider-compatible", providerType: "openai-compatible", displayName: "Compatible", baseUrl: "https://models.example.test/v1", envVarName: "OPENAI_COMPATIBLE_TEST_API_KEY", enabled: true, connectionStatus: "active", createdAt, updatedAt: createdAt });
+    const stored = await repositories.providerConfigs.get("provider-compatible");
     repositories.close();
-    const bodies: Record<string, unknown>[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      bodies.push(body);
-      return new Response(`${JSON.stringify({ type: "text_delta", roundId: body.roundId, messageId: "remote", delta: `Respuesta ${bodies.length}` })}\n${JSON.stringify({ type: "done", roundId: body.roundId, finishReason: "stop" })}\n`);
-    }));
-    function ClearProbe() {
-      const assistant = useAssistant();
-      return <><button onClick={() => assistant.setKey({ profileId: selected.id, endpoint: selected.baseUrl }, "secret-clear")}>Preparar clave</button><button onClick={() => assistant.clearKey()}>Borrar clave</button><AssistantView /></>;
-    }
-    render(<AssistantProvider factory={factory} dbName="phase5-clear-before-repeat"><ClearProbe /></AssistantProvider>);
-    const composer = await screen.findByRole("textbox", { name: "Pregunta" });
-    fireEvent.click(screen.getByRole("button", { name: "Preparar clave" }));
-    fireEvent.change(composer, { target: { value: "¿Qué es Retributivo?" } });
-    fireEvent.keyDown(composer, { key: "Enter" });
-    await screen.findByText("Respuesta 1");
-    fireEvent.click(screen.getByRole("button", { name: "Borrar clave" }));
-    fireEvent.click(screen.getByRole("button", { name: "Regenerar respuesta" }));
-    await screen.findByText("Respuesta 2");
-    expect(bodies.map((body) => body.apiKey)).toEqual(["secret-clear", undefined]);
+    expect(stored).toMatchObject({ envVarName: "OPENAI_COMPATIBLE_TEST_API_KEY" });
+    expect(JSON.stringify(stored)).not.toMatch(/secret-clear|apiKeyValue/);
   });
 
   test("clears selection loading and exposes a sanitized error when a conversation load fails", async () => {

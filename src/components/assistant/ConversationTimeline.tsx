@@ -4,8 +4,9 @@ import { AssistantComposer } from "@/components/assistant/AssistantComposer";
 import { AssistantMessage } from "@/components/assistant/AssistantMessage";
 import { ConversationEvent } from "@/components/assistant/ConversationEvent";
 import type { AssistantContextValue } from "@/components/assistant/AssistantProvider";
+import type { SourceReference } from "@/lib/assistant/domain";
 
-export function ConversationTimeline({ assistant, onShowContextUsage }: Readonly<{ assistant: AssistantContextValue; onShowContextUsage?(): void }>) {
+export function ConversationTimeline({ assistant, onShowContextUsage, onOpenSource }: Readonly<{ assistant: AssistantContextValue; onShowContextUsage?(): void; onOpenSource?(source: SourceReference): void }>) {
   const conversation = assistant.conversation;
   const latestAssistantId = [...assistant.messages].reverse().find((message) => message.role === "assistant")?.id;
   const repeatableIds = new Set(assistant.repeatableMessageIds);
@@ -50,13 +51,14 @@ export function ConversationTimeline({ assistant, onShowContextUsage }: Readonly
                   onRegenerate={(id) => void assistant.regenerateResponse(id)}
                   onAcceptAction={(id) => void assistant.acceptAction(id)}
                   onRejectAction={(id) => void assistant.rejectAction(id)}
+                  onOpenSource={onOpenSource}
                 />
               ); })())}
             </ul>
           </>
         )}
       </div>
-      {conversation ? <AssistantComposer streaming={assistant.streaming} disabled={assistant.selectionLoading || conversation.status !== "active" || !assistant.canSend} conversation={conversation} profiles={assistant.modelProfiles.filter((profile) => profile.enabled && (conversation.type === "analysis" ? profile.analysisCompatible : profile.generalChatCompatible))} contextTokens={[...assistant.messages].reverse().find((message) => message.usage)?.usage?.inputTokens} onSend={assistant.send} onStop={assistant.stop} onPreferences={(patch) => void assistant.updateConversationPreferences(patch)} onConfigureModels={assistant.openModelSettings} onShowContextUsage={onShowContextUsage} /> : null}
+      {conversation ? <AssistantComposer streaming={assistant.streaming} disabled={assistant.selectionLoading || conversation.status !== "active" || !assistant.canSend} conversation={conversation} catalog={assistant.modelCatalog} providers={assistant.providerConfigs.filter((provider) => provider.enabled)} preferences={assistant.modelPreferences} contextTokens={[...assistant.messages].reverse().find((message) => message.usage)?.usage?.inputTokens} onSend={assistant.send} onStop={assistant.stop} onSelectModel={(providerId, modelId) => void assistant.selectConversationModel(providerId, modelId)} onToggleFavorite={(entryId) => void assistant.toggleModelFavorite(entryId)} onCheckCompatibility={(entry) => void assistant.checkModelCompatibility(entry)} onPreferences={(patch) => void assistant.updateConversationPreferences(patch)} onConfigureProviders={assistant.openModelSettings} onShowContextUsage={onShowContextUsage} /> : null}
       <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">{assistant.announcement}</div>
       {assistant.error ? <p role="alert" className="border-t border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-danger">{assistant.error}</p> : null}
     </main>

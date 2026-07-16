@@ -17,7 +17,7 @@ export const modelProfileSchema = z.object({
 
 export const assistantSettingsSchema = z.object({
   id: z.literal("assistant-settings"), defaultGeneralModelProfileId: id.optional(), defaultAnalysisModelProfileId: id.optional(),
-  responseMode: z.enum(["strict", "flexible"]), contextStrategy: z.enum(["automatic", "full", "optimized"]),
+  responseMode: z.enum(["strict", "flexible"]), contextStrategy: z.enum(["associated_people", "full_analysis", "automatic", "full", "optimized"]),
   safetyMarginPercent: z.number().min(0).max(50), warningThresholdPercent: z.number().min(1).max(99), compactionThresholdPercent: z.number().min(1).max(100),
 }).strict().superRefine((value, context) => {
   if (value.warningThresholdPercent >= value.compactionThresholdPercent) context.addIssue({ code: z.ZodIssueCode.custom, path: ["warningThresholdPercent"], message: "El aviso debe ser anterior a la compactación." });
@@ -25,13 +25,13 @@ export const assistantSettingsSchema = z.object({
 
 export const DEFAULT_ASSISTANT_SETTINGS: AssistantSettings = {
   id: "assistant-settings", defaultGeneralModelProfileId: undefined, defaultAnalysisModelProfileId: undefined,
-  responseMode: "strict", contextStrategy: "automatic", safetyMarginPercent: 10, warningThresholdPercent: 75, compactionThresholdPercent: 85,
+  responseMode: "strict", contextStrategy: "associated_people", safetyMarginPercent: 10, warningThresholdPercent: 75, compactionThresholdPercent: 85,
 };
 
 export const conversationSchema = z.object({
   id, type: z.enum(["general", "analysis"]), analysisId: id.optional(), title: z.string(), associatedPersonIds: z.array(id),
-  primaryPersonId: id.optional(), modelProfileId: id.optional(), responseMode: z.enum(["strict", "flexible"]),
-  contextStrategy: z.enum(["automatic", "full", "optimized"]), analysisVersion: id.optional(),
+  primaryPersonId: id.optional(), providerId: id.optional(), modelId: id.optional(), modelProfileId: id.optional(), responseMode: z.enum(["strict", "flexible"]),
+  contextStrategy: z.enum(["associated_people", "full_analysis", "automatic", "full", "optimized"]), analysisVersion: id.optional(),
   status: z.enum(["active", "archived", "archived_analysis_deleted"]), createdAt: date, updatedAt: date,
 }).strict().superRefine((value, context) => {
   if (value.type === "analysis" && !value.analysisId) context.addIssue({ code: z.ZodIssueCode.custom, path: ["analysisId"], message: "analysisId is required" });
@@ -41,7 +41,7 @@ export const conversationSchema = z.object({
 export const chatMessageSchema = z.object({
   id, conversationId: id, role: z.enum(["user", "assistant"]), content: z.string(),
   status: z.enum(["streaming", "completed", "stopped", "interrupted", "failed"]), contextOrigin: z.enum(["general", "analysis"]),
-  modelProfileId: id, modelId: id.optional(), responseMode: z.enum(["strict", "flexible"]), contextStrategy: z.enum(["automatic", "full", "optimized"]),
+  providerId: id.optional(), modelProfileId: id, modelId: id.optional(), responseMode: z.enum(["strict", "flexible"]), contextStrategy: z.enum(["associated_people", "full_analysis", "automatic", "full", "optimized"]),
   analysisVersion: id.optional(), sourceRefIds: z.array(id), actionIds: z.array(id), usage: tokenUsageSchema.optional(), createdAt: date,
 }).strict();
 
@@ -70,7 +70,7 @@ export const sourceReferenceSchema = z.object({
   conceptIds: z.array(id).max(100), excerpt: z.string().max(4_096), sanitizedHash: id,
 }).strict();
 
-export const contextSnapshotSchema = z.object({ id, conversationId: id, analysisId: id.optional(), summary: z.string().max(32_768), summarizedMessageIds: z.array(id), decisions: z.array(z.string().max(1_000)), figures: z.array(z.number().finite()), sourceIds: z.array(id), actionIds: z.array(id), personIds: z.array(id), analysisVersion: id, actualStrategy: z.enum(["automatic", "full", "optimized"]), actualResponseMode: z.enum(["strict", "flexible"]), createdAt: date }).strict();
+export const contextSnapshotSchema = z.object({ id, conversationId: id, analysisId: id.optional(), summary: z.string().max(32_768), summarizedMessageIds: z.array(id), decisions: z.array(z.string().max(1_000)), figures: z.array(z.number().finite()), sourceIds: z.array(id), actionIds: z.array(id), personIds: z.array(id), analysisVersion: id, actualStrategy: z.enum(["associated_people", "full_analysis", "automatic", "full", "optimized"]), actualResponseMode: z.enum(["strict", "flexible"]), createdAt: date }).strict();
 export const analysisVersionSnapshotSchema = z.object({ id, analysisId: id, analysisVersion: id, canonical: z.string().min(2).max(2_000_000), createdAt: date }).strict();
 export const cleanupJobSchema = z.object({
   id, analysisId: id, scope: documentScopeSchema, policy: z.enum(["delete_all", "preserve_conversations"]),
