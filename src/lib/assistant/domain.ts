@@ -1,4 +1,5 @@
 import { detectSensitivePatterns, normalizeSensitiveKey } from "@/lib/assistant/privacy/patterns";
+import type { PersonAnalysisPresentation } from "@/lib/assistant/tools/personEvidence";
 
 export type ConversationType = "general" | "analysis";
 export type ConversationStatus = "active" | "archived" | "archived_analysis_deleted";
@@ -134,7 +135,7 @@ export interface ModelPreferences {
 export interface SourceReference {
   id: string; conversationId: string; messageId?: string; analysisId?: string; documentId?: string; personId?: string;
   sourceType: string; sanitizedSourceLabel: string; availability: SourceAvailability; page?: number; sheet?: string;
-  rowRange?: string; cellRange?: string; period?: string; conceptIds: string[]; excerpt: string; sanitizedHash: string;
+  rowRange?: string; cellRange?: string; period?: string; conceptIds: string[]; excerpt: string; sanitizedHash: string; presentation?: PersonAnalysisPresentation;
 }
 
 export interface PersistedDocumentMetadata {

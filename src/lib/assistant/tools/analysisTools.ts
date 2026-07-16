@@ -1,6 +1,7 @@
 import type { AnalysisResult, PersonComparisonRow } from "@/lib/types";
 import { selectConceptDifferenceGroups, selectPerson, selectPersonCuadreReg, selectPersonDifferenceGroups, selectPersonProfile } from "@/lib/assistant/tools/sharedSelectors";
 import type { SearchFacets } from "@/lib/assistant/search/directIndex";
+import { buildPersonAnalysisEvidence } from "@/lib/assistant/tools/personEvidence";
 
 export interface ScopedDocumentRecord {
   readonly id: string;
@@ -35,7 +36,7 @@ export const analysisToolHandlers = {
   getAnalysisSummary: (analysis: AnalysisToolData) => ({ summary: analysis.result.summary }),
   findPersonByEmployeeId: (analysis: AnalysisToolData, input: { personId: string }) => ({ person: selectPerson(analysis.result, input.personId) ? safePersonRow(requirePerson(analysis.result, input.personId)) : undefined }),
   searchPeople: (analysis: AnalysisToolData, input: { query: string; limit: number }) => ({ people: analysis.result.people.filter((row) => [row.employeeNumber, row.workplace, row.position, row.category].some((value) => value?.toLocaleLowerCase("es").includes(input.query.toLocaleLowerCase("es")))).slice(0, input.limit).map(safePersonRow) }),
-  getPersonProfile: (analysis: AnalysisToolData, input: { personId: string }) => { requirePerson(analysis.result, input.personId); return selectPersonProfile(analysis.result, input.personId)!; },
+  getPersonProfile: (analysis: AnalysisToolData, input: { personId: string }) => { requirePerson(analysis.result, input.personId); return buildPersonAnalysisEvidence(analysis.result, input.personId); },
   getPersonPayrollPeriods: (analysis: AnalysisToolData, input: { personId: string }) => ({ personId: input.personId, periods: analysis.result.payrollRecords.filter((row) => row.employeeNumber === input.personId).map((row) => ({ period: row.periodLabel, ...(row.totalDevengado === undefined ? {} : { totalDevengado: row.totalDevengado }) })) }),
   getPersonConcepts: (analysis: AnalysisToolData, input: { personId: string }) => {
     requirePerson(analysis.result, input.personId);

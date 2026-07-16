@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const LOCAL_WARNING = "Las conversaciones y el contexto sanitizado se almacenan localmente en este navegador. Cualquier persona con acceso al perfil del navegador podría acceder a estos datos.";
+const LOCAL_WARNING = "Las API keys se leen solo desde variables de entorno del servidor. Conversaciones y contexto sanitizado permanecen en IndexedDB.";
 
 async function openAssistant(page: Page) {
   await page.goto("/");
@@ -54,7 +54,7 @@ async function seedAssistantAnalysisConversation(page: Page, analysisId: string,
   await page.evaluate(async ({ analysisId: scopedAnalysisId, conversationId }) => {
     const createdAt = "2026-07-13T10:01:00.000Z";
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("retributivo-assistant-v1", 4);
+      const request = indexedDB.open("retributivo-assistant-v1");
       request.onerror = () => reject(request.error); request.onsuccess = () => resolve(request.result);
     });
     const transaction = db.transaction(["conversations", "messages", "sources"], "readwrite");
@@ -70,6 +70,25 @@ async function seedAssistantAnalysisConversation(page: Page, analysisId: string,
     await new Promise<void>((resolve, reject) => { transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error); });
     db.close();
   }, { analysisId, conversationId: id });
+}
+
+async function seedStructuredPersonSource(page: Page, analysisId: string, conversationId: string) {
+  await page.evaluate(async ({ analysisId: scopedAnalysisId, conversationId: scopedConversationId }) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => { const request = indexedDB.open("retributivo-assistant-v1"); request.onerror = () => reject(request.error); request.onsuccess = () => resolve(request.result); });
+    const transaction = db.transaction("sources", "readwrite");
+    const evidence = {
+      personId: "10050", laborContext: { workplace: "Bilbao", position: "Delegado/a de Compras", category: "Oficial de Primera" },
+      totals: { registro: 44760.16, payroll: 44968.16, difference: 208 },
+      blocks: { salary: { registro: 25325.28, payroll: 25325.28, difference: 0 }, salaryComplement: { registro: 14694, payroll: 14694, difference: 0 }, extraSalary: { registro: 4740.88, payroll: 4948.88, difference: 208 } },
+      status: "Diferencia", periods: ["2025-01"],
+      registro: { concepts: [{ block: "Extrasalarial", blockKey: "extraSalary", code: "CSP_I_COMP_TELETR_COVID", amount: 0 }] },
+      payroll: { periods: [{ period: "2025-01", concepts: [{ name: "Abono teletrabajo", amount: 208, type: "devengo" }], totals: { totalDevengado: 3700 }, bases: { irpfBaseAccumulated: 3700 } }] },
+      comparisons: [{ block: "Extrasalarial", blockKey: "extraSalary", registroCode: "CSP_I_COMP_TELETR_COVID", pdfConcept: "Abono teletrabajo", registroAmount: 0, payrollAmount: 208, difference: 208, status: "Diferencia", detail: "Comparación", cause: { label: "Teletrabajo", description: "El recibo identifica expresamente el abono.", review: "Revisar su inclusión.", confidence: "alta", facts: ["Registro 0; recibos 208."], missingEvidence: ["Confirmar documentalmente el criterio aplicado."] }, cohorts: [] }],
+      cuadre: {}, completeness: { registroConcepts: 1, payrollPeriods: 1, payrollConcepts: 1, comparisons: 1, mismatches: 1 },
+    };
+    transaction.objectStore("sources").put({ id: `source-${scopedConversationId}`, conversationId: scopedConversationId, messageId: `message-${scopedConversationId}`, analysisId: scopedAnalysisId, personId: "10050", sourceType: "person_analysis", sanitizedSourceLabel: "Evidencia retributiva · matrícula 10050", availability: "available", conceptIds: ["CSP_I_COMP_TELETR_COVID"], excerpt: "Matrícula 10050: diferencia 208 EUR.", sanitizedHash: "structured-source-hash", presentation: { kind: "person_analysis", personId: "10050", evidence } });
+    await new Promise<void>((resolve, reject) => { transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error); }); db.close();
+  }, { analysisId, conversationId });
 }
 
 test.beforeEach(async ({ page }) => {
@@ -116,7 +135,7 @@ test("stops a partial stream and retries it in a fresh run", async ({ page }) =>
   await expect(page.getByRole("button", { name: "Regenerar respuesta" })).toBeVisible();
 });
 
-test("runs bounded fallback in Chromium and preserves the partial producer", async ({ page }) => {
+test("bounds transient retries in Chromium and preserves the partial producer", async ({ page }) => {
   const chatRounds: Array<{ phase?: string; modelId?: string }> = [];
   page.on("request", (request) => {
     if (request.method() !== "POST" || new URL(request.url()).pathname !== "/api/assistant/chat") return;
@@ -154,18 +173,16 @@ test("runs bounded fallback in Chromium and preserves the partial producer", asy
   await openAssistant(page);
   await page.getByLabel("Pregunta").fill("¿Qué compara el Registro Retributivo con los Recibos?");
   await page.getByRole("button", { name: "Enviar" }).click();
-  await expect(page.getByRole("article", { name: "Respuesta del Asistente" })).toHaveCount(2);
-  await expect(page.getByRole("article", { name: "Respuesta del Asistente" }).nth(0)).toContainText("Primera parte sanitizada.");
-  await expect(page.getByRole("article", { name: "Respuesta del Asistente" }).nth(0)).toContainText("Interrumpida · e2e-current-model");
-  await expect(page.getByRole("article", { name: "Respuesta del Asistente" }).nth(1)).toContainText("Continuación por e2e-default-model.");
-  await expect(page.getByRole("article", { name: "Respuesta del Asistente" }).nth(1)).toContainText("Respuesta · e2e-default-model");
+  await expect(page.getByRole("article", { name: "Respuesta del Asistente" })).toHaveCount(1);
+  await expect(page.getByRole("article", { name: "Respuesta del Asistente" })).toContainText("Primera parte sanitizada.");
+  await expect(page.getByRole("article", { name: "Respuesta del Asistente" })).toContainText("Fallida · e2e-current-model");
+  await expect(page.getByRole("alert").filter({ hasText: "temporalmente" })).toContainText("temporalmente");
   await page.reload();
   await page.getByRole("tab", { name: "Asistente" }).click();
-  await expect(page.getByRole("article", { name: "Respuesta del Asistente" })).toHaveCount(2);
+  await expect(page.getByRole("article", { name: "Respuesta del Asistente" })).toHaveCount(1);
   expect(chatRounds.map(({ phase, modelId }) => ({ phase, modelId }))).toEqual([
     { phase: "plan", modelId: "e2e-current-model" },
     { phase: "continue", modelId: "e2e-current-model" },
-    { phase: "continue", modelId: "e2e-default-model" },
   ]);
 });
 
@@ -176,8 +193,8 @@ test("converts general context, associates multiple people and reuses it from Pe
   await page.getByRole("tab", { name: "Asistente" }).click();
   await page.getByRole("button", { name: "Crear conversación general" }).click();
   await page.getByRole("button", { name: "Convertir al análisis activo" }).click();
-  await page.getByRole("button", { name: "Asociar matrícula 10048" }).click();
   await page.getByRole("button", { name: "Gestionar personas asociadas" }).click();
+  await page.getByRole("checkbox", { name: "Matrícula 10048" }).click();
   await page.getByRole("checkbox", { name: "Matrícula 10049" }).click();
   await expect(page.getByRole("checkbox", { name: "Matrícula 10049" })).toBeChecked();
   await expect(page.getByLabel("Personas asociadas resumidas")).toContainText("10048");
@@ -206,6 +223,27 @@ test("preserves conversations as historical evidence when deleting an analysis",
   await expect(page.getByLabel("Pregunta")).toBeDisabled();
 });
 
+test("renders complete person evidence as responsive cards and tables without technical JSON", async ({ page }) => {
+  await page.goto("/");
+  await seedAnalysis(page, "analysis-person-source");
+  await seedAssistantAnalysisConversation(page, "analysis-person-source", "conversation-person-source");
+  await seedStructuredPersonSource(page, "analysis-person-source", "conversation-person-source");
+  await page.reload();
+  await page.getByRole("tab", { name: "Asistente" }).click();
+  await page.getByRole("button", { name: "Abrir fuente Evidencia retributiva · matrícula 10050" }).click();
+  const panel = page.getByRole("complementary", { name: "Detalle de la fuente" });
+  await expect(panel.getByRole("heading", { name: "Resumen" })).toBeVisible();
+  await expect(panel.getByRole("heading", { name: "Conceptos descuadrados" })).toBeVisible();
+  await expect(panel.getByText("Abono teletrabajo").first()).toBeVisible();
+  await expect(panel.getByText("Confianza alta").first()).toBeVisible();
+  await expect(panel.getByText("Registro Retributivo", { exact: true }).first()).toBeVisible();
+  await expect(panel.getByText("Recibos por periodo")).toBeVisible();
+  await expect(panel).not.toContainText("getPersonProfile");
+  await expect(panel).not.toContainText('"comparisons"');
+  const overflow = await panel.evaluate((element) => element.scrollWidth - element.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+});
+
 test("deletes assistant records totally and resumes a pending cleanup job after reload", async ({ page }) => {
   await page.goto("/");
   await seedAnalysis(page, "analysis-delete");
@@ -223,7 +261,7 @@ test("deletes assistant records totally and resumes a pending cleanup job after 
   await seedAnalysis(page, "analysis-resume");
   await seedAssistantAnalysisConversation(page, "analysis-resume");
   await page.evaluate(async () => {
-    const db = await new Promise<IDBDatabase>((resolve, reject) => { const request = indexedDB.open("retributivo-assistant-v1", 4); request.onerror = () => reject(request.error); request.onsuccess = () => resolve(request.result); });
+    const db = await new Promise<IDBDatabase>((resolve, reject) => { const request = indexedDB.open("retributivo-assistant-v1"); request.onerror = () => reject(request.error); request.onsuccess = () => resolve(request.result); });
     const transaction = db.transaction("cleanupJobs", "readwrite");
     transaction.objectStore("cleanupJobs").put({ id: "cleanup-analysis-resume-delete_all", analysisId: "analysis-resume",
       scope: { type: "analysis", analysisId: "analysis-resume" }, policy: "delete_all", stage: "pending", status: "pending",
@@ -238,7 +276,7 @@ test("deletes assistant records totally and resumes a pending cleanup job after 
 test("keeps general documents isolated and copies only explicit sanitized context", async ({ page }) => {
   await page.goto("/");
   await page.evaluate(async () => {
-    const db = await new Promise<IDBDatabase>((resolve, reject) => { const request = indexedDB.open("retributivo-assistant-v1", 4); request.onerror = () => reject(request.error); request.onsuccess = () => resolve(request.result); });
+    const db = await new Promise<IDBDatabase>((resolve, reject) => { const request = indexedDB.open("retributivo-assistant-v1"); request.onerror = () => reject(request.error); request.onsuccess = () => resolve(request.result); });
     const stores = ["conversations", "messages", "actions", "documents", "chunks", "searchTerms", "indexJobs"];
     const transaction = db.transaction(stores, "readwrite");
     const base = { type: "general", associatedPersonIds: [], modelProfileId: "fake-retributivo-v1", responseMode: "strict", contextStrategy: "automatic", status: "active", createdAt: "2026-07-13T10:00:00.000Z" };
@@ -259,7 +297,7 @@ test("keeps general documents isolated and copies only explicit sanitized contex
   await page.getByRole("tab", { name: "Asistente" }).click();
   await page.getByRole("button", { name: "Aceptar Copiar contexto" }).click();
   const copied = await page.evaluate(async () => {
-    const db = await new Promise<IDBDatabase>((resolve, reject) => { const request = indexedDB.open("retributivo-assistant-v1", 4); request.onerror = () => reject(request.error); request.onsuccess = () => resolve(request.result); });
+    const db = await new Promise<IDBDatabase>((resolve, reject) => { const request = indexedDB.open("retributivo-assistant-v1"); request.onerror = () => reject(request.error); request.onsuccess = () => resolve(request.result); });
     const transaction = db.transaction("documents", "readonly"); const all = await new Promise<any[]>((resolve, reject) => { const request = transaction.objectStore("documents").getAll(); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); db.close();
     return all.filter((document) => document.scope?.conversationId === "copy-target").map((document) => document.id);
   });
@@ -289,7 +327,7 @@ test("keeps the responsive shell within every approved viewport", async ({ page 
   await expect(page.getByRole("article", { name: "Respuesta del Asistente" })).toContainText("Retributivo compara");
   const longModelId = "m".repeat(256);
   await page.evaluate(async (modelId) => {
-    const db = await new Promise<IDBDatabase>((resolve, reject) => { const request = indexedDB.open("retributivo-assistant-v1", 4); request.onerror = () => reject(request.error); request.onsuccess = () => resolve(request.result); });
+    const db = await new Promise<IDBDatabase>((resolve, reject) => { const request = indexedDB.open("retributivo-assistant-v1"); request.onerror = () => reject(request.error); request.onsuccess = () => resolve(request.result); });
     const transaction = db.transaction("messages", "readwrite"); const store = transaction.objectStore("messages");
     const messages = await new Promise<any[]>((resolve, reject) => { const request = store.getAll(); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
     for (const message of messages.filter((item) => item.role === "assistant")) store.put({ ...message, modelId });
@@ -316,19 +354,20 @@ test("keyboard navigation and the local non-encrypted storage warning remain acc
   await expect(page.getByText(LOCAL_WARNING)).toBeVisible();
 });
 
-test("manual provider keys disappear on reload", async ({ page }) => {
+test("provider settings never expose or persist API key values", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("tab", { name: "Ajustes" }).click();
   await page.getByRole("tab", { name: "IA", exact: true }).click();
-  await page.getByRole("button", { name: "Añadir proveedor Manual" }).click();
-  await page.getByLabel("Clave efímera").fill("clave-solo-en-memoria");
-  await expect(page.getByLabel("Clave efímera")).toHaveValue("clave-solo-en-memoria");
+  await page.getByLabel("Tipo de proveedor").selectOption("openai-compatible");
+  await page.getByRole("button", { name: "Añadir proveedor" }).click();
+  await expect(page.getByLabel("Variable de entorno")).toHaveValue("OPENAI_COMPATIBLE_MY_PROVIDER_API_KEY");
+  await expect(page.getByLabel(/clave|api key/i)).toHaveCount(0);
 
   await page.reload();
   await page.getByRole("tab", { name: "Ajustes" }).click();
   await page.getByRole("tab", { name: "IA", exact: true }).click();
-  await page.getByRole("button", { name: "Añadir proveedor Manual" }).click();
-  await expect(page.getByLabel("Clave efímera")).toHaveValue("");
+  await expect(page.getByText("OPENAI_API_KEY", { exact: false })).toBeVisible();
+  await expect(page.getByLabel(/clave|api key/i)).toHaveCount(0);
 });
 
 test("migration v4 renders preserved evidence as historical and read-only", async ({ page }) => {
@@ -380,7 +419,7 @@ test("migration v4 renders preserved evidence as historical and read-only", asyn
     const db = await new Promise<IDBDatabase>((resolve, reject) => { const request = indexedDB.open("retributivo-assistant-v1"); request.onerror = () => reject(request.error); request.onsuccess = () => resolve(request.result); });
     const version = db.version; db.close(); return version;
   });
-  expect(migratedVersion).toBe(4);
+  expect(migratedVersion).toBe(5);
   await expect(page.getByRole("heading", { name: "Evidencia histórica" })).toBeVisible();
   await expect(page.getByText("Histórica no disponible")).toBeVisible();
   await expect(page.getByText("Disponible", { exact: true })).toBeVisible();

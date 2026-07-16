@@ -11,6 +11,11 @@ const labels = {
   deleted: "Eliminada",
 } as const;
 
+function displaySourceLabel(source: SourceReference): string {
+  if (source.sourceType === "person_analysis") return source.sanitizedSourceLabel;
+  return source.sanitizedSourceLabel.replace("Análisis retributivo · getPersonProfile", "Evidencia retributiva");
+}
+
 export function SourceSummary({ sources, revealedSourceIds = [], onOpenSource }: Readonly<{ sources: readonly SourceReference[]; revealedSourceIds?: readonly string[]; onOpenSource?(source: SourceReference): void }>) {
   const [expanded, setExpanded] = useState<string>();
   useEffect(() => {
@@ -23,6 +28,7 @@ export function SourceSummary({ sources, revealedSourceIds = [], onOpenSource }:
       <h3 className="mb-2 text-xs font-bold uppercase tracking-[0.12em] text-muted">Fuentes</h3>
       <ul className="space-y-2">
         {sources.map((source) => {
+          const sourceLabel = displaySourceLabel(source);
           const available = source.availability === "available";
           const Icon = available ? BookOpen : source.availability === "deleted" ? CircleSlash2 : History;
           const unavailableLabel = source.availability === "deleted" ? "Fuente eliminada" : "Fuente histórica no disponible";
@@ -31,14 +37,14 @@ export function SourceSummary({ sources, revealedSourceIds = [], onOpenSource }:
               <div className="flex min-w-0 items-center gap-2">
                 <Icon aria-hidden="true" className="size-4 shrink-0 text-muted" />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-ink">{source.sanitizedSourceLabel}</p>
+                  <p className="truncate text-sm font-semibold text-ink">{sourceLabel}</p>
                   <p className="text-xs text-muted">{labels[source.availability]}</p>
                 </div>
                 <button
                   type="button"
                   className="min-h-11 min-w-11 rounded-xl px-3 text-xs font-bold text-primary enabled:hover:bg-blue-50 disabled:cursor-not-allowed disabled:text-muted"
                   disabled={!available}
-                  aria-label={available ? `Abrir fuente ${source.sanitizedSourceLabel}` : unavailableLabel}
+                  aria-label={available ? `Abrir fuente ${sourceLabel}` : unavailableLabel}
                   onClick={() => { setExpanded(undefined); onOpenSource?.(source); }}
                 >
                   {available ? "Abrir" : "No disponible"}

@@ -157,6 +157,122 @@ describe("assistant analysis tool registry", () => {
     });
   });
 
+  it("returns the complete anonymized evidence for matricula 10050 and identifies explicit telework", async () => {
+    const teleworkResult = {
+      ...result,
+      people: [{
+        ...person,
+        employeeNumber: "10050",
+        person: "Persona Confidencial",
+        position: "Delegado/a de Compras",
+        category: "Oficial de Primera",
+        workplace: "Bilbao",
+        salaryRegistro: 25_325.28,
+        salaryPdf: 25_325.28,
+        salaryDifference: 0,
+        salaryComplementRegistro: 14_694,
+        salaryComplementPdf: 14_694,
+        salaryComplementDifference: 0,
+        extraSalaryRegistro: 4_740.88,
+        extraSalaryPdf: 4_948.88,
+        extraSalaryDifference: 208,
+        registroTotal: 44_760.16,
+        pdfTotal: 44_968.16,
+        totalDifference: 208,
+        periods: ["2025-01", "2025-02"],
+      }],
+      registroEmployees: [{
+        ...result.registroEmployees[0],
+        employeeNumber: "10050",
+        workerName: "Persona Confidencial",
+        position: "Delegado/a de Compras",
+        category: "Oficial de Primera",
+        workplace: "Bilbao",
+        professionalGroup: "Grupo 3",
+        valuation: "Nivel 4",
+        family: "Compras",
+        personalCategoryGroup: "Administracion",
+        concepts: [
+          { block: "Salario", blockKey: "salary", code: "SALARIO", amount: 25_325.28 },
+          { block: "Extrasalarial", blockKey: "extraSalary", code: "CSP_I_COMP_TELETR_COVID", amount: 0 },
+        ],
+      }],
+      payrollRecords: [
+        { sourceFile: "recibo-enero-privado.pdf", periodLabel: "2025-01", workerName: "Persona Confidencial", employeeNumber: "10050", workplace: "Bilbao", professionalGroup: "Grupo 3", concepts: [{ name: "Abono teletrabajo", amount: 104, type: "devengo" }], totalDevengado: 3_700, totalDeducir: 500, netPay: 3_200, irpfBaseAccumulated: 3_700 },
+        { sourceFile: "recibo-febrero-privado.pdf", periodLabel: "2025-02", workerName: "Persona Confidencial", employeeNumber: "10050", workplace: "Bilbao", professionalGroup: "Grupo 3", concepts: [{ name: "Abono teletrabajo", amount: 104, type: "devengo" }], totalDevengado: 3_750, totalDeducir: 510, netPay: 3_240, irpfBaseAccumulated: 7_450 },
+      ],
+      concepts: [{
+        employeeNumber: "10050", person: "Persona Confidencial", block: "Extrasalarial", blockKey: "extraSalary",
+        registroCode: "CSP_I_COMP_TELETR_COVID", pdfConcept: "Abono teletrabajo", registroAmount: 0, pdfAmount: 208,
+        difference: 208, status: "Diferencia", detail: "Concepto presente en recibos y ausente en Registro",
+      }],
+      internalExcelChecks: [],
+      internalExcelNormalizedVariablesChecks: [],
+      normalizedVsReal: [],
+    } as unknown as AnalysisResult;
+    const custom = createAnalysisToolRegistry({ conversation: { id: "c-10050", type: "analysis", analysisId: "analysis-1" }, analysis: { id: "analysis-1", result: teleworkResult }, chunks: [] });
+
+    const evidence = await custom.execute("getPersonProfile", { analysisId: "analysis-1", personId: "10050" }) as Record<string, any>;
+
+    expect(evidence.laborContext).toMatchObject({ position: "Delegado/a de Compras", category: "Oficial de Primera", workplace: "Bilbao", professionalGroup: "Grupo 3", family: "Compras" });
+    expect(evidence.registro.concepts).toEqual(expect.arrayContaining([expect.objectContaining({ code: "CSP_I_COMP_TELETR_COVID", amount: 0 })]));
+    expect(evidence.payroll.periods).toHaveLength(2);
+    expect(evidence.payroll.periods.flatMap((period: any) => period.concepts)).toEqual(expect.arrayContaining([expect.objectContaining({ name: "Abono teletrabajo", amount: 104 })]));
+    expect(evidence.comparisons[0]).toMatchObject({ block: "Extrasalarial", registroAmount: 0, payrollAmount: 208, difference: 208, cause: { label: "Teletrabajo", confidence: "alta" } });
+    expect(evidence.comparisons[0].cause.facts.join(" ")).toContain("Abono teletrabajo");
+    expect(evidence.comparisons[0].cause.missingEvidence.join(" ")).toMatch(/confirmar|document/i);
+    const serialized = JSON.stringify(evidence);
+    for (const forbidden of ["Persona Confidencial", "recibo-enero-privado.pdf", "sourceFile", "workerName", "raw"]) expect(serialized).not.toContain(forbidden);
+  });
+
+  it("creates one deterministic structured person source instead of exposing JSON", async () => {
+    const envelope = await registry().executeEnvelope!("getPersonProfile", { analysisId: "analysis-1", personId: "10048" });
+    expect(envelope.sources).toHaveLength(1);
+    expect(envelope.sources[0]).toMatchObject({
+      personId: "10048",
+      sourceType: "person_analysis",
+      sanitizedSourceLabel: "Evidencia retributiva · matrícula 10048",
+      presentation: { kind: "person_analysis", personId: "10048" },
+    });
+    expect(envelope.sources[0]!.excerpt).not.toMatch(/^\s*[\[{]/);
+    expect(envelope.sources[0]!.excerpt).not.toContain("getPersonProfile");
+  });
+
+  it("uses medium confidence for an amount-only telework pattern", async () => {
+    const amountOnly = { ...result, concepts: [{ ...result.concepts[0], pdfConcept: "Concepto variable", registroCode: "OTRO", registroAmount: 0, pdfAmount: 208, difference: 208, detail: "Diferencia calculada" }] } as AnalysisResult;
+    const custom = createAnalysisToolRegistry({ conversation: { id: "c1", type: "analysis", analysisId: "analysis-1" }, analysis: { id: "analysis-1", result: amountOnly }, chunks: [] });
+    const evidence = await custom.execute("getPersonProfile", { analysisId: "analysis-1", personId: "10048" }) as Record<string, any>;
+    expect(evidence.comparisons[0].cause).toMatchObject({ label: "Teletrabajo", confidence: "media" });
+    expect(evidence.comparisons[0].cause.description).toMatch(/no lo documenta expresamente/i);
+  });
+
+  it("only exposes anonymous cohort aggregates with at least three people", async () => {
+    const cohortPeople = ["10048", "10049", "10050"].map((employeeNumber) => ({ ...person, employeeNumber, person: `Nombre ${employeeNumber}`, position: "Técnico", category: "A1", workplace: "Centro Norte" }));
+    const cohortConcepts = cohortPeople.map(({ employeeNumber, person: privateName }) => ({ ...result.concepts[0], employeeNumber, person: privateName }));
+    const cohortResult = { ...result, people: cohortPeople, concepts: cohortConcepts } as AnalysisResult;
+    const custom = createAnalysisToolRegistry({ conversation: { id: "c1", type: "analysis", analysisId: "analysis-1" }, analysis: { id: "analysis-1", result: cohortResult }, chunks: [] });
+    const evidence = await custom.execute("getPersonProfile", { analysisId: "analysis-1", personId: "10048" }) as Record<string, any>;
+    expect(evidence.comparisons[0].cohorts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ dimension: "puesto", value: "Técnico", peopleCount: 3 }),
+      expect.objectContaining({ dimension: "categoria", value: "A1", peopleCount: 3 }),
+      expect.objectContaining({ dimension: "centro", value: "Centro Norte", peopleCount: 3 }),
+    ]));
+    const serialized = JSON.stringify(evidence.comparisons[0].cohorts);
+    expect(serialized).not.toMatch(/10048|10049|10050|Nombre/);
+
+    const tooSmall = { ...cohortResult, people: cohortPeople.slice(0, 2), concepts: cohortConcepts.slice(0, 2) } as AnalysisResult;
+    const smallRegistry = createAnalysisToolRegistry({ conversation: { id: "c1", type: "analysis", analysisId: "analysis-1" }, analysis: { id: "analysis-1", result: tooSmall }, chunks: [] });
+    const smallEvidence = await smallRegistry.execute("getPersonProfile", { analysisId: "analysis-1", personId: "10048" }) as Record<string, any>;
+    expect(smallEvidence.comparisons[0].cohorts).toEqual([]);
+  });
+
+  it("fails recoverably instead of truncating an exceptionally large person package", async () => {
+    const concepts = Array.from({ length: 300 }, (_, index) => ({ name: `Concepto estructurado ${String(index).padStart(3, "0")} ${"x".repeat(180)}`, amount: index, type: "devengo" as const }));
+    const hugeResult = { ...result, payrollRecords: Array.from({ length: 12 }, (_, index) => ({ ...result.payrollRecords[0], periodLabel: `2026-${String(index + 1).padStart(2, "0")}`, concepts })) } as AnalysisResult;
+    const custom = createAnalysisToolRegistry({ conversation: { id: "c1", type: "analysis", analysisId: "analysis-1" }, analysis: { id: "analysis-1", result: hugeResult }, chunks: [] });
+    await expect(custom.execute("getPersonProfile", { analysisId: "analysis-1", personId: "10048" })).rejects.toMatchObject({ code: "person_evidence_too_large", classification: "context" });
+  });
+
   it("rejects general scope, a different analysis and extra input fields", async () => {
     await expect(registry("general").execute("getAnalysisSummary", { analysisId: "analysis-1" })).rejects.toThrow(/conversación/i);
     await expect(registry().execute("getAnalysisSummary", { analysisId: "analysis-2" })).rejects.toThrow(/análisis/i);
@@ -178,14 +294,17 @@ describe("assistant analysis tool registry", () => {
   });
 
   it("keeps Person and Cuadre Reg. parity with shared projections of AnalysisResult", async () => {
-    expect(await registry().execute("getPersonProfile", { analysisId: "analysis-1", personId: "10048" })).toEqual(selectPersonProfile(result, "10048"));
+    const evidence = await registry().execute("getPersonProfile", { analysisId: "analysis-1", personId: "10048" }) as Record<string, unknown>;
+    const { workplace: _workplace, position: _position, category: _category, ...profileFacts } = selectPersonProfile(result, "10048")!;
+    expect(evidence).toMatchObject({ ...profileFacts, laborContext: { workplace: "Centro Norte", position: "Técnico", category: "A1" } });
     expect(await registry().execute("getPersonCuadreReg", { analysisId: "analysis-1", personId: "10048" })).toEqual(selectPersonCuadreReg(result, "10048"));
   });
 
   it("feeds the Persona and Cuadre surfaces and tools from the same literal-safe projections", async () => {
     const personSurface = selectPersonProfileFromRow(result.people[0]);
     expect(personSurface.totals).toEqual({ registro: 125, payroll: 134, difference: 9 });
-    await expect(registry().execute("getPersonProfile", { analysisId: "analysis-1", personId: "10048" })).resolves.toEqual(personSurface);
+    const { workplace: _workplace, position: _position, category: _category, ...surfaceFacts } = personSurface;
+    await expect(registry().execute("getPersonProfile", { analysisId: "analysis-1", personId: "10048" })).resolves.toMatchObject({ ...surfaceFacts, laborContext: { workplace: "Centro Norte", position: "Técnico", category: "A1" } });
     const breakdownSurface = selectBreakdownProjection(result.internalExcelChecks[0]);
     const normalizedSurface = selectNormalizedProjection(result.internalExcelNormalizedVariablesChecks![0]);
     expect(breakdownSurface).toMatchObject({ personId: "10048", salaryDifference: 0, salaryComplementDifference: 0, extraSalaryDifference: 0 });
@@ -212,13 +331,13 @@ describe("assistant analysis tool registry", () => {
     const first = await stable.executeEnvelope!("getPersonProfile", { analysisId: "analysis-1", personId: "10048" });
     const repeated = await stable.executeEnvelope!("getPersonProfile", { analysisId: "analysis-1", personId: "10048" });
     expect(repeated.sources).toEqual(first.sources);
-    expect(first.sources[0]).toEqual(expect.objectContaining({ availability: "available", excerpt: expect.stringContaining('"difference":9'), sanitizedHash: expect.stringMatching(/^[a-f0-9]{64}$/) }));
+    expect(first.sources[0]).toEqual(expect.objectContaining({ availability: "available", excerpt: expect.stringContaining("diferencia 9.00 EUR"), sanitizedHash: expect.stringMatching(/^[a-f0-9]{64}$/) }));
     const changedResult = { ...result, people: [{ ...result.people[0], totalDifference: 99 }] } as AnalysisResult;
     const changed = createAnalysisToolRegistry({ conversation: { id: "conversation-1", type: "analysis", analysisId: "analysis-1" }, analysis: { id: "analysis-1", result: changedResult }, chunks: [] });
     const changedEnvelope = await changed.executeEnvelope!("getPersonProfile", { analysisId: "analysis-1", personId: "10048" });
     expect(changedEnvelope.sources[0]?.id).not.toBe(first.sources[0]?.id);
     expect(changedEnvelope.sources[0]?.sanitizedHash).not.toBe(first.sources[0]?.sanitizedHash);
-    expect(changedEnvelope.sources[0]?.excerpt).toContain('"difference":99');
+    expect(changedEnvelope.sources[0]?.excerpt).toContain("diferencia 99.00 EUR");
   });
 
   it("rejects known names in tool arguments before local execution", async () => {

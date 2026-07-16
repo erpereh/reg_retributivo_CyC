@@ -89,6 +89,7 @@ const PUBLIC_MESSAGES_BY_CODE: Readonly<Record<string, string>> = {
   ambiguous_person_mention: "Hay varias personas que coinciden. Escribe el nombre completo, indica la matrícula o selecciónala en Personas asociadas.",
   person_outside_authorized_scope: "La persona indicada no está dentro del alcance autorizado.",
   privacy_scope_too_large: "El alcance contiene demasiadas identidades para procesarlo de forma segura. Reduce el alcance o utiliza Personas asociadas.",
+  person_evidence_too_large: "La evidencia de esta matrícula es demasiado extensa para procesarla completa. Formula una consulta más concreta sobre periodos o conceptos.",
   empty_response: "El modelo no devolvió contenido.",
   tool_round_limit: "El asistente necesitó demasiadas rondas de herramientas.",
   stream_truncated: "La respuesta se interrumpió antes de completarse.",

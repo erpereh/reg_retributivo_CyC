@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { AssistantSettings } from "@/lib/assistant/domain";
 import { ANALYSIS_TOOL_NAMES, ANALYSIS_TOOL_SCHEMAS } from "@/lib/assistant/tools/registry";
+import { personAnalysisPresentationSchema } from "@/lib/assistant/tools/personEvidence";
 
 const id = z.string().min(1).max(256);
 const date = z.string().min(1);
@@ -67,7 +68,7 @@ export const sourceReferenceSchema = z.object({
   id, conversationId: id, messageId: id.optional(), analysisId: id.optional(), documentId: id.optional(), personId: id.optional(),
   sourceType: id, sanitizedSourceLabel: z.string().min(1).max(256), availability: z.enum(["available", "historical_unavailable", "deleted"]),
   page: z.number().int().positive().optional(), sheet: z.string().optional(), rowRange: z.string().optional(), cellRange: z.string().optional(), period: z.string().optional(),
-  conceptIds: z.array(id).max(100), excerpt: z.string().max(4_096), sanitizedHash: id,
+  conceptIds: z.array(id).max(2_000), excerpt: z.string().max(4_096), sanitizedHash: id, presentation: personAnalysisPresentationSchema.optional(),
 }).strict();
 
 export const contextSnapshotSchema = z.object({ id, conversationId: id, analysisId: id.optional(), summary: z.string().max(32_768), summarizedMessageIds: z.array(id), decisions: z.array(z.string().max(1_000)), figures: z.array(z.number().finite()), sourceIds: z.array(id), actionIds: z.array(id), personIds: z.array(id), analysisVersion: id, actualStrategy: z.enum(["associated_people", "full_analysis", "automatic", "full", "optimized"]), actualResponseMode: z.enum(["strict", "flexible"]), createdAt: date }).strict();

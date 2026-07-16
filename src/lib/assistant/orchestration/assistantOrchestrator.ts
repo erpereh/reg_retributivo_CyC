@@ -12,6 +12,7 @@ import { canonicalizePrivacyText } from "@/lib/assistant/privacy/patterns";
 import { executeAtomicToolRound } from "@/lib/assistant/execution/clientBatch";
 import type { ProviderRuntimeDescriptor } from "@/lib/assistant/catalog/domain";
 import { MAX_CHAT_REQUEST_BYTES, MAX_PRIVACY_BLOCKED_TERMS, serializedRequestBytes } from "@/lib/assistant/transportLimits";
+import { buildPersonAnalysisPresentation, personAnalysisEvidenceSchema, personAnalysisExcerpt } from "@/lib/assistant/tools/personEvidence";
 
 export type AssistantTransport = (body: Record<string, unknown>, signal?: AbortSignal) => Promise<Response>;
 export interface ProducedMessage { readonly id: string; readonly status: "interrupted" | "completed"; readonly content: string; readonly modelProfileId: string; readonly modelId: string }
@@ -76,14 +77,18 @@ export function createRepositoryRequestScopeValidator(repositories: Pick<Assista
       for (const source of sourceList) {
       if (source.availability !== "available" || source.conversationId !== conversationId || source.analysisId !== analysisId) throw new ProviderAdapterError("privacy", "local_source_scope_mismatch");
       const stored = typeof source.id === "string" ? await repositories.sources.get(source.id) : undefined;
-      if (stored) { const exact = ["id", "conversationId", "analysisId", "documentId", "sourceType", "sanitizedSourceLabel", "availability", "excerpt", "sanitizedHash"].every((key) => sameValue((stored as unknown as Record<string, unknown>)[key], source[key])); if (!exact) throw new ProviderAdapterError("privacy", "local_source_stale"); continue; }
+      if (stored) { const exact = ["id", "conversationId", "analysisId", "documentId", "personId", "sourceType", "sanitizedSourceLabel", "availability", "conceptIds", "excerpt", "sanitizedHash", "presentation"].every((key) => sameValue((stored as unknown as Record<string, unknown>)[key], source[key])); if (!exact) throw new ProviderAdapterError("privacy", "local_source_stale"); continue; }
       if (typeof source.documentId === "string") {
         const document = await repositories.documents.get(source.documentId); const record = document as unknown as Record<string, unknown> | undefined;
         const chunk = typeof source.chunkId === "string" ? await repositories.chunks.get(source.chunkId) as Record<string, unknown> | undefined : undefined; const authority = chunk ?? record;
         const exact = document && document.status === "ready" && recordScopeMatches(record!, conversationId, analysisId) && (!chunk || chunk.documentId === document.id) && source.id === `tool-source-${conversationId}-${document.id}` && source.sanitizedSourceLabel === document.sanitizedSourceLabel && source.sourceType === (record?.sourceType ?? document.mediaType) && source.excerpt === authority?.content && source.sanitizedHash === authority?.sanitizedHash;
         if (!exact) throw new ProviderAdapterError("privacy", "local_document_source_mismatch"); continue;
       }
-      const tool = String((result as Record<string, unknown>).tool ?? ""); const requestId = String((result as Record<string, unknown>).requestId ?? ""); const data = (result as Record<string, unknown>).data ?? (result as Record<string, unknown>).result; const factKey = `${tool}:${requestId}`; const hash = await sha256(canonicalJson({ tool, requestId, data, factKey })); const excerpt = canonicalJson(data).slice(0, 2_000);
+      const tool = String((result as Record<string, unknown>).tool ?? ""); const requestId = String((result as Record<string, unknown>).requestId ?? ""); const data = (result as Record<string, unknown>).data ?? (result as Record<string, unknown>).result; const factKey = `${tool}:${requestId}`;
+      const personEvidence = tool === "getPersonProfile" ? personAnalysisEvidenceSchema.safeParse(data) : undefined;
+      const presentation = personEvidence?.success ? buildPersonAnalysisPresentation(personEvidence.data) : undefined;
+      const excerpt = personEvidence?.success ? personAnalysisExcerpt(personEvidence.data) : canonicalJson(data).slice(0, 2_000);
+      const hash = await sha256(canonicalJson(personEvidence?.success ? { tool, requestId, data, presentation, excerpt, factKey } : { tool, requestId, data, factKey }));
       if (source.id !== `tool-source-${hash}` || source.sanitizedHash !== hash || source.excerpt !== excerpt) throw new ProviderAdapterError("privacy", "local_synthetic_source_mismatch");
       }
     }

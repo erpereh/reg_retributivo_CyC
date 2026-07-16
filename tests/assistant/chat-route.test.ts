@@ -93,7 +93,7 @@ describe("POST /api/assistant/chat", () => {
     const profile = { id: "p1", name: "Gemini", provider: "gemini", baseUrl: "https://generativelanguage.googleapis.com", modelId: "gemini-2.5-flash", enabled: true, generalChatCompatible: true, analysisCompatible: true, supportsStreaming: true, supportsTools: true, supportsStructuredOutput: false, detectedContextWindow: 1_048_576, capabilitiesSource: "detected" as const };
 
     for await (const _ of service.execute({ ...base, phase: "plan", question: "Matrícula 10048", tools: ["getPersonProfile"], profile }, new AbortController().signal)) { /* consume */ }
-    expect(planTools).toHaveBeenCalledWith(expect.objectContaining({ tools: [expect.objectContaining({ name: "getPersonProfile", description: expect.stringContaining("ficha retributiva") })], messages: expect.arrayContaining([expect.objectContaining({ role: "system", content: expect.stringContaining("matrícula concreta") })]) }));
+    expect(planTools).toHaveBeenCalledWith(expect.objectContaining({ tools: [expect.objectContaining({ name: "getPersonProfile", description: expect.stringContaining("evidencia completa") })], messages: expect.arrayContaining([expect.objectContaining({ role: "system", content: expect.stringMatching(/conceptos descuadrados.*causa probable.*pendiente/is) })]) }));
   });
 
   it.each(["plan", "respond", "continue"] as const)("accepts strict %s and emits only validated NDJSON", async (phase) => {

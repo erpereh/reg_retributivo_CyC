@@ -122,7 +122,7 @@ const TOOL_DESCRIPTIONS: Readonly<Record<AnalysisToolName, string>> = {
   getAnalysisSummary: "Devuelve únicamente agregados globales del análisis, sin cargar personas ni documentos.",
   findPersonByEmployeeId: "Busca una matrícula exacta dentro del alcance autorizado y devuelve su identificador anonimizado.",
   searchPeople: "Busca personas por criterios anonimizados, con límite estricto y orden por relevancia.",
-  getPersonProfile: "Obtiene la ficha retributiva anonimizada de una matrícula concreta. Úsala antes de responder sobre esa matrícula.",
+  getPersonProfile: "Obtiene la evidencia completa, estructurada y anonimizada de una matrícula concreta: contexto laboral, Registro Retributivo, recibos por periodo, conceptos descuadrados, cuadre y causas probables. Úsala antes de responder sobre esa matrícula.",
   getPersonPayrollPeriods: "Lista de forma acotada los periodos de nómina disponibles para una persona concreta.",
   getPersonConcepts: "Recupera los conceptos retributivos de una persona concreta; no consulta el corpus completo.",
   getPersonConceptDifferences: "Compara importes por concepto para una persona concreta y devuelve solo diferencias estructuradas.",
@@ -183,7 +183,7 @@ async function messagesFor(input: ChatRequest, adapter: AIProviderAdapter, apiKe
   const context = contextItems.join("\n\n");
   const analysisSummary = input.analysisId && input.analysisContext ? `\n\nEstás en una aplicación de análisis retributivo. Análisis: ${input.analysisId}. Matrículas asociadas: ${input.analysisContext.associatedPersonIds.join(", ") || "ninguna"}. Matrícula principal: ${input.analysisContext.primaryPersonId ?? "ninguna"}. Estrategia: ${input.analysisContext.strategy}. Periodos disponibles: ${input.analysisContext.periods.join(", ") || "no informados"}. Tipos de fuentes: ${input.analysisContext.sourceTypes.join(", ") || "no informados"}. Resumen agregado: ${JSON.stringify(input.analysisContext.aggregate)}. En este contexto, matrícula es el identificador interno de una persona trabajadora. No debe interpretarse como matrícula de vehículo, universidad, aeronave, patente ni otro significado externo.` : "";
   const toolInstruction = tools.length
-    ? "\n\nPara consultas sobre datos del análisis, debes usar primero la herramienta local adecuada y responder únicamente con los resultados devueltos. Para una matrícula concreta, no respondas todavía: solicita primero su ficha mediante una herramienta."
+    ? "\n\nPara consultas sobre datos del análisis, debes usar primero la herramienta local adecuada y responder únicamente con los resultados devueltos. Para una matrícula concreta, no respondas todavía: solicita primero su ficha mediante una herramienta. Cuando la consulta sea amplia sobre una matrícula, enumera primero todos los conceptos descuadrados; después separa claramente los hechos comprobados, la causa probable con su confianza y la evidencia pendiente de confirmar. No termines tras mostrar solo los totales por bloque. Usa herramientas adicionales únicamente si se pide un detalle posterior que no esté incluido en la evidencia completa."
     : "";
   const messages: ProviderMessage[] = [{ role: "system", content: `${instruction}${analysisSummary}${toolInstruction}${context ? `\n\nContexto sanitizado:\n${context}` : ""}` }];
   if (input.phase === "respond") { messages.push({ role: "user", content: input.question }, ...nativeToolHistory(input.toolHistory ?? [input.toolResults])); }
