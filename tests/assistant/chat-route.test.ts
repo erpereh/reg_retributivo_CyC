@@ -38,12 +38,28 @@ describe("POST /api/assistant/chat", () => {
     const service = createChatService(async () => ({ adapter: adapter as never, apiKey: "server-only" }));
     const profile = { id: "p1", name: "Gemini", provider: "gemini", baseUrl: "https://generativelanguage.googleapis.com", modelId: "gemini-2.5-flash", enabled: true, generalChatCompatible: true, analysisCompatible: true, supportsStreaming: true, supportsTools: true, supportsStructuredOutput: false, detectedContextWindow: 1_048_576, capabilitiesSource: "detected" as const };
     const events = [];
-    for await (const event of service.execute({ ...base, phase: "plan", question: "hola", tools: [], profile }, new AbortController().signal)) events.push(event);
+    for await (const event of service.execute({ ...base, phase: "plan", question: "hola", tools: [], profile, privacyBlockedTerms: ["nombre privado"] }, new AbortController().signal)) events.push(event);
     expect(planTools).not.toHaveBeenCalled();
+    expect(JSON.stringify(streamResponse.mock.calls)).not.toContain("nombre privado");
+    expect(JSON.stringify((adapter.countTokens as ReturnType<typeof vi.fn>).mock.calls)).not.toContain("nombre privado");
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: "text_delta", delta: "Hola" }),
       expect.objectContaining({ type: "done", finishReason: "STOP" }),
     ]));
+  });
+
+  it("accepts more than 200 unique privacy terms within the shared request limits", async () => {
+    const execute = vi.fn(async function* (input: { roundId: string }) {
+      yield { type: "text_delta", roundId: input.roundId, delta: "Respuesta segura" } as const;
+      yield { type: "done", roundId: input.roundId, finishReason: "STOP" } as const;
+    });
+    const response = await createChatPostHandler({ execute })(request({
+      ...base, phase: "plan", question: "Consulta", tools: [],
+      privacyBlockedTerms: Array.from({ length: 201 }, (_, index) => `persona-${index}`),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(execute).toHaveBeenCalledOnce();
   });
 
   it("instructs an analysis request to use the available local tool before answering", async () => {

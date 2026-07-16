@@ -11,6 +11,7 @@ import { FakeAssistantAdapter } from "@/lib/assistant/providers/fakeAdapter";
 import { catalogKey } from "@/lib/assistant/catalog/domain";
 import { createIndexedDbRepositories } from "@/lib/assistant/storage/indexedDbRepositories";
 import type { AssistantRepositories } from "@/lib/assistant/storage/repositories";
+import type { StoredAnalysis } from "@/lib/types";
 
 const createdAt = "2026-07-13T10:00:00.000Z";
 
@@ -179,6 +180,40 @@ describe("Phase 5 reviewed provider behavior", () => {
     const messages = await persisted.messages.listByConversation("conversation-model", { limit: 10 });
     expect(messages.items.at(-1)).toMatchObject({ modelProfileId: chatBody?.modelProfileId, providerId: "provider-openai-test", modelId: selected.modelId });
     persisted.close();
+  });
+
+  test("sends analysis context without duplicate privacy terms when no people are associated", async () => {
+    const factory = new IDBFactory();
+    const selected = profile("profile-analysis", { analysisCompatible: true, supportsTools: true });
+    await seed(factory, "phase5-context-privacy", conversation("conversation-analysis", {
+      type: "analysis", analysisId: "analysis-1", analysisVersion: createdAt, associatedPersonIds: [],
+      contextStrategy: "associated_people", modelProfileId: selected.id,
+    }), [selected]);
+    const activeAnalysis = {
+      id: "analysis-1", createdAt,
+      result: {
+        summary: { uniquePeople: 1, peopleWithDifferences: 0, totalGlobalDifference: 0, conceptsPendingReview: 0, pdfsAnalyzed: 250 },
+        people: [{ employeeNumber: "10048", person: "Nombre Repetido", periods: [] }],
+        payrollRecords: Array.from({ length: 250 }, () => ({ employeeNumber: "10048", workerName: "Nombre Repetido" })),
+        registroEmployees: [{ employeeNumber: "10048", workerName: "Nombre Repetido" }],
+      },
+    } as unknown as StoredAnalysis;
+    const bodies: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      bodies.push(body);
+      return new Response(`${JSON.stringify({ type: "text_delta", roundId: body.roundId, messageId: "remote", delta: "Contexto disponible" })}\n${JSON.stringify({ type: "done", roundId: body.roundId, finishReason: "stop" })}\n`);
+    }));
+
+    render(<AssistantProvider activeAnalysis={activeAnalysis} factory={factory} dbName="phase5-context-privacy"><AssistantView /></AssistantProvider>);
+    await screen.findByRole("heading", { name: "conversation-analysis" });
+    const composer = screen.getByRole("textbox", { name: "Pregunta" });
+    fireEvent.change(composer, { target: { value: "hola" } });
+    fireEvent.keyDown(composer, { key: "Enter" });
+
+    expect(await screen.findByText("Contexto disponible")).toBeVisible();
+    const chatBody = bodies.find((body) => body.phase === "plan");
+    expect(chatBody).toMatchObject({ analysisId: "analysis-1", privacyBlockedTerms: [] });
   });
 
   test("ignores stale conversation loads and preserves concurrent person and preference mutations", async () => {

@@ -35,6 +35,30 @@ describe("phase 4 disconnected-path regressions", () => {
     expect(phases).toEqual(["plan", "respond", "continue"]);
   });
 
+  it("rejects more than 5000 unique privacy terms before transport", async () => {
+    const transport = vi.fn(async (body: Record<string, unknown>) => ndjson([
+      { type: "text_delta", roundId: body.roundId, messageId: "m1", delta: "No debe ejecutarse" },
+      { type: "done", roundId: body.roundId, finishReason: "stop" },
+    ]));
+    const registry = { names: [], privacyBlockedTerms: Array.from({ length: 5_001 }, (_, index) => `persona-${index}`), execute: vi.fn() } as unknown as AnalysisToolRegistry;
+    const orchestrator = new AssistantOrchestrator({ transport, registry, validateRequestScope });
+
+    await expect(orchestrator.send({ conversationId: "c1", question: "Resumen", modelProfileId: "p1", modelId: "m1", responseMode: "strict", contextStrategy: "automatic" })).rejects.toMatchObject({ code: "privacy_scope_too_large", classification: "context", publicMessage: "El alcance contiene demasiadas identidades para procesarlo de forma segura. Reduce el alcance o utiliza Personas asociadas." });
+    expect(transport).not.toHaveBeenCalled();
+  });
+
+  it("rejects a chat body over 128 KiB before transport", async () => {
+    const transport = vi.fn(async (body: Record<string, unknown>) => ndjson([
+      { type: "text_delta", roundId: body.roundId, messageId: "m1", delta: "No debe ejecutarse" },
+      { type: "done", roundId: body.roundId, finishReason: "stop" },
+    ]));
+    const registry = { names: [], privacyBlockedTerms: Array.from({ length: 600 }, (_, index) => `${index}-${"x".repeat(250)}`), execute: vi.fn() } as unknown as AnalysisToolRegistry;
+    const orchestrator = new AssistantOrchestrator({ transport, registry, validateRequestScope });
+
+    await expect(orchestrator.send({ conversationId: "c1", question: "Resumen", modelProfileId: "p1", modelId: "m1", responseMode: "strict", contextStrategy: "automatic" })).rejects.toMatchObject({ code: "privacy_scope_too_large", classification: "context" });
+    expect(transport).not.toHaveBeenCalled();
+  });
+
   it("preserves provider auth classification through the NDJSON boundary", async () => {
     const base = { phase: "plan", conversationId: "c1", analysisId: "a1", roundId: "r1", roundNumber: 1, modelProfileId: "p1", modelId: "m1", responseMode: "strict", contextStrategy: "automatic", question: "Resumen", tools: [] };
     const service = { execute: async function* () { throw new ProviderAdapterError("auth"); } };

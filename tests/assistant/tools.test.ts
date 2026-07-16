@@ -67,6 +67,86 @@ describe("assistant analysis tool registry", () => {
     ]);
   });
 
+  it("deduplicates canonical privacy terms repeated across payroll records", () => {
+    const scoped = createAnalysisToolRegistry({
+      conversation: { id: "conversation-1", type: "analysis", analysisId: "analysis-1" },
+      analysis: {
+        id: "analysis-1",
+        result: {
+          people: [{ employeeNumber: "10048", person: " José  Pérez " }],
+          payrollRecords: Array.from({ length: 201 }, () => ({ employeeNumber: "10048", workerName: "JOSÉ\u00a0PÉREZ" })),
+          registroEmployees: [{ employeeNumber: "10048", workerName: "Jose\u0301 Pe\u0301rez" }],
+        },
+      },
+      chunks: [],
+      scopeSnapshot: {
+        id: "scope-1", analysisId: "analysis-1", analysisVersion: "v1", strategy: "associated_people",
+        associatedPersonIds: ["10048"], explicitPersonIds: [], documentIds: [], allowedTools: ANALYSIS_TOOL_NAMES,
+      },
+    } as never);
+
+    expect(scoped.privacyBlockedTerms).toEqual(["josé pérez"]);
+  });
+
+  it("limits transported privacy terms to associated and explicitly mentioned people", () => {
+    const scoped = createAnalysisToolRegistry({
+      conversation: { id: "conversation-1", type: "analysis", analysisId: "analysis-1" },
+      analysis: {
+        id: "analysis-1",
+        result: {
+          people: [
+            { employeeNumber: "100", person: "Ana Asociada" },
+            { employeeNumber: "200", person: "Berta Explícita" },
+            { employeeNumber: "300", person: "Carla Fuera" },
+          ],
+          payrollRecords: [{ employeeNumber: "300", workerName: "Carla Fuera" }],
+          registroEmployees: [],
+        },
+      },
+      chunks: [],
+      scopeSnapshot: {
+        id: "scope-1", analysisId: "analysis-1", analysisVersion: "v1", strategy: "associated_people",
+        associatedPersonIds: ["100"], explicitPersonIds: ["200"], documentIds: [], allowedTools: ANALYSIS_TOOL_NAMES,
+      },
+    } as never);
+
+    expect(scoped.privacyBlockedTerms).toEqual(["ana asociada", "berta explícita"]);
+  });
+
+  it("transports no privacy terms for associated-people context without authorized people", () => {
+    const scoped = createAnalysisToolRegistry({
+      conversation: { id: "conversation-1", type: "analysis", analysisId: "analysis-1" },
+      analysis: { id: "analysis-1", result }, chunks: [],
+      scopeSnapshot: {
+        id: "scope-empty", analysisId: "analysis-1", analysisVersion: "v1", strategy: "associated_people",
+        associatedPersonIds: [], explicitPersonIds: [], documentIds: [], allowedTools: ANALYSIS_TOOL_NAMES,
+      },
+    });
+
+    expect(scoped.privacyBlockedTerms).toEqual([]);
+  });
+
+  it("keeps every unique canonical privacy term for full analysis", () => {
+    const scoped = createAnalysisToolRegistry({
+      conversation: { id: "conversation-1", type: "analysis", analysisId: "analysis-1" },
+      analysis: {
+        id: "analysis-1",
+        result: {
+          people: Array.from({ length: 201 }, (_, index) => ({ employeeNumber: String(index), person: `Persona ${index}` })),
+          payrollRecords: [], registroEmployees: [],
+        },
+      },
+      chunks: [],
+      scopeSnapshot: {
+        id: "scope-1", analysisId: "analysis-1", analysisVersion: "v1", strategy: "full_analysis",
+        associatedPersonIds: [], explicitPersonIds: [], documentIds: [], allowedTools: ANALYSIS_TOOL_NAMES,
+      },
+    } as never);
+
+    expect(scoped.privacyBlockedTerms).toHaveLength(201);
+    expect(scoped.privacyBlockedTerms).toContain("persona 200");
+  });
+
   it("returns a person's complete sanitized payroll and registro concepts", async () => {
     await expect(registry().execute("getPersonConcepts" as AnalysisToolName, { analysisId: "analysis-1", personId: "10048" })).resolves.toEqual({
       personId: "10048",

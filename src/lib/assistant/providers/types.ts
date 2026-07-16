@@ -82,6 +82,7 @@ const PUBLIC_MESSAGES: Readonly<Record<ProviderErrorClassification, string>> = {
   provider: "El proveedor devolvió una respuesta no válida.",
 };
 const PUBLIC_MESSAGES_BY_CODE: Readonly<Record<string, string>> = {
+  privacy_scope_too_large: "El alcance contiene demasiadas identidades para procesarlo de forma segura. Reduce el alcance o utiliza Personas asociadas.",
   empty_response: "El modelo no devolvió contenido.",
   tool_round_limit: "El asistente necesitó demasiadas rondas de herramientas.",
   stream_truncated: "La respuesta se interrumpió antes de completarse.",

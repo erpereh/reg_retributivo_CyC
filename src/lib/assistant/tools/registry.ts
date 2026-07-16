@@ -57,12 +57,14 @@ export interface AnalysisToolRegistry { readonly names: typeof ANALYSIS_TOOL_NAM
 function assertScope(context: AnalysisToolRegistryContext, requestedAnalysisId: string): void { if (context.conversation.type !== "analysis" || !context.conversation.analysisId) throw new Error("La conversación general no tiene acceso a herramientas de análisis."); if (context.conversation.analysisId !== requestedAnalysisId || context.analysis.id !== requestedAnalysisId) throw new Error("El análisis solicitado no pertenece a la conversación."); }
 
 export function createAnalysisToolRegistry(context: AnalysisToolRegistryContext): AnalysisToolRegistry {
+  const allCanonicalNames = canonicalKnownNames(context.analysis);
+  const privacyBlockedTerms = canonicalKnownNames(context.analysis, context.scopeSnapshot);
   async function execute(name: AnalysisToolName, args: unknown): Promise<unknown> {
     if (!ANALYSIS_TOOL_NAMES.includes(name)) throw new Error("Herramienta no permitida.");
     const normalized = context.scopeSnapshot ? normalizeScopedToolArguments(context.scopeSnapshot, name, args) : args;
     const parsed = ANALYSIS_TOOL_SCHEMAS[name].input.parse(normalized) as Record<string, unknown> & { analysisId: string }; assertScope(context, parsed.analysisId);
     if (context.scopeSnapshot) assertToolAllowedBySnapshot(context.scopeSnapshot, name, parsed);
-    assertNoKnownNames(parsed, context.analysis);
+    assertNoKnownNames(parsed, allCanonicalNames);
     let value: unknown;
     if (name === "searchDocumentChunks") {
       if (context.searchDocuments) {
@@ -85,9 +87,9 @@ export function createAnalysisToolRegistry(context: AnalysisToolRegistryContext)
       value = { people: (value as { people: Array<{ personId: string }> }).people.filter((person) => allowed.has(person.personId)) };
     }
     const clean = stripUndefined(value);
-    const result = ANALYSIS_TOOL_SCHEMAS[name].output.parse(clean); assertNoKnownNames(result, context.analysis); assertSafeForProvider(result); return result;
+    const result = ANALYSIS_TOOL_SCHEMAS[name].output.parse(clean); assertNoKnownNames(result, allCanonicalNames); assertSafeForProvider(result); return result;
   }
-  return { names: ANALYSIS_TOOL_NAMES, privacyBlockedTerms: knownNames(context.analysis), execute, assertSafeOutput(value) { assertNoKnownNames(value, context.analysis); assertSafeForProvider(value); }, async executeEnvelope(name, args, requestId = "local") {
+  return { names: ANALYSIS_TOOL_NAMES, privacyBlockedTerms, execute, assertSafeOutput(value) { assertNoKnownNames(value, allCanonicalNames); assertSafeForProvider(value); }, async executeEnvelope(name, args, requestId = "local") {
     const data = await execute(name, args);
     const parsed = ANALYSIS_TOOL_SCHEMAS[name].input.parse(args) as { analysisId: string };
     const documentMatches = name === "searchDocumentChunks" ? (data as { matches: { sourceId: string; sanitizedSourceLabel: string; sourceType: string; excerpt: string; sanitizedHash: string }[] }).matches : [];
@@ -101,7 +103,7 @@ export function createAnalysisToolRegistry(context: AnalysisToolRegistryContext)
       const sanitizedHash = await sha256(canonicalJson({ tool: name, requestId, data, factKey }));
       sources.push({ id: `tool-source-${sanitizedHash}`, conversationId: context.conversation.id, analysisId: parsed.analysisId, sourceType: "analysis", sanitizedSourceLabel: `Análisis retributivo · ${name}`, availability: "available", conceptIds: [], excerpt: excerpt.slice(0, 2_000), sanitizedHash });
     }
-    assertNoKnownNames(sources, context.analysis); assertSafeForProvider(sources);
+    assertNoKnownNames(sources, allCanonicalNames); assertSafeForProvider(sources);
     return { data, sources };
   } };
 }
@@ -117,16 +119,30 @@ async function sha256(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function assertNoKnownNames(value: unknown, analysis: AnalysisToolData): void {
-  const names = knownNames(analysis).map(canonicalizePrivacyText);
+function assertNoKnownNames(value: unknown, names: readonly string[]): void {
   const strings: string[] = [];
   const visit = (input: unknown): void => { if (typeof input === "string") strings.push(canonicalizePrivacyText(input)); else if (Array.isArray(input)) input.forEach(visit); else if (input && typeof input === "object") Object.values(input).forEach(visit); };
   visit(value);
   if (names.some((name) => strings.some((candidate) => candidate.includes(name)))) throw new Error("Los nombres conocidos no están permitidos en argumentos de herramientas por privacidad.");
 }
 
-function knownNames(analysis: AnalysisToolData): string[] {
-  return [...analysis.result.people.map((row) => row.person), ...analysis.result.payrollRecords.map((row) => row.workerName), ...analysis.result.registroEmployees.map((row) => row.workerName)].filter((name): name is string => Boolean(name?.trim()));
+function canonicalKnownNames(analysis: AnalysisToolData, scopeSnapshot?: ScopeSnapshot): string[] {
+  const allowedPersonIds = scopeSnapshot?.strategy === "associated_people"
+    ? new Set([...scopeSnapshot.associatedPersonIds, ...scopeSnapshot.explicitPersonIds])
+    : undefined;
+  const entries = [
+    ...analysis.result.people.map((row) => ({ personId: row.employeeNumber, name: row.person })),
+    ...analysis.result.payrollRecords.map((row) => ({ personId: row.employeeNumber, name: row.workerName })),
+    ...analysis.result.registroEmployees.map((row) => ({ personId: row.employeeNumber, name: row.workerName })),
+  ];
+  const names = new Set<string>();
+  for (const entry of entries) {
+    if (allowedPersonIds && (!entry.personId || !allowedPersonIds.has(entry.personId))) continue;
+    if (!entry.name?.trim()) continue;
+    const canonical = canonicalizePrivacyText(entry.name);
+    if (canonical.length > 1) names.add(canonical);
+  }
+  return [...names];
 }
 
 function stripUndefined(value: unknown): unknown {

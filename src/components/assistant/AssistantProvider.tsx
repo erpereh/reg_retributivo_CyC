@@ -316,15 +316,25 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
         repositories = repositoriesFactory ? await repositoriesFactory() : await createIndexedDbRepositories({ factory, dbName });
         if (cancelled) { repositories.close(); return; }
         repositoriesRef.current = repositories;
+        let cachedAnalysisRegistry: Readonly<{
+          conversation: Conversation;
+          analysis: StoredAnalysis;
+          scopeSnapshot: typeof activeScopeSnapshotRef.current;
+          registry: AnalysisToolRegistry;
+        }> | undefined;
         const currentAnalysisRegistry = () => {
           const currentConversation = conversationRef.current;
           const currentAnalysis = activeAnalysisRef.current;
           if (!currentConversation || currentConversation.type !== "analysis" || !currentConversation.analysisId || !currentAnalysis || currentAnalysis.id !== currentConversation.analysisId) throw new ProviderAdapterError("incompatible", "analysis_tools_unavailable");
-          return createAnalysisToolRegistry({ conversation: currentConversation, analysis: currentAnalysis, chunks: [], searchDocuments: async ({ analysisId, query, limit }) => repositories!.buildSearchIndex({ type: "analysis", analysisId }).then((index) => index.search({ scope: { type: "analysis", analysisId }, query, limit })), ...(activeScopeSnapshotRef.current ? { scopeSnapshot: activeScopeSnapshotRef.current } : {}) });
+          const scopeSnapshot = activeScopeSnapshotRef.current;
+          if (cachedAnalysisRegistry?.conversation === currentConversation && cachedAnalysisRegistry.analysis === currentAnalysis && cachedAnalysisRegistry.scopeSnapshot === scopeSnapshot) return cachedAnalysisRegistry.registry;
+          const registry = createAnalysisToolRegistry({ conversation: currentConversation, analysis: currentAnalysis, chunks: [], searchDocuments: async ({ analysisId, query, limit }) => repositories!.buildSearchIndex({ type: "analysis", analysisId }).then((index) => index.search({ scope: { type: "analysis", analysisId }, query, limit })), ...(scopeSnapshot ? { scopeSnapshot } : {}) });
+          cachedAnalysisRegistry = { conversation: currentConversation, analysis: currentAnalysis, scopeSnapshot, registry };
+          return registry;
         };
         const registry = {
           get names() { const current = conversationRef.current; const analysis = activeAnalysisRef.current; return !adapterRef.current && current?.type === "analysis" && current.analysisId === analysis?.id ? ANALYSIS_TOOL_NAMES : []; },
-          get privacyBlockedTerms() { if (adapterRef.current) return []; try { return currentAnalysisRegistry().privacyBlockedTerms; } catch { return []; } },
+          get privacyBlockedTerms() { const current = conversationRef.current; const analysis = activeAnalysisRef.current; return !adapterRef.current && current?.type === "analysis" && current.analysisId === analysis?.id ? currentAnalysisRegistry().privacyBlockedTerms ?? [] : []; },
           execute(name: AnalysisToolName, args: unknown) { return currentAnalysisRegistry().execute(name, args); },
           executeEnvelope(name: AnalysisToolName, args: unknown, requestId?: string) { return currentAnalysisRegistry().executeEnvelope!(name, args, requestId); },
           assertSafeOutput(value: unknown) { const current = conversationRef.current; const analysis = activeAnalysisRef.current; if (!adapterRef.current && current?.type === "analysis" && current.analysisId === analysis?.id) currentAnalysisRegistry().assertSafeOutput?.(value); },
