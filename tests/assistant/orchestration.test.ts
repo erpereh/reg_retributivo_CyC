@@ -19,7 +19,8 @@ describe("assistant client orchestration", () => {
     expect(result.rounds).toBe(2);
     expect(registry.execute).toHaveBeenCalledWith("getPersonProfile", { analysisId: "a1", personId: "10048" });
     const settled = { requestId: "q1", tool: "getPersonProfile", args: { analysisId: "a1", personId: "10048" }, providerContext, status: "success", data: { safe: true }, sources: [] };
-    expect(transport.mock.calls[1][0]).toEqual(expect.objectContaining({ phase: "respond", toolResults: [settled], toolHistory: [[settled]] }));
+    expect(transport.mock.calls[1][0]).toEqual(expect.objectContaining({ phase: "respond", toolHistory: [[settled]] }));
+    expect(transport.mock.calls[1][0]).not.toHaveProperty("toolResults");
   });
 
   it("preserves ordered Gemini context across sequential tool rounds", async () => {
@@ -46,6 +47,47 @@ describe("assistant client orchestration", () => {
     ]);
   });
 
+  it("forces final synthesis after a successful complete person profile", async () => {
+    const providerContext = { kind: "gemini" as const, partIndex: 0, thoughtSignature: "signature-profile" };
+    const transport = vi.fn(async (body: Record<string, unknown>) => {
+      if (body.phase === "plan") return ndjson([
+        { type: "tool_request", roundId: String(body.roundId), requestId: "q-profile", tool: "getPersonProfile", args: { analysisId: "a1", personId: "10048" }, providerContext },
+        { type: "done", roundId: String(body.roundId), finishReason: "tool_request" },
+      ]);
+      if (body.toolPolicy !== "none") return ndjson([
+        { type: "tool_request", roundId: String(body.roundId), requestId: "q-redundant", tool: "getPersonConcepts", args: { analysisId: "a1", personId: "10048" } },
+        { type: "done", roundId: String(body.roundId), finishReason: "tool_request" },
+      ]);
+      return ndjson([{ type: "text_delta", roundId: String(body.roundId), messageId: "m2", delta: "Ficha completa" }, { type: "done", roundId: String(body.roundId), finishReason: "stop" }]);
+    });
+    const registry = { names: ["getPersonProfile", "getPersonConcepts"], execute: vi.fn(async () => ({ personId: "10048", complete: true })) } as unknown as AnalysisToolRegistry;
+
+    await expect(new AssistantOrchestrator({ transport, registry, validateRequestScope }).send({ conversationId: "c1", analysisId: "a1", question: "Dime todo sobre matrícula 10048", modelProfileId: "p1", modelId: "gemini-3.1-flash-lite", responseMode: "strict", contextStrategy: "associated_people" })).resolves.toMatchObject({ text: "Ficha completa", rounds: 2 });
+    expect(transport.mock.calls[1][0]).toEqual(expect.objectContaining({ phase: "respond", toolPolicy: "none" }));
+  });
+
+  it("always uses the third request for synthesis instead of asking a fourth tool round", async () => {
+    const transport = vi.fn(async (body: Record<string, unknown>) => {
+      if (body.toolPolicy === "none") return ndjson([{ type: "text_delta", roundId: String(body.roundId), messageId: "m3", delta: "Síntesis disponible" }, { type: "done", roundId: String(body.roundId), finishReason: "stop" }]);
+      const tool = body.phase === "plan" ? "getAnalysisSummary" : "getTopDifferences";
+      return ndjson([{ type: "tool_request", roundId: String(body.roundId), requestId: `q-${body.roundNumber}`, tool, args: { analysisId: "a1" } }, { type: "done", roundId: String(body.roundId), finishReason: "tool_request" }]);
+    });
+    const registry = { names: ["getAnalysisSummary", "getTopDifferences"], execute: vi.fn(async (tool: string) => ({ tool })) } as unknown as AnalysisToolRegistry;
+
+    await expect(new AssistantOrchestrator({ transport, registry, validateRequestScope }).send({ conversationId: "c1", analysisId: "a1", question: "Resumen", modelProfileId: "p1", modelId: "fake", responseMode: "strict", contextStrategy: "automatic" })).resolves.toMatchObject({ text: "Síntesis disponible", rounds: 3 });
+    expect(transport.mock.calls.map(([body]) => (body as Record<string, unknown>).toolPolicy)).toEqual(["auto", "auto", "none"]);
+  });
+
+  it("accepts a complete person synthesis larger than the legacy text limit", async () => {
+    const completeText = "x".repeat(20_000);
+    const transport = vi.fn(async (body: Record<string, unknown>) => body.phase === "plan"
+      ? ndjson([{ type: "tool_request", roundId: String(body.roundId), requestId: "q-profile", tool: "getPersonProfile", args: { analysisId: "a1", personId: "10048" } }, { type: "done", roundId: String(body.roundId), finishReason: "tool_request" }])
+      : ndjson([{ type: "text_delta", roundId: String(body.roundId), messageId: "m2", delta: completeText.slice(0, 10_000) }, { type: "text_delta", roundId: String(body.roundId), messageId: "m2", delta: completeText.slice(10_000) }, { type: "done", roundId: String(body.roundId), finishReason: "stop" }]));
+    const registry = { names: ["getPersonProfile"], execute: vi.fn(async () => ({ personId: "10048", complete: true })) } as unknown as AnalysisToolRegistry;
+
+    await expect(new AssistantOrchestrator({ transport, registry, validateRequestScope }).send({ conversationId: "c1", analysisId: "a1", question: "Dime todo sobre matrícula 10048", modelProfileId: "p1", modelId: "fake", responseMode: "strict", contextStrategy: "associated_people" })).resolves.toMatchObject({ text: completeText });
+  });
+
   it("does not audit an opaque Gemini signature as user or tool content", async () => {
     const providerContext = { kind: "gemini" as const, partIndex: 0, thoughtSignature: "sk-opaqueTechnicalSignature123" };
     const transport = vi.fn(async (body: Record<string, unknown>) => body.phase === "plan"
@@ -57,11 +99,13 @@ describe("assistant client orchestration", () => {
     expect(transport).toHaveBeenCalledTimes(2);
   });
 
-  it("stops at three rounds, validates privacy client-side and honors AbortSignal", async () => {
-    const transport = vi.fn(async (body: Record<string, unknown>) => ndjson([{ type: "tool_request", roundId: String(body.roundId), requestId: String(body.roundId), tool: "getPersonProfile", args: { analysisId: "a1", personId: "10048" } }, { type: "done", roundId: String(body.roundId), finishReason: "tool_request" }]));
+  it("validates privacy client-side and honors AbortSignal", async () => {
+    const transport = vi.fn(async (body: Record<string, unknown>) => body.toolPolicy === "none"
+      ? ndjson([{ type: "text_delta", roundId: String(body.roundId), messageId: "m2", delta: "Respuesta" }, { type: "done", roundId: String(body.roundId), finishReason: "stop" }])
+      : ndjson([{ type: "tool_request", roundId: String(body.roundId), requestId: String(body.roundId), tool: "getPersonProfile", args: { analysisId: "a1", personId: "10048" } }, { type: "done", roundId: String(body.roundId), finishReason: "tool_request" }]));
     const registry = { names: ["getPersonProfile"], execute: vi.fn(async () => ({ safe: true })) } as unknown as AnalysisToolRegistry;
     const orchestrator = new AssistantOrchestrator({ transport, registry, validateRequestScope });
-    await expect(orchestrator.send({ conversationId: "c1", analysisId: "a1", question: "Consulta matrícula 10048", modelProfileId: "p1", modelId: "fake", responseMode: "strict", contextStrategy: "automatic" })).rejects.toMatchObject({ code: "tool_round_limit", classification: "provider" } satisfies Partial<ProviderAdapterError>);
+    await expect(orchestrator.send({ conversationId: "c1", analysisId: "a1", question: "Consulta matrícula 10048", modelProfileId: "p1", modelId: "fake", responseMode: "strict", contextStrategy: "automatic" })).resolves.toMatchObject({ text: "Respuesta" });
     await expect(orchestrator.send({ conversationId: "c1", analysisId: "a1", question: "persona@example.com", modelProfileId: "p1", modelId: "fake", responseMode: "strict", contextStrategy: "automatic" })).rejects.toThrow(/sensible|privacidad/i);
     const controller = new AbortController(); controller.abort();
     await expect(orchestrator.send({ conversationId: "c1", analysisId: "a1", question: "Consulta", modelProfileId: "p1", modelId: "fake", responseMode: "strict", contextStrategy: "automatic", signal: controller.signal })).rejects.toThrow();

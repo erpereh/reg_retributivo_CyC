@@ -4,9 +4,9 @@ import { canonicalizePrivacyText } from "@/lib/assistant/privacy/patterns";
 import { selectPersonCuadreReg, selectPersonProfile } from "@/lib/assistant/tools/sharedSelectors";
 import { ProviderAdapterError } from "@/lib/assistant/providers/types";
 
-// The request transports the tool payload and its local presentation. Keeping each
-// representation below 48 KiB leaves room inside the existing 128 KiB envelope.
-export const MAX_PERSON_ANALYSIS_EVIDENCE_BYTES = 48 * 1024;
+// The transport removes the local-only structured presentation and does not duplicate
+// the latest round, leaving room for metadata inside the existing 128 KiB envelope.
+export const MAX_PERSON_ANALYSIS_EVIDENCE_BYTES = 96 * 1024;
 
 const optionalText = z.string().max(256).optional();
 const moneyTripleSchema = z.object({ registro: z.number(), payroll: z.number(), difference: z.number() }).strict();

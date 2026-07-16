@@ -6,6 +6,19 @@ import { ConversationEvent } from "@/components/assistant/ConversationEvent";
 import type { AssistantContextValue } from "@/components/assistant/AssistantProvider";
 import type { SourceReference } from "@/lib/assistant/domain";
 
+type TimelineItem =
+  | { kind: "event"; id: string; createdAt: string; event: AssistantContextValue["events"][number] }
+  | { kind: "message"; id: string; createdAt: string; message: AssistantContextValue["messages"][number] };
+
+function timelineOrder(item: TimelineItem): number {
+  if (item.kind === "event") return 0;
+  return item.message.role === "user" ? 1 : 2;
+}
+
+function compareTimeline(left: TimelineItem, right: TimelineItem): number {
+  return left.createdAt.localeCompare(right.createdAt) || timelineOrder(left) - timelineOrder(right) || left.id.localeCompare(right.id);
+}
+
 export function ConversationTimeline({ assistant, onShowContextUsage, onOpenSource }: Readonly<{ assistant: AssistantContextValue; onShowContextUsage?(): void; onOpenSource?(source: SourceReference): void }>) {
   const conversation = assistant.conversation;
   const latestAssistantId = [...assistant.messages].reverse().find((message) => message.role === "assistant")?.id;
@@ -13,7 +26,7 @@ export function ConversationTimeline({ assistant, onShowContextUsage, onOpenSour
   const timeline = [
     ...assistant.events.map((event) => ({ kind: "event" as const, id: event.id, createdAt: event.createdAt, event })),
     ...assistant.messages.map((message) => ({ kind: "message" as const, id: message.id, createdAt: message.createdAt, message })),
-  ].sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+  ].sort(compareTimeline);
   return (
     <main className="flex h-full min-h-0 min-w-0 flex-col bg-slate-50/80" aria-labelledby="assistant-title">
       <header className="flex min-h-16 items-center border-b border-line bg-white px-4 sm:px-5">

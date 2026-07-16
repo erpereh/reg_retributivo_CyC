@@ -8,6 +8,7 @@ import { SafeDeltaBuffer } from "@/lib/assistant/streamProtocol";
 import { canonicalizePrivacyText } from "@/lib/assistant/privacy/patterns";
 import { providerRuntime, type ProviderRuntimeService } from "@/lib/assistant/server/providerRuntime";
 import { MAX_CHAT_REQUEST_BYTES, MAX_PRIVACY_BLOCKED_TERMS } from "@/lib/assistant/transportLimits";
+import { personAnalysisEvidenceSchema } from "@/lib/assistant/tools/personEvidence";
 
 const id = z.string().min(1).max(256);
 const contextCandidateSchema = z.object({ id, kind: z.enum(["tool", "metadata", "lexical", "chunk", "message"]), content: z.string().max(32_768), tokens: z.number().int().nonnegative(), relevance: z.number().min(0).max(1), sourceId: id, sanitizedHash: id, factKey: id, facets: z.record(z.array(z.string())).optional(), scope: documentScopeSchema }).strict();
@@ -16,14 +17,15 @@ const compactionLineageSchema = z.object({ decisions: z.array(z.string().max(1_0
 const modelMetadataSchema = z.object({ contextWindow: z.number().int().positive(), maxOutputTokens: z.number().int().positive().optional(), generationModelId: id.optional() }).strict();
 const analysisContextSchema = z.object({ associatedPersonIds: z.array(id).max(20), primaryPersonId: id.optional(), strategy: z.enum(["associated_people", "full_analysis"]), periods: z.array(z.string().min(1).max(64)).max(100), sourceTypes: z.array(z.string().min(1).max(64)).max(20), aggregate: z.record(z.number().finite()).refine((value) => Object.keys(value).length <= 50) }).strict();
 const providerDescriptorSchema = z.object({ providerId: id, providerType: z.enum(["gemini", "openai", "openrouter", "cerebras", "groq", "openai-compatible"]), baseUrl: z.string().url().max(2_048), envVarName: z.string().min(1).max(128) }).strict();
-const common = { executionId: z.string().uuid().optional(), conversationId: id, analysisId: id.optional(), analysisContext: analysisContextSchema.optional(), roundId: id, roundNumber: z.number().int().min(1).max(3), providerId: id.optional(), provider: providerDescriptorSchema.optional(), modelProfileId: id, modelId: id, modelMetadata: modelMetadataSchema.optional(), profile: modelProfileSchema.optional(), privacyBlockedTerms: z.array(z.string().min(2).max(256)).max(MAX_PRIVACY_BLOCKED_TERMS).optional(), responseMode: z.enum(["strict", "flexible"]), contextStrategy: z.enum(["associated_people", "full_analysis", "automatic", "full", "optimized"]), contextCandidates: z.array(contextCandidateSchema).max(256).optional(), compactedContext: compactedContextSchema.optional(), compactionLineage: compactionLineageSchema.optional(), safetyMarginPercent: z.number().min(0).max(50).optional(), warningThresholdPercent: z.number().min(1).max(99).optional(), compactionThresholdPercent: z.number().min(1).max(100).optional() };
+const common = { executionId: z.string().uuid().optional(), conversationId: id, analysisId: id.optional(), analysisContext: analysisContextSchema.optional(), roundId: id, roundNumber: z.number().int().min(1).max(3), toolPolicy: z.enum(["auto", "none"]).optional(), providerId: id.optional(), provider: providerDescriptorSchema.optional(), modelProfileId: id, modelId: id, modelMetadata: modelMetadataSchema.optional(), profile: modelProfileSchema.optional(), privacyBlockedTerms: z.array(z.string().min(2).max(256)).max(MAX_PRIVACY_BLOCKED_TERMS).optional(), responseMode: z.enum(["strict", "flexible"]), contextStrategy: z.enum(["associated_people", "full_analysis", "automatic", "full", "optimized"]), contextCandidates: z.array(contextCandidateSchema).max(256).optional(), compactedContext: compactedContextSchema.optional(), compactionLineage: compactionLineageSchema.optional(), safetyMarginPercent: z.number().min(0).max(50).optional(), warningThresholdPercent: z.number().min(1).max(99).optional(), compactionThresholdPercent: z.number().min(1).max(100).optional() };
 const plan = z.object({ phase: z.literal("plan"), ...common, question: z.string().min(1).max(16_384), tools: z.array(z.enum(ANALYSIS_TOOL_NAMES)).max(19) }).strict();
 const providerToolContext = z.object({ kind: z.literal("gemini"), partIndex: z.number().int().min(0).max(255), thoughtSignature: z.string().min(1).max(16_384).optional() }).strict();
 const toolResult = z.object({ requestId: id, tool: z.enum(ANALYSIS_TOOL_NAMES), args: z.unknown().optional(), providerContext: providerToolContext.optional(), status: z.enum(["success", "empty", "failed", "cancelled"]).optional(), data: z.unknown().optional(), result: z.unknown().optional(), error: z.object({ code: id, message: z.string().min(1).max(200) }).strict().optional(), sources: z.array(sourceReferenceSchema).max(100).optional() }).strict().superRefine((value, context) => { if ((!value.status || value.status === "success" || value.status === "empty") && value.data === undefined && value.result === undefined) context.addIssue({ code: z.ZodIssueCode.custom, message: "Falta el resultado de la herramienta." }); if ((value.status === "failed" || value.status === "cancelled") && !value.error) context.addIssue({ code: z.ZodIssueCode.custom, message: "Falta el error sanitizado." }); });
 const toolHistory = z.array(z.array(toolResult).min(1).max(19)).max(3);
-const respond = z.object({ phase: z.literal("respond"), ...common, question: z.string().min(1).max(16_384), tools: z.array(z.enum(ANALYSIS_TOOL_NAMES)).max(19).optional(), toolResults: z.array(toolResult).min(1).max(19), toolHistory: toolHistory.optional() }).strict();
+const respond = z.object({ phase: z.literal("respond"), ...common, question: z.string().min(1).max(16_384), tools: z.array(z.enum(ANALYSIS_TOOL_NAMES)).max(19).optional(), toolResults: z.array(toolResult).min(1).max(19).optional(), toolHistory: toolHistory.optional() }).strict();
 const continuation = z.object({ phase: z.literal("continue"), ...common, question: z.string().min(1).max(16_384).optional(), tools: z.array(z.enum(ANALYSIS_TOOL_NAMES)).max(19).optional(), toolResults: z.array(toolResult).max(19).optional(), toolHistory: toolHistory.optional(), interruptedMessageId: id.optional(), continuationContext: z.string().min(1).max(16_384).optional() }).strict();
 export const chatRequestSchema = z.discriminatedUnion("phase", [plan, respond, continuation]).superRefine((value, context) => {
+  if (value.phase === "respond" && !value.toolResults?.length && !value.toolHistory?.length) context.addIssue({ code: z.ZodIssueCode.custom, path: ["toolHistory"], message: "La respuesta no contiene resultados de herramientas." });
   if (value.phase === "continue") {
     const hasInterrupted = Boolean(value.interruptedMessageId);
     const hasContinuationText = Boolean(value.continuationContext);
@@ -31,7 +33,7 @@ export const chatRequestSchema = z.discriminatedUnion("phase", [plan, respond, c
   }
   if (Boolean(value.providerId) !== Boolean(value.provider) || (value.providerId && value.provider?.providerId !== value.providerId)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["provider"], message: "El descriptor no pertenece al proveedor seleccionado." });
   const rounds = value.phase === "plan" ? [] : value.toolHistory ?? (value.toolResults?.length ? [value.toolResults] : []);
-  if (value.phase !== "plan" && value.toolHistory?.length && JSON.stringify(value.toolResults ?? []) !== JSON.stringify(value.toolHistory.at(-1))) context.addIssue({ code: z.ZodIssueCode.custom, path: ["toolResults"], message: "Los resultados actuales no corresponden a la última ronda." });
+  if (value.phase !== "plan" && value.toolResults?.length && value.toolHistory?.length && JSON.stringify(value.toolResults) !== JSON.stringify(value.toolHistory.at(-1))) context.addIssue({ code: z.ZodIssueCode.custom, path: ["toolResults"], message: "Los resultados actuales no corresponden a la última ronda." });
   for (const [roundIndex, round] of rounds.entries()) {
     let previousPartIndex = -1;
     for (const [callIndex, result] of round.entries()) {
@@ -160,20 +162,38 @@ function nativeToolMessages(results: readonly z.infer<typeof toolResult>[]): Pro
   ];
 }
 function nativeToolHistory(rounds: readonly (readonly z.infer<typeof toolResult>[])[]): ProviderMessage[] { return rounds.flatMap((round) => nativeToolMessages(round)); }
-async function messagesFor(input: ChatRequest, adapter: AIProviderAdapter, apiKey: string, tools: readonly ProviderTool[], signal: AbortSignal) {
+function synthesisToolHistory(rounds: readonly (readonly z.infer<typeof toolResult>[])[]): string {
+  return JSON.stringify(rounds.map((round) => round.map((entry) => ({
+    tool: entry.tool,
+    status: entry.status ?? "success",
+    ...(entry.status === "failed" || entry.status === "cancelled"
+      ? { error: entry.error }
+      : { data: entry.data ?? entry.result ?? null, sources: (entry.sources ?? []).map((source) => ({ id: source.id, label: source.sanitizedSourceLabel })) }),
+  }))));
+}
+function hasCompletePersonEvidence(input: ChatRequest): boolean {
+  if (input.phase === "plan") return false;
+  const rounds = input.toolHistory ?? (input.toolResults?.length ? [input.toolResults] : []);
+  return rounds.some((round) => round.some((result) => result.tool === "getPersonProfile" && (result.status === undefined || result.status === "success") && personAnalysisEvidenceSchema.safeParse(result.data ?? result.result).success));
+}
+function outputTokenLimit(input: ChatRequest): number {
+  const desired = hasCompletePersonEvidence(input) ? 8_192 : 2_048;
+  return Math.min(desired, input.modelMetadata?.maxOutputTokens ?? input.profile?.maxOutputTokens ?? 2_048);
+}
+async function messagesFor(input: ChatRequest, adapter: AIProviderAdapter, apiKey: string, tools: readonly ProviderTool[], outputTokens: number, signal: AbortSignal) {
   const instruction = responseModeInstructions(input.responseMode); const continuationInstruction = "Continúa exactamente desde el contenido parcial anterior, sin repetirlo ni reiniciar la respuesta."; const question = input.phase === "continue" ? continuationInstruction : input.question;
   const promptTokens = await counted(adapter, input, apiKey, `${instruction}\n${question}`, signal); const toolSchemaTokens = await counted(adapter, input, apiKey, JSON.stringify(tools), signal);
   const scope = input.analysisId ? { type: "analysis", analysisId: input.analysisId } as const : { type: "conversation", conversationId: input.conversationId } as const;
   const candidates: ContextCandidate[] = []; for (const candidate of input.contextCandidates ?? []) candidates.push({ ...candidate, tokens: await counted(adapter, input, apiKey, candidate.content, signal) });
   const contextWindow = input.modelMetadata?.contextWindow ?? input.profile?.detectedContextWindow ?? input.profile?.manualContextWindow; if (!contextWindow) throw new ProviderAdapterError("context", "context_window_unknown");
-  let plan; try { plan = new ContextPlanner().plan({ strategy: input.contextStrategy, responseMode: input.responseMode, candidates, scope, contextWindow, promptTokens, toolSchemaTokens, safetyMarginPercent: input.safetyMarginPercent, warningThresholdPercent: input.warningThresholdPercent, compactionThresholdPercent: input.compactionThresholdPercent }); } catch { throw new ProviderAdapterError("context", "context_budget_invalid"); }
+  let plan; try { plan = new ContextPlanner().plan({ strategy: input.contextStrategy, responseMode: input.responseMode, candidates, scope, contextWindow, promptTokens, toolSchemaTokens, outputTokens, safetyMarginPercent: input.safetyMarginPercent, warningThresholdPercent: input.warningThresholdPercent, compactionThresholdPercent: input.compactionThresholdPercent }); } catch { throw new ProviderAdapterError("context", "context_budget_invalid"); }
   const statuses: AssistantStreamEvent[] = []; if (plan.budget.warning) statuses.push({ type: "status", roundId: input.roundId, code: "context_warning", label: "El contexto supera el umbral de aviso." });
   let contextItems = plan.items.map((item) => item.content);
   if (plan.budget.requiresCompaction) {
     const summarized = plan.items.filter((item) => item.kind === "message"); const summary = `Resumen de contexto previo (${summarized.length} mensajes): ${summarized.map((item) => item.content.slice(0, 512)).join(" ")}`;
     try { assertSafeForProvider(summary); assertNoBlockedTerms(summary, input.privacyBlockedTerms ?? []); } catch { throw new ProviderAdapterError("privacy", "privacy_compaction"); }
     const summaryTokens = await counted(adapter, input, apiKey, summary, signal); const compacted: ContextCandidate = { id: `${input.executionId ?? "legacy"}:summary`, kind: "message", content: summary, tokens: summaryTokens, relevance: 1, sourceId: `${input.executionId ?? "legacy"}:snapshot-source`, sanitizedHash: `summary-${summaryTokens}`, factKey: "context:summary", scope };
-    try { plan = new ContextPlanner().plan({ strategy: input.contextStrategy, responseMode: input.responseMode, candidates: [...plan.items.filter((item) => item.kind !== "message"), compacted], scope, contextWindow, promptTokens, toolSchemaTokens, safetyMarginPercent: input.safetyMarginPercent, warningThresholdPercent: input.warningThresholdPercent, compactionThresholdPercent: input.compactionThresholdPercent }); } catch { throw new ProviderAdapterError("context", "context_compaction_failed"); }
+    try { plan = new ContextPlanner().plan({ strategy: input.contextStrategy, responseMode: input.responseMode, candidates: [...plan.items.filter((item) => item.kind !== "message"), compacted], scope, contextWindow, promptTokens, toolSchemaTokens, outputTokens, safetyMarginPercent: input.safetyMarginPercent, warningThresholdPercent: input.warningThresholdPercent, compactionThresholdPercent: input.compactionThresholdPercent }); } catch { throw new ProviderAdapterError("context", "context_compaction_failed"); }
     if (plan.budget.requiresCompaction) throw new ProviderAdapterError("context", "context_compaction_insufficient");
     contextItems = plan.items.map((item) => item.content);
     const lineage = input.compactionLineage;
@@ -183,28 +203,36 @@ async function messagesFor(input: ChatRequest, adapter: AIProviderAdapter, apiKe
   const context = contextItems.join("\n\n");
   const analysisSummary = input.analysisId && input.analysisContext ? `\n\nEstás en una aplicación de análisis retributivo. Análisis: ${input.analysisId}. Matrículas asociadas: ${input.analysisContext.associatedPersonIds.join(", ") || "ninguna"}. Matrícula principal: ${input.analysisContext.primaryPersonId ?? "ninguna"}. Estrategia: ${input.analysisContext.strategy}. Periodos disponibles: ${input.analysisContext.periods.join(", ") || "no informados"}. Tipos de fuentes: ${input.analysisContext.sourceTypes.join(", ") || "no informados"}. Resumen agregado: ${JSON.stringify(input.analysisContext.aggregate)}. En este contexto, matrícula es el identificador interno de una persona trabajadora. No debe interpretarse como matrícula de vehículo, universidad, aeronave, patente ni otro significado externo.` : "";
   const toolInstruction = tools.length
-    ? "\n\nPara consultas sobre datos del análisis, debes usar primero la herramienta local adecuada y responder únicamente con los resultados devueltos. Para una matrícula concreta, no respondas todavía: solicita primero su ficha mediante una herramienta. Cuando la consulta sea amplia sobre una matrícula, enumera primero todos los conceptos descuadrados; después separa claramente los hechos comprobados, la causa probable con su confianza y la evidencia pendiente de confirmar. No termines tras mostrar solo los totales por bloque. Usa herramientas adicionales únicamente si se pide un detalle posterior que no esté incluido en la evidencia completa."
+    ? input.toolPolicy === "none"
+      ? "\n\nLa recuperación local ha finalizado. Sintetiza ahora la respuesta exclusivamente con los resultados proporcionados y no solicites ni simules más herramientas. Presenta el contexto laboral y los totales; enumera todos los conceptos descuadrados comparando Registro y recibos; resume los periodos y los recuentos de conceptos disponibles; y separa claramente los hechos comprobados, la causa probable con su confianza y la evidencia pendiente de confirmar. Los recuentos descritos deben coincidir con completeness. La fuente estructurada conserva el detalle completo de todos los conceptos y periodos."
+      : "\n\nPara consultas sobre datos del análisis, debes usar primero la herramienta local adecuada y responder únicamente con los resultados devueltos. Para una matrícula concreta, no respondas todavía: solicita primero su ficha mediante una herramienta. Cuando la consulta sea amplia sobre una matrícula, presenta el contexto laboral y los totales; enumera todos los conceptos descuadrados comparando Registro y recibos; resume los periodos y los recuentos de conceptos disponibles; y separa claramente los hechos comprobados, la causa probable con su confianza y la evidencia pendiente de confirmar. Los recuentos descritos deben coincidir con completeness. No termines tras mostrar solo los totales por bloque. La fuente estructurada conserva el detalle completo de todos los conceptos y periodos. Usa herramientas adicionales únicamente si se pide un detalle posterior que no esté incluido en la evidencia completa."
     : "";
   const messages: ProviderMessage[] = [{ role: "system", content: `${instruction}${analysisSummary}${toolInstruction}${context ? `\n\nContexto sanitizado:\n${context}` : ""}` }];
-  if (input.phase === "respond") { messages.push({ role: "user", content: input.question }, ...nativeToolHistory(input.toolHistory ?? [input.toolResults])); }
+  if (input.toolPolicy === "none" && input.phase !== "plan") {
+    const rounds = input.toolHistory ?? (input.toolResults?.length ? [input.toolResults] : []);
+    messages.push({ role: "user", content: `${input.question}\n\nResultados locales sanitizados para la síntesis final:\n${synthesisToolHistory(rounds)}` });
+  }
+  else if (input.phase === "respond") { messages.push({ role: "user", content: input.question }, ...nativeToolHistory(input.toolHistory ?? (input.toolResults ? [input.toolResults] : []))); }
   else if (input.phase === "continue") {
     if (input.toolHistory?.length && input.question) messages.push({ role: "user", content: input.question }, ...nativeToolHistory(input.toolHistory));
     else { messages.push({ role: "assistant", content: input.continuationContext ?? continuationInstruction }); if (input.toolResults?.length) messages.push(...nativeToolMessages(input.toolResults)); messages.push({ role: "user", content: continuationInstruction }); }
   }
   else messages.push({ role: "user", content: input.question });
-  const finalTokens = await counted(adapter, input, apiKey, messages.map((message) => message.content).join("\n") + JSON.stringify(tools), signal); if (finalTokens + 2_048 + Math.ceil(contextWindow * ((input.safetyMarginPercent ?? 10) / 100)) > contextWindow) throw new ProviderAdapterError("context", "context_overflow");
+  const finalTokens = await counted(adapter, input, apiKey, messages.map((message) => message.content).join("\n") + JSON.stringify(tools), signal); if (finalTokens + outputTokens + Math.ceil(contextWindow * ((input.safetyMarginPercent ?? 10) / 100)) > contextWindow) throw new ProviderAdapterError("context", "context_overflow");
   return { messages, statuses };
 }
 
 export function createChatService(resolveAdapter: ChatAdapterResolver = createProductionChatAdapterResolver()): ChatExecutionService {
-  return { async *execute(input, signal) { assertRequestSafe(input); const { adapter, apiKey } = await resolveAdapter(input); const toolNames = input.phase === "plan" ? input.tools : input.tools ?? ANALYSIS_TOOL_NAMES; const tools = providerTools(toolNames); const prepared = await messagesFor(input, adapter, apiKey, tools, signal); const { messages } = prepared; for (const status of prepared.statuses) yield status;
-    for (const result of input.phase === "plan" ? [] : input.toolResults ?? []) yield { type: "tool_result_ack", roundId: input.roundId, requestId: result.requestId };
-    if (tools.length) {
+  return { async *execute(input, signal) { assertRequestSafe(input); const { adapter, apiKey } = await resolveAdapter(input); const toolNames = input.phase === "plan" ? input.tools : input.tools ?? ANALYSIS_TOOL_NAMES; const tools = providerTools(toolNames); const maxOutputTokens = outputTokenLimit(input); const prepared = await messagesFor(input, adapter, apiKey, tools, maxOutputTokens, signal); const { messages } = prepared; for (const status of prepared.statuses) yield status;
+    const currentToolResults = input.phase === "plan" ? [] : input.toolResults ?? input.toolHistory?.at(-1) ?? [];
+    for (const result of currentToolResults) yield { type: "tool_result_ack", roundId: input.roundId, requestId: result.requestId };
+    if (tools.length && input.toolPolicy !== "none") {
       yield { type: "status", roundId: input.roundId, label: "Planificando herramientas" };
       const result = await adapter.planTools({ apiKey, signal, modelId: input.modelId, providerModelName: input.profile?.providerModelName, messages, tools });
       if (result.toolCalls.length) { for (const call of result.toolCalls) { if (!ANALYSIS_TOOL_NAMES.includes(call.name as AnalysisToolName)) throw new ProviderAdapterError("provider", "tool_not_allowed"); const tool = call.name as AnalysisToolName; ANALYSIS_TOOL_SCHEMAS[tool].input.parse(call.args); assertSafeForProvider(call.args); yield { type: "tool_request", roundId: input.roundId, requestId: call.id, tool, args: call.args, ...(call.providerContext ? { providerContext: call.providerContext } : {}) }; } yield { type: "done", roundId: input.roundId, finishReason: "tool_request" }; return; }
     }
-    for await (const event of adapter.streamResponse({ apiKey, signal, modelId: input.modelMetadata?.generationModelId ?? input.modelId, providerModelName: input.profile?.providerModelName, messages, tools, maxOutputTokens: Math.min(2_048, input.modelMetadata?.maxOutputTokens ?? input.profile?.maxOutputTokens ?? 2_048) })) { const converted = providerEvent(input, event); if (converted) yield converted; }
+    const responseTools = input.toolPolicy === "none" ? [] : tools;
+    for await (const event of adapter.streamResponse({ apiKey, signal, modelId: input.modelMetadata?.generationModelId ?? input.modelId, providerModelName: input.profile?.providerModelName, messages, tools: responseTools, maxOutputTokens })) { const converted = providerEvent(input, event); if (converted) yield converted; }
   } };
 }
 function providerEvent(input: ChatRequest, event: ProviderStreamEvent): AssistantStreamEvent | undefined { if (event.type === "text_delta") return { type: "text_delta", roundId: input.roundId, messageId: `${input.executionId ?? "legacy"}:message:${input.roundNumber}`, delta: event.delta }; if (event.type === "usage") return { type: "usage", roundId: input.roundId, usage: event.usage }; return { type: "done", roundId: input.roundId, finishReason: event.finishReason }; }

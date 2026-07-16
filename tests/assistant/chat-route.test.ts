@@ -8,6 +8,12 @@ function request(body: unknown, signal?: AbortSignal) {
   return new Request("http://localhost/api/assistant/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal });
 }
 const base = { conversationId: "c1", analysisId: "a1", roundId: "r1", roundNumber: 1, modelProfileId: "p1", modelId: "fake-model", responseMode: "strict", contextStrategy: "automatic" } as const;
+const completePersonEvidence = {
+  personId: "10048", laborContext: { workplace: "Centro", position: "Técnico", category: "A1" }, totals: { registro: 1, payroll: 2, difference: 1 },
+  blocks: { salary: { registro: 1, payroll: 2, difference: 1 }, salaryComplement: { registro: 0, payroll: 0, difference: 0 }, extraSalary: { registro: 0, payroll: 0, difference: 0 } },
+  status: "Diferencia", periods: [], registro: { concepts: [] }, payroll: { periods: [] }, comparisons: [], cuadre: {},
+  completeness: { registroConcepts: 0, payrollPeriods: 0, payrollConcepts: 0, comparisons: 0, mismatches: 0 },
+} as const;
 
 describe("POST /api/assistant/chat", () => {
   it("resolves a validated provider descriptor in a fresh chat runtime", async () => {
@@ -70,6 +76,26 @@ describe("POST /api/assistant/chat", () => {
       expect.objectContaining({ type: "text_delta", delta: "Hola" }),
       expect.objectContaining({ type: "done", finishReason: "STOP" }),
     ]));
+  });
+
+  it("flattens completed tool history, removes executable declarations and reserves a larger output for complete person evidence", async () => {
+    const planTools = vi.fn(async () => ({ toolCalls: [{ id: "redundant", name: "getPersonConcepts", args: { analysisId: "a1", personId: "10048" } }] }));
+    const streamResponse = vi.fn(async function* () { yield { type: "text_delta", delta: "Ficha completa" } as const; yield { type: "done", finishReason: "STOP" } as const; });
+    const adapter = { countTokens: vi.fn(async () => ({ tokens: 1, estimated: true })), planTools, streamResponse };
+    const service = createChatService(async () => ({ adapter: adapter as never, apiKey: "server-only" }));
+    const result = { requestId: "q1", tool: "getPersonProfile", args: { analysisId: "a1", personId: "10048" }, status: "success", data: completePersonEvidence } as const;
+    const events = [];
+
+    for await (const event of service.execute({ ...base, phase: "respond", question: "Dime todo sobre matrícula 10048", tools: ["getPersonProfile", "getPersonConcepts"], toolPolicy: "none", toolResults: [result], toolHistory: [[result]], modelMetadata: { contextWindow: 1_000_000, maxOutputTokens: 16_384 } } as never, new AbortController().signal)) events.push(event);
+
+    expect(planTools).not.toHaveBeenCalled();
+    expect(streamResponse).toHaveBeenCalledWith(expect.objectContaining({
+      maxOutputTokens: 8_192,
+      tools: [],
+      messages: expect.arrayContaining([expect.objectContaining({ role: "user", content: expect.stringContaining('"tool":"getPersonProfile"') })]),
+    }));
+    expect(streamResponse.mock.calls[0]?.[0].messages.some((message: { toolCalls?: unknown }) => message.toolCalls)).toBe(false);
+    expect(events).toEqual(expect.arrayContaining([expect.objectContaining({ type: "text_delta", delta: "Ficha completa" })]));
   });
 
   it("accepts more than 200 unique privacy terms within the shared request limits", async () => {

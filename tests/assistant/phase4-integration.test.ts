@@ -35,12 +35,14 @@ describe("phase 4 disconnected-path regressions", () => {
     expect(phases).toEqual(["plan", "respond", "continue"]);
   });
 
-  it("completes the primary-person flow with Gemini native tool context intact", async () => {
+  it("completes the primary-person flow by flattening native tool context for terminal synthesis", async () => {
     const planTools = vi.fn()
       .mockResolvedValueOnce({ toolCalls: [{ id: "q-person", name: "getPersonProfile", args: { analysisId: "a1", personId: "10048" }, providerContext: { kind: "gemini", partIndex: 0, thoughtSignature: "signature-person" } }] })
       .mockResolvedValueOnce({ toolCalls: [] });
-    const streamResponse = vi.fn(async function* (request: { messages: unknown }) {
-      expect(JSON.stringify(request.messages)).toContain("signature-person");
+    const streamResponse = vi.fn(async function* (request: { messages: unknown; tools: unknown[] }) {
+      expect(JSON.stringify(request.messages)).not.toContain("signature-person");
+      expect(JSON.stringify(request.messages)).toContain("10048");
+      expect(request.tools).toEqual([]);
       yield { type: "text_delta", delta: "Ficha preparada" } as const;
       yield { type: "done", finishReason: "STOP" } as const;
     });
@@ -52,8 +54,8 @@ describe("phase 4 disconnected-path regressions", () => {
     const provider = { providerId: "provider-gemini", providerType: "gemini", baseUrl: "https://generativelanguage.googleapis.com", envVarName: "GEMINI_API_KEY" } as const;
 
     await expect(new AssistantOrchestrator({ transport, registry, validateRequestScope }).send({ conversationId: "c1", analysisId: "a1", question: "dime todo lo que puedas de matrícula 10048", providerId: provider.providerId, provider, modelProfileId: "p1", modelId: "gemini-3.1-flash-lite", modelMetadata: { contextWindow: 1_000_000 }, responseMode: "strict", contextStrategy: "associated_people" })).resolves.toMatchObject({ text: "Ficha preparada", rounds: 2 });
-    expect(planTools).toHaveBeenCalledTimes(2);
-    expect(streamResponse).toHaveBeenCalledWith(expect.objectContaining({ tools: [expect.objectContaining({ name: "getPersonProfile" })] }));
+    expect(planTools).toHaveBeenCalledTimes(1);
+    expect(streamResponse).toHaveBeenCalledWith(expect.objectContaining({ tools: [] }));
   });
 
   it("rejects more than 5000 unique privacy terms before transport", async () => {
@@ -120,7 +122,8 @@ describe("phase 4 disconnected-path regressions", () => {
     const source = { id: "s1", conversationId: "c1", analysisId: "a1", sourceType: "analysis", sanitizedSourceLabel: "Análisis retributivo", availability: "available", conceptIds: [], excerpt: "Resumen estructurado", sanitizedHash: "h1" };
     const registry = { names: ["getAnalysisSummary"], execute: vi.fn(), executeEnvelope: vi.fn(async () => ({ data: { summary: { uniquePeople: 1 } }, sources: [source] })) } as unknown as AnalysisToolRegistry;
     await new AssistantOrchestrator({ transport, registry, validateRequestScope }).send({ conversationId: "c1", analysisId: "a1", question: "Resumen", modelProfileId: "p1", modelId: "m1", responseMode: "strict", contextStrategy: "automatic" });
-    expect(transport.mock.calls[1][0]).toEqual(expect.objectContaining({ toolResults: [{ requestId: "req-1", tool: "getAnalysisSummary", args: { analysisId: "a1" }, status: "success", data: { summary: { uniquePeople: 1 } }, sources: [source] }] }));
+    expect(transport.mock.calls[1][0]).toEqual(expect.objectContaining({ toolHistory: [[{ requestId: "req-1", tool: "getAnalysisSummary", args: { analysisId: "a1" }, status: "success", data: { summary: { uniquePeople: 1 } }, sources: [source] }]] }));
+    expect(transport.mock.calls[1][0]).not.toHaveProperty("toolResults");
   });
 
   it("rejects an event from another round and cancels an oversized NDJSON reader", async () => {

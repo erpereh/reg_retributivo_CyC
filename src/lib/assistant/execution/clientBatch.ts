@@ -1,6 +1,6 @@
 import { assertSafeForProvider } from "@/lib/assistant/privacy/assertions";
 import type { AnalysisToolName, AnalysisToolRegistry } from "@/lib/assistant/tools/registry";
-import type { ProviderToolContext } from "@/lib/assistant/providers/types";
+import { ProviderAdapterError, type ProviderToolContext } from "@/lib/assistant/providers/types";
 
 export interface RequestedLocalTool { readonly requestId: string; readonly tool: AnalysisToolName; readonly args: unknown; readonly providerContext?: ProviderToolContext }
 export interface SettledLocalTool {
@@ -29,9 +29,10 @@ export async function executeAtomicToolRound(registry: AnalysisToolRegistry, req
       assertSafeForProvider(envelope);
       const empty = envelope.data === null || (Array.isArray(envelope.data) && envelope.data.length === 0);
       return { requestId: request.requestId, tool: request.tool, args: request.args, ...(request.providerContext ? { providerContext: request.providerContext } : {}), status: empty ? "empty" : "success", data: envelope.data, sources: envelope.sources };
-    } catch {
+    } catch (error) {
       const cancelled = controller.signal.aborted;
-      return { requestId: request.requestId, tool: request.tool, args: request.args, ...(request.providerContext ? { providerContext: request.providerContext } : {}), status: cancelled ? "cancelled" : "failed", error: { code: cancelled ? "cancelled" : "tool_failed", message: "No se pudo completar la consulta local." }, sources: [] };
+      const code = cancelled ? "cancelled" : error instanceof ProviderAdapterError ? error.code : "tool_failed";
+      return { requestId: request.requestId, tool: request.tool, args: request.args, ...(request.providerContext ? { providerContext: request.providerContext } : {}), status: cancelled ? "cancelled" : "failed", error: { code, message: "No se pudo completar la consulta local." }, sources: [] };
     } finally { clearTimeout(timer); options.signal.removeEventListener("abort", abort); }
   }));
 }

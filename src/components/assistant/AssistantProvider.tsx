@@ -903,7 +903,8 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       pendingFakeRequestRef.current = { kind: "general", request: { systemPrompt: TEST_SYSTEM_PROMPT, question: content, messageId: "pending" } };
     }
     const assistantMessage: ChatMessage = {
-      ...userMessage, id: createId("message"), role: "assistant", content: "", status: "streaming", sourceRefIds, createdAt: now(),
+      ...userMessage, id: createId("message"), role: "assistant", content: "", status: "streaming", sourceRefIds,
+      createdAt: new Date(Math.max(Date.parse(now()), Date.parse(createdAt) + 1)).toISOString(),
     };
     const runToken = beginConversationRun(authoritative.id);
     const runIsCurrent = () => isConversationRunCurrent(runToken);
@@ -1083,8 +1084,10 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       if (timer) clearTimeout(timer);
       timer = undefined;
       const content = rendered();
-      const nextMessages = messagesRef.current.map((message) => message.id === messageId ? { ...message, content, status: "completed" as const } : message);
-      const persisted = await persistRunRound(selected.id, nextMessages, sources, runIsCurrent);
+      const nextSources = [...sources.filter((source) => !result.sources.some((recovered) => recovered.id === source.id)), ...result.sources];
+      const sourceRefIds = result.sources.map((source) => source.id);
+      const nextMessages = messagesRef.current.map((message) => message.id === messageId ? { ...message, content, status: "completed" as const, sourceRefIds } : message);
+      const persisted = await persistRunRound(selected.id, nextMessages, nextSources, runIsCurrent);
       if (persisted && runIsCurrent()) {
         setNotice(mode === "retry" ? "Respuesta reanudada" : "La respuesta se ha regenerado");
         setAnnouncement(`${mode === "retry" ? "Respuesta reanudada" : "Respuesta regenerada"}: ${content}`);
@@ -1105,7 +1108,8 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
         messagesRef.current = nextMessages;
         setMessages(nextMessages);
         await persistRunRound(selected.id, nextMessages, sources, runIsCurrent).catch(() => false);
-        if (runIsCurrent()) { setError("No se pudo completar la respuesta del Asistente."); setAnnouncement("La respuesta ha fallado"); }
+        const failureMessage = caught instanceof ProviderAdapterError ? caught.publicMessage : "No se pudo completar la respuesta del Asistente.";
+        if (runIsCurrent()) { setError(failureMessage); setAnnouncement("La respuesta ha fallado"); }
       }
     } finally {
       if (timer) clearTimeout(timer);

@@ -31,6 +31,30 @@ function assertRequestWithinPrivacyEnvelope(body: Readonly<Record<string, unknow
   if (terms.length > MAX_PRIVACY_BLOCKED_TERMS || serializedRequestBytes(body) > MAX_CHAT_REQUEST_BYTES) throw new ProviderAdapterError("context", "privacy_scope_too_large");
 }
 
+function compactToolResultForTransport(value: unknown): unknown {
+  if (!value || typeof value !== "object") return value;
+  const entry = value as Record<string, unknown>;
+  const sources = Array.isArray(entry.sources) ? entry.sources.map((source) => {
+    if (!source || typeof source !== "object") return source;
+    const { presentation: _presentation, ...reference } = source as Record<string, unknown>;
+    void _presentation;
+    return reference;
+  }) : entry.sources;
+  return { ...entry, ...(sources === undefined ? {} : { sources }) };
+}
+
+function compactRequestForTransport(body: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  const history = Array.isArray(body.toolHistory)
+    ? body.toolHistory.map((round) => Array.isArray(round) ? round.map(compactToolResultForTransport) : round)
+    : undefined;
+  if (history) {
+    const { toolResults: _duplicatedLatestRound, ...rest } = body;
+    void _duplicatedLatestRound;
+    return { ...rest, toolHistory: history };
+  }
+  return { ...body, ...(Array.isArray(body.toolResults) ? { toolResults: body.toolResults.map(compactToolResultForTransport) } : {}) };
+}
+
 function recordScopeMatches(record: Record<string, unknown>, conversationId: string, analysisId?: string): boolean {
   const scope = record.scope as { type?: string; analysisId?: string; conversationId?: string } | undefined;
   return scope?.type === "analysis" ? Boolean(analysisId) && scope.analysisId === analysisId : scope?.type === "conversation" && scope.conversationId === conversationId;
@@ -99,14 +123,14 @@ export function createRepositoryBoundAssistantOrchestrator(dependencies: Omit<Or
   return new AssistantOrchestrator({ ...dependencies, validateRequestScope: createRepositoryRequestScopeValidator(repositories) });
 }
 
-async function readEvents(response: Response, onEvent: (event: AssistantStreamEvent) => void): Promise<void> {
+async function readEvents(response: Response, onEvent: (event: AssistantStreamEvent) => void, maxTextLength = 16_384): Promise<void> {
   if (!response.ok || !response.body) throw new Error("La ruta de chat no respondió correctamente.");
   const decoder = new IncrementalNdjsonDecoder(); const reader = response.body.getReader(); let eventCount = 0; let textLength = 0;
   let terminal = false;
   const bounded = (event: AssistantStreamEvent) => {
     if (terminal) return;
     eventCount += 1; if (event.type === "text_delta") textLength += event.delta.length;
-    if (eventCount > 1_000 || textLength > 16_384) throw new Error("El stream del asistente supera el tamaño permitido.");
+    if (eventCount > 1_000 || textLength > maxTextLength) throw new Error("El stream del asistente supera el tamaño permitido.");
     onEvent(event);
     if (event.type === "done" || event.type === "error") terminal = true;
   };
@@ -126,6 +150,14 @@ async function readEvents(response: Response, onEvent: (event: AssistantStreamEv
 export class AssistantRunStoppedError extends Error {
   readonly status = "stopped" as const;
   constructor(readonly partialText: string, readonly events: readonly AssistantStreamEvent[]) { super("La respuesta fue detenida."); this.name = "AssistantRunStoppedError"; }
+}
+
+function hasSuccessfulPersonProfile(toolHistory: readonly (readonly unknown[])[]): boolean {
+  return toolHistory.some((round) => round.some((entry) => {
+    if (!entry || typeof entry !== "object") return false;
+    const result = entry as { tool?: unknown; status?: unknown; data?: unknown; result?: unknown };
+    return result.tool === "getPersonProfile" && (result.status === undefined || result.status === "success") && (result.data !== undefined || result.result !== undefined);
+  }));
 }
 
 export class AssistantOrchestrator {
@@ -168,10 +200,12 @@ export class AssistantOrchestrator {
           const legacyContextWindow = input.profile?.detectedContextWindow ?? input.profile?.manualContextWindow;
           const modelMetadata = input.modelMetadata ?? (legacyContextWindow ? { contextWindow: legacyContextWindow, ...(input.profile?.maxOutputTokens ? { maxOutputTokens: input.profile.maxOutputTokens } : {}) } : undefined);
           const privacyBlockedTerms = canonicalPrivacyTerms(input.privacyBlockedTerms ?? this.dependencies.registry.privacyBlockedTerms ?? []);
-          const body: Record<string, unknown> = { phase, executionId, conversationId: input.conversationId, analysisId: input.analysisId, analysisContext: input.analysisContext, roundId, roundNumber: posts, providerId: input.providerId, provider: input.provider, modelProfileId: producer.id, modelId: producer.modelId, modelMetadata, privacyBlockedTerms, contextCandidates: input.contextCandidates, responseMode: input.responseMode, contextStrategy: input.contextStrategy, tools: this.dependencies.registry.names, ...(phase === "plan" ? { question: input.question } : phase === "respond" ? { question: input.question, toolResults, toolHistory } : { question: input.question, toolResults, toolHistory, ...(continuation ? { interruptedMessageId: continuation.messageId, continuationContext: continuation.context } : {}) }) };
+          const toolPolicy = posts === 3 || hasSuccessfulPersonProfile(toolHistory) ? "none" : "auto";
+          const body: Record<string, unknown> = { phase, toolPolicy, executionId, conversationId: input.conversationId, analysisId: input.analysisId, analysisContext: input.analysisContext, roundId, roundNumber: posts, providerId: input.providerId, provider: input.provider, modelProfileId: producer.id, modelId: producer.modelId, modelMetadata, privacyBlockedTerms, contextCandidates: input.contextCandidates, responseMode: input.responseMode, contextStrategy: input.contextStrategy, tools: this.dependencies.registry.names, ...(phase === "plan" ? { question: input.question } : phase === "respond" ? { question: input.question, toolResults, toolHistory } : { question: input.question, toolResults, toolHistory, ...(continuation ? { interruptedMessageId: continuation.messageId, continuationContext: continuation.context } : {}) }) };
           if (input.compaction) body.compactionLineage = { decisions: input.compaction.decisions, figures: input.compaction.figures, sourceIds: input.compaction.sourceIds, actionIds: input.compaction.actionIds, personIds: input.compaction.personIds, analysisVersion: input.compaction.analysisVersion };
-          Object.keys(body).forEach((key) => body[key] === undefined && delete body[key]); assertRequestWithinPrivacyEnvelope(body, privacyBlockedTerms); const { apiKey: _key, privacyBlockedTerms: _blocked, ...audited } = body; void _key; void _blocked; assertSafeForProvider(withoutOpaqueProviderSignatures(audited)); await this.dependencies.validateRequestScope(body, runContext); assertActive();
-          const events: AssistantStreamEvent[] = []; await readEvents(await this.dependencies.transport(body, controller.signal), (event) => { if (event.roundId !== roundId) throw new Error("El evento no pertenece a la ejecución activa."); this.dependencies.registry.assertSafeOutput?.(withoutOpaqueProviderSignatures(event)); const normalized = event.type === "text_delta" ? { ...event, messageId } : event; events.push(normalized); allEvents.push(normalized); if (normalized.type === "text_delta") { text += normalized.delta; input.onTextDelta?.(normalized.delta); } }); assertActive();
+          Object.keys(body).forEach((key) => body[key] === undefined && delete body[key]); const { apiKey: _key, privacyBlockedTerms: _blocked, ...audited } = body; void _key; void _blocked; assertSafeForProvider(withoutOpaqueProviderSignatures(audited)); await this.dependencies.validateRequestScope(body, runContext); assertActive(); const transportBody = compactRequestForTransport(body); assertRequestWithinPrivacyEnvelope(transportBody, privacyBlockedTerms);
+          const maxTextLength = toolPolicy === "none" && hasSuccessfulPersonProfile(toolHistory) ? 65_536 : 16_384;
+          const events: AssistantStreamEvent[] = []; await readEvents(await this.dependencies.transport(transportBody, controller.signal), (event) => { if (event.roundId !== roundId) throw new Error("El evento no pertenece a la ejecución activa."); this.dependencies.registry.assertSafeOutput?.(withoutOpaqueProviderSignatures(event)); const normalized = event.type === "text_delta" ? { ...event, messageId } : event; events.push(normalized); allEvents.push(normalized); if (normalized.type === "text_delta") { text += normalized.delta; input.onTextDelta?.(normalized.delta); } }, maxTextLength); assertActive();
           for (const status of events) if (status.type === "status" && status.code === "context_compacted" && status.snapshot) { await this.dependencies.persistSnapshot?.(status.snapshot, runContext); assertActive(); }
           const errorEvent = events.find((event): event is Extract<AssistantStreamEvent, { type: "error" }> => event.type === "error"); if (errorEvent) throw new ProviderAdapterError(errorEvent.classification ?? (errorEvent.retryable ? "transient" : "provider"), errorEvent.code);
           const requests = events.filter((event): event is Extract<AssistantStreamEvent, { type: "tool_request" }> => event.type === "tool_request");
