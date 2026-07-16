@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { createProvidersPostHandler } from "@/lib/assistant/server/providersRoute";
+import { providerRuntimeDescriptor, type ProviderConfig } from "@/lib/assistant/catalog/domain";
 import type { ProviderRuntimeService } from "@/lib/assistant/server/providerRuntime";
 
-const config = { id: "provider-1", providerType: "openai", displayName: "OpenAI", baseUrl: "https://api.openai.com/v1", envVarName: "OPENAI_API_KEY", enabled: true, connectionStatus: "active", createdAt: "2026-01-01", updatedAt: "2026-01-01" };
+const config: ProviderConfig = { id: "provider-1", providerType: "openai", displayName: "OpenAI", baseUrl: "https://api.openai.com/v1", envVarName: "OPENAI_API_KEY", enabled: true, connectionStatus: "active", createdAt: "2026-01-01", updatedAt: "2026-01-01" };
 const service = {
   register: vi.fn().mockResolvedValue({ providerId: "provider-1", keyStatus: "configured" }),
   status: vi.fn(), catalog: vi.fn(), checkCompatibility: vi.fn(), resolve: vi.fn(),
@@ -19,5 +20,15 @@ describe("POST /api/assistant/providers", () => {
     const response = await createProvidersPostHandler(service)(new Request("http://localhost/api/assistant/providers", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ operation: "register", config, apiKey: "secret" }) }));
     expect(response.status).toBe(400);
     expect(JSON.stringify(await response.json())).not.toContain("secret");
+  });
+
+  it("checks one model from a validated descriptor without relying on prior registration", async () => {
+    service.checkCompatibility = vi.fn().mockResolvedValue({ connection: true, streaming: true, tools: true });
+    const provider = providerRuntimeDescriptor(config);
+
+    const response = await createProvidersPostHandler(service)(new Request("http://localhost/api/assistant/providers", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ operation: "compatibility", provider, modelId: "models/gemini-test" }) }));
+
+    expect(response.status).toBe(200);
+    expect(service.checkCompatibility).toHaveBeenCalledWith(provider, "models/gemini-test", expect.any(AbortSignal));
   });
 });

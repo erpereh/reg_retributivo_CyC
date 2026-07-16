@@ -17,6 +17,22 @@ export interface ProviderConfig {
   readonly updatedAt: string;
 }
 
+export interface ProviderRuntimeDescriptor {
+  readonly providerId: string;
+  readonly providerType: ProviderType;
+  readonly baseUrl: string;
+  readonly envVarName: string;
+}
+
+export function providerRuntimeDescriptor(config: ProviderConfig): ProviderRuntimeDescriptor {
+  return {
+    providerId: config.id,
+    providerType: config.providerType,
+    baseUrl: normalizeBaseUrl(config.baseUrl),
+    envVarName: config.envVarName,
+  };
+}
+
 export interface ModelCapabilities {
   readonly chat: CapabilityState;
   readonly streaming: CapabilityState;

@@ -5,7 +5,7 @@ import {
   sanitizeChatContent, type AssistantSettings, type ChatAction, type ChatEvent, type ChatMessage,
   type ContextStrategy, type Conversation, type ModelPreferences, type PersistedDocumentMetadata, type ResponseMode, type SourceReference,
 } from "@/lib/assistant/domain";
-import { applyCompleteCatalogRefresh, catalogKey, type ModelCatalogEntry, type ProviderConfig } from "@/lib/assistant/catalog/domain";
+import { applyCompleteCatalogRefresh, catalogKey, providerRuntimeDescriptor, type ModelCatalogEntry, type ProviderConfig } from "@/lib/assistant/catalog/domain";
 import { generalModelCompatibility, modelCompatibility } from "@/lib/assistant/catalog/compatibility";
 import { ProviderAdapterError } from "@/lib/assistant/providers/types";
 import { GENERAL_RETRIBUTIVO_PROMPT, type FakeAssistantAdapter } from "@/lib/assistant/providers/fakeAdapter";
@@ -101,6 +101,7 @@ export interface AssistantContextValue {
   providerConfigs: ProviderConfig[];
   modelCatalog: ModelCatalogEntry[];
   modelPreferences: ModelPreferences;
+  checkingCompatibilityEntryIds: readonly string[];
   saveProviderConfig(config: ProviderConfig): Promise<void>;
   deleteProviderConfig(providerId: string): Promise<void>;
   checkProvider(providerId: string): Promise<void>;
@@ -152,6 +153,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
   const messagesRef = useRef<ChatMessage[]>([]);
   const currentAnalysisVersionRef = useRef<{ analysisId: string; analysisVersion: string } | undefined>(undefined);
   const resolvingActionIdsRef = useRef(new Set<string>());
+  const compatibilityControllersRef = useRef(new Map<string, AbortController>());
   const mountedRef = useRef(true);
   const [ready, setReady] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -179,6 +181,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
   const [providerConfigs, setProviderConfigs] = useState<ProviderConfig[]>([]);
   const [modelCatalog, setModelCatalog] = useState<ModelCatalogEntry[]>([]);
   const [modelPreferences, setModelPreferences] = useState<ModelPreferences>({ id: "model-preferences", favoriteCatalogEntryIds: [], recentCatalogEntryIds: [], updatedAt: now() });
+  const [checkingCompatibilityEntryIds, setCheckingCompatibilityEntryIds] = useState<string[]>([]);
   const registeredProviderIdsRef = useRef(new Set<string>());
 
   useEffect(() => { activeAnalysisRef.current = activeAnalysis; }, [activeAnalysis]);
@@ -374,6 +377,8 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       mountedRef.current = false;
       orchestratorRef.current?.stop();
       orchestratorRef.current = undefined;
+      for (const controller of compatibilityControllersRef.current.values()) controller.abort();
+      compatibilityControllersRef.current.clear();
       repositoriesRef.current?.close();
       repositoriesRef.current = undefined;
     };
@@ -406,7 +411,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     const config = providerConfigs.find((item) => item.id === providerId);
     const repositories = repositoriesRef.current;
     if (!config || !repositories) return;
-    const result = await providerOperation({ operation: "status", providerId });
+    const result = await providerOperation({ operation: "status", provider: providerRuntimeDescriptor(config) });
     const checked = { ...config, connectionStatus: result.keyStatus === "configured" ? "connected" : result.keyStatus === "not_configured" ? "missing_key" : "error", lastCheckedAt: now(), updatedAt: now() } as ProviderConfig;
     await repositories.providerConfigs.put(checked);
     setProviderConfigs((items) => items.map((item) => item.id === providerId ? checked : item));
@@ -418,7 +423,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     if (!config || !repositories) return;
     try {
       await providerOperation({ operation: "register", config });
-      const payload = await providerOperation({ operation: "catalog", providerId });
+      const payload = await providerOperation({ operation: "catalog", provider: providerRuntimeDescriptor(config) });
       const completion = payload.completion;
       const entries = Array.isArray(payload.models) ? payload.models as ModelCatalogEntry[] : [];
       if (completion !== "complete" && completion !== "valid_empty") throw new Error("catalog_refresh_incomplete");
@@ -440,19 +445,36 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
   const deleteProviderConfig = useCallback((providerId: string) => serializeConfigurationMutation(async () => {
     const repositories = repositoriesRef.current;
     if (!repositories) return;
+    for (const entry of modelCatalog.filter((item) => item.providerId === providerId)) {
+      compatibilityControllersRef.current.get(entry.id)?.abort();
+      compatibilityControllersRef.current.delete(entry.id);
+    }
+    setCheckingCompatibilityEntryIds((items) => items.filter((id) => !modelCatalog.some((entry) => entry.id === id && entry.providerId === providerId)));
     await repositories.deleteProviderConfiguration(providerId);
     setProviderConfigs((items) => items.filter((item) => item.id !== providerId));
     setModelCatalog((items) => items.filter((item) => item.providerId !== providerId));
-  }), [serializeConfigurationMutation]);
+  }), [modelCatalog, serializeConfigurationMutation]);
 
   const checkModelCompatibility = useCallback(async (entry: ModelCatalogEntry) => {
     const repositories = repositoriesRef.current;
-    if (!repositories) return;
-    const result = await providerOperation({ operation: "compatibility", providerId: entry.providerId, modelId: entry.apiModelId });
-    const checked: ModelCatalogEntry = { ...entry, capabilities: { ...entry.capabilities, chat: Boolean(result.connection), streaming: Boolean(result.streaming), tools: Boolean(result.tools) }, metadataSource: "verified", compatibilityCheckedAt: now() };
-    await repositories.modelCatalog.put(checked);
-    setModelCatalog((items) => items.map((item) => item.id === checked.id ? checked : item));
-  }, [providerOperation]);
+    const config = providerConfigs.find((item) => item.id === entry.providerId && item.enabled);
+    if (!repositories || !config || compatibilityControllersRef.current.has(entry.id)) return;
+    const controller = new AbortController();
+    compatibilityControllersRef.current.set(entry.id, controller);
+    setCheckingCompatibilityEntryIds((items) => [...new Set([...items, entry.id])]);
+    setError(undefined);
+    try {
+      const result = await providerOperation({ operation: "compatibility", provider: providerRuntimeDescriptor(config), modelId: entry.apiModelId }, controller.signal);
+      const checked: ModelCatalogEntry = { ...entry, capabilities: { ...entry.capabilities, chat: Boolean(result.connection), streaming: Boolean(result.streaming), tools: Boolean(result.tools) }, metadataSource: "verified", compatibilityCheckedAt: now() };
+      await repositories.modelCatalog.put(checked);
+      setModelCatalog((items) => items.map((item) => item.id === checked.id ? checked : item));
+    } catch {
+      if (!controller.signal.aborted) setError("No se pudo comprobar la compatibilidad del modelo. Puedes volver a intentarlo.");
+    } finally {
+      if (compatibilityControllersRef.current.get(entry.id) === controller) compatibilityControllersRef.current.delete(entry.id);
+      if (mountedRef.current) setCheckingCompatibilityEntryIds((items) => items.filter((id) => id !== entry.id));
+    }
+  }, [providerConfigs, providerOperation]);
 
   const persistModelPreferences = useCallback(async (next: ModelPreferences) => {
     await repositoriesRef.current?.saveModelPreferences(next);
@@ -810,7 +832,8 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     const createdAt = now();
     const selectedCatalogEntry = modelCatalog.find((entry) => entry.providerId === conversation.providerId && entry.canonicalModelId === conversation.modelId
       && entry.availability === "available" && entry.capabilities.chat === true && (conversation.type === "general" || entry.capabilities.tools === true));
-    if (!selectedCatalogEntry && !adapter) {
+    const selectedProviderConfig = selectedCatalogEntry ? providerConfigs.find((provider) => provider.id === selectedCatalogEntry.providerId && provider.enabled) : undefined;
+    if ((!selectedCatalogEntry || !selectedProviderConfig) && !adapter) {
       setError("No hay modelos configurados.");
       return;
     }
@@ -893,7 +916,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       }
       const result = await orchestratorRef.current!.send({
         conversationId: conversation.id, ...(conversation.type === "analysis" ? { analysisId: conversation.analysisId } : {}), question: content, assistantMessageId: assistantMessage.id,
-        ...(analysisContext ? { analysisContext } : {}), ...(selectedCatalogEntry ? { providerId: selectedCatalogEntry.providerId, modelMetadata: { contextWindow: selectedCatalogEntry.contextWindow ?? 8_192, ...(selectedCatalogEntry.maxOutputTokens ? { maxOutputTokens: selectedCatalogEntry.maxOutputTokens } : {}), generationModelId: selectedCatalogEntry.generationModelId } } : {}), modelProfileId, modelId,
+        ...(analysisContext ? { analysisContext } : {}), ...(selectedCatalogEntry && selectedProviderConfig ? { providerId: selectedCatalogEntry.providerId, provider: providerRuntimeDescriptor(selectedProviderConfig), modelMetadata: { contextWindow: selectedCatalogEntry.contextWindow ?? 8_192, ...(selectedCatalogEntry.maxOutputTokens ? { maxOutputTokens: selectedCatalogEntry.maxOutputTokens } : {}), generationModelId: selectedCatalogEntry.generationModelId } } : {}), modelProfileId, modelId,
         responseMode: conversation.responseMode, contextStrategy: conversation.contextStrategy, onTextDelta,
       });
       if (!runIsCurrent()) return;
@@ -936,7 +959,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       if (activeRunTokenRef.current === runToken) activeRunTokenRef.current = undefined;
       activeScopeSnapshotRef.current = undefined;
     }
-  }, [activeAnalysis, beginConversationRun, conversation, documents, isConversationRunCurrent, messages, modelCatalog, persistRunRound, selectionLoading, sources, streaming]);
+  }, [activeAnalysis, beginConversationRun, conversation, documents, isConversationRunCurrent, messages, modelCatalog, persistRunRound, providerConfigs, selectionLoading, sources, streaming]);
 
   const stop = useCallback(() => {
     const token = activeRunTokenRef.current;
@@ -973,6 +996,8 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     const authoritative = await repositoriesRef.current?.conversations.get(repeatTarget.selected.id);
     if (!authoritative || authoritative.status !== "active") return;
     const { selected, target, precedingUser, modelProfileId, modelId, catalogEntry } = repeatTarget;
+    const providerConfig = catalogEntry ? providerConfigs.find((provider) => provider.id === catalogEntry.providerId && provider.enabled) : undefined;
+    if (catalogEntry && !providerConfig) return;
     const pending = repeatTarget.pending;
     let runPending: PendingFakeRequest | undefined;
     if (pending) {
@@ -1002,7 +1027,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     try {
       const result = await orchestrator.send({
         conversationId: selected.id, ...(selected.type === "analysis" ? { analysisId: selected.analysisId } : {}), question: precedingUser.content,
-        assistantMessageId: target.id, modelProfileId, modelId, ...(catalogEntry ? { providerId: catalogEntry.providerId, modelMetadata: { contextWindow: catalogEntry.contextWindow ?? 8_192, ...(catalogEntry.maxOutputTokens ? { maxOutputTokens: catalogEntry.maxOutputTokens } : {}), generationModelId: catalogEntry.generationModelId } } : {}),
+        assistantMessageId: target.id, modelProfileId, modelId, ...(catalogEntry && providerConfig ? { providerId: catalogEntry.providerId, provider: providerRuntimeDescriptor(providerConfig), modelMetadata: { contextWindow: catalogEntry.contextWindow ?? 8_192, ...(catalogEntry.maxOutputTokens ? { maxOutputTokens: catalogEntry.maxOutputTokens } : {}), generationModelId: catalogEntry.generationModelId } } : {}),
         responseMode: target.responseMode, contextStrategy: target.contextStrategy,
         ...(canContinue ? { resumeFrom: { messageId: target.id, context: target.content } } : {}), onTextDelta,
       });
@@ -1042,7 +1067,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
       if (runIsCurrent()) setStreaming(false);
       if (activeRunTokenRef.current === runToken) activeRunTokenRef.current = undefined;
     }
-  }, [adapter, beginConversationRun, isConversationRunCurrent, persistRunRound, resolveRepeatTarget, selectionLoading, sources, streaming]);
+  }, [adapter, beginConversationRun, isConversationRunCurrent, persistRunRound, providerConfigs, resolveRepeatTarget, selectionLoading, sources, streaming]);
   const retryResponse = useCallback((messageId: string) => repeatResponse(messageId, "retry"), [repeatResponse]);
   const regenerateResponse = useCallback((messageId: string) => repeatResponse(messageId, "regenerate"), [repeatResponse]);
 
@@ -1227,9 +1252,9 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     ready, conversations, hasMoreConversations: Boolean(conversationCursor), conversation, messages, repeatableMessageIds, hasMoreMessages: Boolean(messageCursor), sources, revealedSourceIds, events, actions, actionOutputs, resolvingActionIds, snapshots, documents, indexJobs,
     streaming, selectionLoading, conversationTransitionPending, announcement, notice, error, createGeneralConversation, loadMoreConversations, selectConversation, renameConversation, archiveConversation, deleteConversation,
     loadMoreMessages, send, stop, retryResponse, regenerateResponse, copyResponse, acceptAction, rejectAction, convertToActiveAnalysis, associatePerson, continuePersonInAssistant, addPerson, removePerson, setPrimaryPerson,
-    requestPersonProfile, openModelSettings, updateConversationPreferences, selectConversationModel, availablePersonIds, people: conversation?.type === "analysis" && activeAnalysis && activeAnalysis.id === conversation.analysisId ? activeAnalysis.result.people : [], canSend: Boolean(adapter) || Boolean(conversation && providerConfigs.some((provider) => provider.id === conversation.providerId && provider.enabled) && modelCatalog.some((entry) => entry.providerId === conversation.providerId && entry.canonicalModelId === conversation.modelId && modelCompatibility(entry, conversation.type).selectable)), providerConfigs, modelCatalog, modelPreferences, saveProviderConfig, deleteProviderConfig, checkProvider, refreshProviderCatalog, checkModelCompatibility, toggleModelFavorite, assistantSettings,
+    requestPersonProfile, openModelSettings, updateConversationPreferences, selectConversationModel, availablePersonIds, people: conversation?.type === "analysis" && activeAnalysis && activeAnalysis.id === conversation.analysisId ? activeAnalysis.result.people : [], canSend: Boolean(adapter) || Boolean(conversation && providerConfigs.some((provider) => provider.id === conversation.providerId && provider.enabled) && modelCatalog.some((entry) => entry.providerId === conversation.providerId && entry.canonicalModelId === conversation.modelId && modelCompatibility(entry, conversation.type).selectable)), providerConfigs, modelCatalog, modelPreferences, checkingCompatibilityEntryIds, saveProviderConfig, deleteProviderConfig, checkProvider, refreshProviderCatalog, checkModelCompatibility, toggleModelFavorite, assistantSettings,
     updateAssistantSettings, clearAssistantContent,
-  }), [acceptAction, actionOutputs, actions, activeAnalysis, adapter, addPerson, announcement, archiveConversation, assistantSettings, associatePerson, availablePersonIds, checkModelCompatibility, checkProvider, clearAssistantContent, conversation, conversationCursor, conversations, deleteProviderConfig, documents,
+  }), [acceptAction, actionOutputs, actions, activeAnalysis, adapter, addPerson, announcement, archiveConversation, assistantSettings, associatePerson, availablePersonIds, checkModelCompatibility, checkProvider, checkingCompatibilityEntryIds, clearAssistantContent, conversation, conversationCursor, conversations, deleteProviderConfig, documents,
     convertToActiveAnalysis, continuePersonInAssistant, copyResponse, createGeneralConversation, deleteConversation, error, events, loadMoreConversations,
     loadMoreMessages, messageCursor, messages, modelCatalog, modelPreferences, notice, openModelSettings, providerConfigs, refreshProviderCatalog, regenerateResponse, removePerson, renameConversation, repeatableMessageIds, requestPersonProfile, retryResponse,
     conversationTransitionPending, indexJobs, rejectAction, revealedSourceIds, resolvingActionIds, saveProviderConfig, selectConversation, selectConversationModel, selectionLoading, send, setPrimaryPerson, snapshots, sources, stop, streaming, toggleModelFavorite, updateAssistantSettings, updateConversationPreferences]);

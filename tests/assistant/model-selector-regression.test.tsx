@@ -120,6 +120,50 @@ describe("assistant model selector regressions", () => {
     expect(screen.getByRole("button", { name: "Comprobar compatibilidad" })).toBeVisible();
   });
 
+  test("reports a compatibility failure without an unhandled exception or catalog mutation", async () => {
+    const factory = new IDBFactory();
+    vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    const unknown = model("unknown-tools", "unknown");
+    await seed(factory, "selector-compatibility-failure", [unknown], conversation("analysis"));
+    vi.stubGlobal("fetch", vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      if (body.operation === "compatibility") return Response.json({ code: "provider_not_allowed" }, { status: 502 });
+      return Response.json({ providerId: body.config?.id, keyStatus: "configured" });
+    }));
+
+    render(<AssistantProvider factory={factory} dbName="selector-compatibility-failure"><AssistantView /></AssistantProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Modelo de conversación: sin seleccionar" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Ver todos" }));
+    fireEvent.click(screen.getByRole("button", { name: "Comprobar compatibilidad" }));
+
+    expect(await screen.findByText("No se pudo comprobar la compatibilidad del modelo. Puedes volver a intentarlo.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Comprobar compatibilidad" })).toBeEnabled();
+    const repositories = await createIndexedDbRepositories({ factory, dbName: "selector-compatibility-failure" });
+    expect((await repositories.modelCatalog.get(unknown.id))?.capabilities.tools).toBe("unknown");
+    repositories.close();
+  });
+
+  test("disables an explicit compatibility probe while it is in flight", async () => {
+    const factory = new IDBFactory();
+    vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    await seed(factory, "selector-compatibility-pending", [model("unknown-tools", "unknown")], conversation("analysis"));
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => { finish = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      if (body.operation === "compatibility") { await pending; return Response.json({ connection: true, streaming: true, tools: true }); }
+      return Response.json({ providerId: body.config?.id, keyStatus: "configured" });
+    }));
+    render(<AssistantProvider factory={factory} dbName="selector-compatibility-pending"><AssistantView /></AssistantProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Modelo de conversación: sin seleccionar" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Ver todos" }));
+    fireEvent.click(screen.getByRole("button", { name: "Comprobar compatibilidad" }));
+
+    expect(screen.getByRole("button", { name: "Comprobar compatibilidad" })).toBeDisabled();
+    finish();
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Comprobar compatibilidad" })).toBeNull());
+  });
+
   test("shows unknown chat compatibility only in Ver todos without emptying general chat", async () => {
     const factory = new IDBFactory();
     vi.stubGlobal("IDBKeyRange", IDBKeyRange);

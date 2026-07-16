@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { createChatPostHandler, createChatService } from "@/lib/assistant/server/chatService";
+import { chatRequestSchema, createChatPostHandler, createChatService, createProductionChatAdapterResolver } from "@/lib/assistant/server/chatService";
 import { assistantStreamEventSchema } from "@/lib/assistant/schemas";
+import { createProviderRuntimeService } from "@/lib/assistant/server/providerRuntime";
+import type { AIProviderAdapter } from "@/lib/assistant/providers/types";
 
 function request(body: unknown, signal?: AbortSignal) {
   return new Request("http://localhost/api/assistant/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal });
@@ -8,6 +10,24 @@ function request(body: unknown, signal?: AbortSignal) {
 const base = { conversationId: "c1", analysisId: "a1", roundId: "r1", roundNumber: 1, modelProfileId: "p1", modelId: "fake-model", responseMode: "strict", contextStrategy: "automatic" } as const;
 
 describe("POST /api/assistant/chat", () => {
+  it("resolves a validated provider descriptor in a fresh chat runtime", async () => {
+    const provider = { providerId: "provider-gemini", providerType: "gemini", baseUrl: "https://generativelanguage.googleapis.com", envVarName: "GEMINI_API_KEY" } as const;
+    const parsed = chatRequestSchema.safeParse({ ...base, phase: "plan", question: "Consulta", tools: [], providerId: provider.providerId, provider });
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    const adapter = { countTokens: vi.fn(), planTools: vi.fn(), streamResponse: vi.fn() } as unknown as AIProviderAdapter;
+    const runtime = createProviderRuntimeService({ env: { GEMINI_API_KEY: "server-only" }, resolveAdapter: () => adapter, production: true });
+
+    await expect(createProductionChatAdapterResolver(runtime)(parsed.data)).resolves.toEqual({ adapter, apiKey: "server-only" });
+  });
+
+  it("rejects a provider descriptor whose stable id does not match providerId", () => {
+    const provider = { providerId: "provider-other", providerType: "gemini", baseUrl: "https://generativelanguage.googleapis.com", envVarName: "GEMINI_API_KEY" } as const;
+    const parsed = chatRequestSchema.safeParse({ ...base, phase: "plan", question: "Consulta", tools: [], providerId: "provider-gemini", provider });
+
+    expect(parsed.success).toBe(false);
+  });
+
   it("skips tool planning for a general request with no available tools", async () => {
     const planTools = vi.fn();
     const streamResponse = vi.fn(async function* () {

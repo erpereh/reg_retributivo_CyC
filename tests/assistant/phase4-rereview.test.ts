@@ -3,6 +3,7 @@ import { AssistantOrchestrator, createRepositoryRequestScopeValidator } from "@/
 import { createChatPostHandler, createChatService } from "@/lib/assistant/server/chatService";
 import { ProviderAdapterError, type AIProviderAdapter, type ProviderMessage } from "@/lib/assistant/providers/types";
 import type { AnalysisToolRegistry } from "@/lib/assistant/tools/registry";
+import type { ProviderRuntimeDescriptor } from "@/lib/assistant/catalog/domain";
 
 const profile = { id: "p1", name: "Fake", provider: "openai", baseUrl: "https://api.openai.com/v1", modelId: "m1", enabled: true, generalChatCompatible: true, analysisCompatible: true, supportsStreaming: true, supportsTools: true, supportsStructuredOutput: true, detectedContextWindow: 10_000, capabilitiesSource: "detected" } as const;
 const registry = { names: [], execute: vi.fn() } as unknown as AnalysisToolRegistry;
@@ -51,15 +52,16 @@ describe("phase 4 rereview integrated regressions", () => {
     expect(transport.mock.calls.length).toBeLessThanOrEqual(3);
   });
 
-  it("transports only a provider identifier and never a client-side key", async () => {
+  it("transports a minimal provider descriptor and never a client-side key", async () => {
     const bodies: Record<string, unknown>[] = [];
     const transport = vi.fn(async (body: Record<string, unknown>) => {
       bodies.push(body);
       return new Response(`${JSON.stringify({ type: "text_delta", roundId: body.roundId, messageId: "m", delta: "Respuesta válida" })}\n${JSON.stringify({ type: "done", roundId: body.roundId, finishReason: "stop" })}\n`);
     });
-    const result = await new AssistantOrchestrator({ transport, registry, validateRequestScope } as never).send({ conversationId: "c1", question: "Resumen", providerId: "provider-stable", modelId: "m1", modelMetadata: { contextWindow: 10_000 }, responseMode: "strict", contextStrategy: "automatic" });
+    const provider: ProviderRuntimeDescriptor = { providerId: "provider-stable", providerType: "openai", baseUrl: "https://api.openai.com/v1", envVarName: "OPENAI_API_KEY" };
+    const result = await new AssistantOrchestrator({ transport, registry, validateRequestScope } as never).send({ conversationId: "c1", question: "Resumen", providerId: "provider-stable", provider, modelProfileId: "provider-stable:m1", modelId: "m1", modelMetadata: { contextWindow: 10_000 }, responseMode: "strict", contextStrategy: "automatic" });
     expect(result).toMatchObject({ text: "Respuesta válida" });
-    expect(bodies[0]).toMatchObject({ providerId: "provider-stable", modelId: "m1" });
+    expect(bodies[0]).toMatchObject({ providerId: "provider-stable", provider, modelId: "m1" });
     expect(JSON.stringify(bodies[0])).not.toMatch(/apiKey|secret/i);
   });
 

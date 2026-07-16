@@ -13,11 +13,17 @@ const providerConfigSchema = z.object({
   lastCheckedAt: z.string().optional(), lastCatalogRefreshAt: z.string().optional(), lastCatalogErrorCode: z.string().optional(),
   createdAt: z.string(), updatedAt: z.string(),
 }).strict();
+const providerDescriptorSchema = z.object({
+  providerId: id,
+  providerType: z.enum(["gemini", "openai", "openrouter", "cerebras", "groq", "openai-compatible"]),
+  baseUrl: z.string().url().max(2_048),
+  envVarName: z.string().min(1).max(128),
+}).strict();
 const requestSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("register"), config: providerConfigSchema }).strict(),
-  z.object({ operation: z.literal("status"), providerId: id }).strict(),
-  z.object({ operation: z.literal("catalog"), providerId: id }).strict(),
-  z.object({ operation: z.literal("compatibility"), providerId: id, modelId: id }).strict(),
+  z.object({ operation: z.literal("status"), provider: providerDescriptorSchema }).strict(),
+  z.object({ operation: z.literal("catalog"), provider: providerDescriptorSchema }).strict(),
+  z.object({ operation: z.literal("compatibility"), provider: providerDescriptorSchema, modelId: id }).strict(),
 ]);
 
 const MAX_BYTES = 16 * 1024;
@@ -37,9 +43,9 @@ export function createProvidersPostHandler(service: ProviderRuntimeService) {
     try {
       switch (parsed.data.operation) {
         case "register": return Response.json(await service.register(parsed.data.config));
-        case "status": return Response.json(await service.status(parsed.data.providerId));
-        case "catalog": return Response.json(await service.catalog(parsed.data.providerId, request.signal));
-        case "compatibility": return Response.json(await service.checkCompatibility(parsed.data.providerId, parsed.data.modelId, request.signal));
+        case "status": return Response.json(await service.status(parsed.data.provider));
+        case "catalog": return Response.json(await service.catalog(parsed.data.provider, request.signal));
+        case "compatibility": return Response.json(await service.checkCompatibility(parsed.data.provider, parsed.data.modelId, request.signal));
       }
     } catch (error) {
       const code = error instanceof Error && ["provider_not_allowed", "provider_key_not_configured"].includes(error.message) ? error.message : "provider_error";
