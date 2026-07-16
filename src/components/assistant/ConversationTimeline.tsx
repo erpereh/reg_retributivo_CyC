@@ -21,7 +21,7 @@ export function ConversationTimeline({ assistant, onShowContextUsage, onOpenSour
           <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">Asistente retributivo</p>
           <h1 id="assistant-title" className="truncate text-lg font-bold text-ink">{conversation?.title ?? "Nueva conversación"}</h1>
         </div>
-        {conversation?.type === "general" ? <button type="button" className="btn-secondary ms-3 shrink-0" disabled={conversation.status !== "active" || assistant.streaming || assistant.selectionLoading} onClick={() => void assistant.convertToActiveAnalysis()}>Convertir al análisis activo</button> : null}
+        {conversation?.type === "general" ? <button type="button" className="btn-secondary ms-3 shrink-0" disabled={conversation.status !== "active" || assistant.streaming || assistant.selectionLoading || assistant.conversationTransitionPending} onClick={() => void assistant.convertToActiveAnalysis()}>Añadir contexto</button> : null}
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-5 sm:px-6">
         {!conversation ? (

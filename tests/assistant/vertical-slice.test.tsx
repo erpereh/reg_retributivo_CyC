@@ -55,8 +55,8 @@ describe("assistant vertical slice", () => {
     await screen.findByText("¿Qué es Cuadre Reg.?");
     expect(screen.getByText(/Retributivo compara el Registro Retributivo y los recibos/i)).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: /Convertir al análisis activo/i }));
-    await screen.findByText(/Análisis activo asociado/i);
+    fireEvent.click(screen.getByRole("button", { name: /Añadir contexto/i }));
+    await screen.findByText(/Contexto del análisis añadido/i);
     const eventDb = await openAssistantDatabase(factory, "vertical-slice-test");
     const persistedEvents = await new Promise<unknown[]>((resolve, reject) => {
       const request = eventDb.transaction("events", "readonly").objectStore("events").getAll();

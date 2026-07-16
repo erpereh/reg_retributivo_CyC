@@ -36,7 +36,7 @@ async function sha256(value: string): Promise<string> {
 export async function createAnalysisVersionSnapshot(analysisId: string, analysis: unknown, createdAt: string): Promise<AnalysisVersionSnapshot> {
   const canonical = canonicalizeAnalysis(analysis);
   const analysisVersion = await sha256(canonical);
-  return analysisVersionSnapshotSchema.parse({ id: `analysis-version-${analysisId}-${analysisVersion}`, analysisId, analysisVersion, canonical, createdAt });
+  return analysisVersionSnapshotSchema.parse({ id: `analysis-version-${analysisId}-${analysisVersion}`, analysisId, analysisVersion, createdAt });
 }
 
 export async function syncAnalysisVersion(repositories: AssistantRepositories, analysisId: string, analysis: unknown, createdAt: string) {

@@ -62,9 +62,15 @@ function StateProbe() {
     <output data-testid="probe-announcement">{assistant.announcement}</output>
     <output data-testid="probe-notice">{assistant.notice ?? ""}</output>
     <output data-testid="probe-error">{assistant.error ?? ""}</output>
+    <output data-testid="probe-transition">{String(assistant.conversationTransitionPending)}</output>
     <output data-testid="probe-target-status">{target?.status ?? "none"}</output>
     <output data-testid="probe-target-content">{target?.content ?? ""}</output>
   </>;
+}
+
+function DirectConversionProbe() {
+  const assistant = useAssistant();
+  return <><StateProbe /><button disabled={assistant.conversationTransitionPending} onClick={() => void assistant.convertToActiveAnalysis()}>Ejecutar conversión</button></>;
 }
 
 function ConversionProbe() {
@@ -91,6 +97,45 @@ function installBrowser() {
 describe("Phase 5 fourth-review regressions", () => {
   beforeEach(installBrowser);
   afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+  test("converts an analysis above the former canonical limit without persisting the canonical payload", async () => {
+    const factory = new IDBFactory();
+    const dbName = "phase5-large-analysis-conversion";
+    await seed(factory, dbName, [conversation("conversation-a")], [message("user-a", "conversation-a", "user", "Histórico", "completed")]);
+    const oversizedAnalysis = { ...activeAnalysis, result: { ...activeAnalysis.result, summary: { status: "x".repeat(2_000_100) } } as unknown as AnalysisResult };
+    render(<AssistantProvider activeAnalysis={oversizedAnalysis} factory={factory} dbName={dbName}><DirectConversionProbe /></AssistantProvider>);
+    await waitFor(() => expect(screen.getByTestId("probe-selected")).toHaveTextContent("conversation-a"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Ejecutar conversión" }));
+    await waitFor(() => expect(screen.getByTestId("probe-type")).toHaveTextContent("analysis"));
+    expect(screen.getByTestId("probe-notice")).toHaveTextContent("Contexto del análisis añadido");
+    expect(screen.getByTestId("probe-error")).toHaveTextContent("");
+
+    const persisted = await createIndexedDbRepositories({ factory, dbName });
+    const versions = await persisted.analysisVersions.listAll();
+    expect(versions.some((item) => "canonical" in item)).toBe(false);
+    expect(await persisted.messages.get("user-a")).toMatchObject({ content: "Histórico", contextOrigin: "general" });
+    expect(await persisted.events.listByConversation("conversation-a")).toHaveLength(1);
+    persisted.close();
+  });
+
+  test("keeps a general conversation retryable and shows a sanitized error when context preparation fails", async () => {
+    const factory = new IDBFactory();
+    const dbName = "phase5-context-preparation-failure";
+    await seed(factory, dbName, [conversation("conversation-a")]);
+    const repositories = await createIndexedDbRepositories({ factory, dbName });
+    const failingRepositories = { ...repositories, syncAnalysisVersion: vi.fn().mockRejectedValue(new Error("DATABASE_URL should stay private")) } as AssistantRepositories;
+    render(<AssistantProvider activeAnalysis={activeAnalysis} repositoriesFactory={async () => failingRepositories}><DirectConversionProbe /></AssistantProvider>);
+    await waitFor(() => expect(screen.getByTestId("probe-selected")).toHaveTextContent("conversation-a"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Ejecutar conversión" }));
+    await waitFor(() => expect(screen.getByTestId("probe-error")).toHaveTextContent("No se pudo añadir el contexto del análisis. Vuelve a intentarlo."));
+    expect(screen.getByTestId("probe-type")).toHaveTextContent("general");
+    expect(screen.getByTestId("probe-transition")).toHaveTextContent("false");
+    expect(screen.getByRole("button", { name: "Ejecutar conversión" })).toBeEnabled();
+    expect(document.body).not.toHaveTextContent("DATABASE_URL");
+    repositories.close();
+  });
 
   test("the actual New conversation control invalidates a suspended A run and leaves B usable", async () => {
     const factory = new IDBFactory();

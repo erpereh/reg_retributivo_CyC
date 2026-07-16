@@ -141,6 +141,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
   const selectionIntentSequenceRef = useRef(0);
   const selectionIntentRef = useRef<SelectionIntent | undefined>(undefined);
   const createInFlightRef = useRef<SelectionIntent | undefined>(undefined);
+  const contextAdditionInFlightRef = useRef(false);
   const contentGenerationRef = useRef(0);
   const loadGenerationRef = useRef(0);
   const conversationPageGenerationRef = useRef(0);
@@ -213,21 +214,22 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
 
   const ensureActiveAnalysisVersion = useCallback(async (): Promise<string | undefined> => {
     if (!activeAnalysis) return undefined;
-    const snapshot = await createAnalysisVersionSnapshot(activeAnalysis.id, activeAnalysis, now());
     try {
+      const snapshot = await createAnalysisVersionSnapshot(activeAnalysis.id, activeAnalysis, now());
       const repositories = repositoriesRef.current;
       if (!repositories) return undefined;
       await repositories.syncAnalysisVersion({ snapshot, analysisId: activeAnalysis.id, updatedAt: now() });
+      currentAnalysisVersionRef.current = { analysisId: activeAnalysis.id, analysisVersion: snapshot.analysisVersion };
+      return snapshot.analysisVersion;
     } catch {
       return undefined;
     }
-    currentAnalysisVersionRef.current = { analysisId: activeAnalysis.id, analysisVersion: snapshot.analysisVersion };
-    return snapshot.analysisVersion;
   }, [activeAnalysis]);
 
   const clearSelected = useCallback(() => {
     selectionIntentRef.current = undefined;
     createInFlightRef.current = undefined;
+    contextAdditionInFlightRef.current = false;
     loadGenerationRef.current += 1; conversationRef.current = undefined; messagesRef.current = [];
     setConversation(undefined); setMessages([]); setMessageCursor(undefined); setSources([]); setRevealedSourceIds([]); setEvents([]); setActions([]); setActionOutputs({}); setSnapshots([]); setDocuments([]); setIndexJobs([]); setSelectionLoading(false); setConversationTransitionPending(false);
   }, []);
@@ -1194,37 +1196,47 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
   }, [actions]);
 
   const convertToActiveAnalysis = useCallback(async () => {
-    if (createInFlightRef.current) return;
+    if (createInFlightRef.current || contextAdditionInFlightRef.current) return;
     const selectedId = conversationRef.current?.id;
     if (!selectedId || conversationRef.current?.status !== "active" || !activeAnalysis || deletedConversationsRef.current.has(selectedId)) return;
     const analysis = activeAnalysis;
-    const analysisVersion = await ensureActiveAnalysisVersion();
-    if (!analysisVersion) return;
-    const contentGeneration = contentGenerationRef.current;
-    const operation = conversationMutationRef.current.then(async () => {
-      const repositories = repositoriesRef.current;
-      if (!repositories || contentGeneration !== contentGenerationRef.current || deletedConversationsRef.current.has(selectedId)) return false;
-      const converted = await repositories.convertConversationToAnalysis({
-        conversationId: selectedId, analysisId: analysis.id, analysisVersion, convertedAt: now(),
-      });
-      if (!converted || contentGeneration !== contentGenerationRef.current || deletedConversationsRef.current.has(selectedId)) return false;
-      if (mountedRef.current) {
-        setConversations((current) => newestConversations(current.map((item) => item.id === selectedId ? converted.conversation : item)));
-        if (conversationRef.current?.id === selectedId) {
-          const convertedLoadedMessages = messagesRef.current.map((message) => ({ ...message, contextOrigin: "general" as const }));
-          conversationRef.current = converted.conversation;
-          messagesRef.current = convertedLoadedMessages;
-          setConversation(converted.conversation);
-          setMessages(convertedLoadedMessages);
-          setEvents((current) => current.some((event) => event.id === converted.event.id) ? current : [...current, converted.event]);
-          setNotice("Análisis activo asociado");
-          setAnnouncement("Análisis activo asociado");
+    contextAdditionInFlightRef.current = true;
+    setConversationTransitionPending(true);
+    setError(undefined);
+    try {
+      const analysisVersion = await ensureActiveAnalysisVersion();
+      if (!analysisVersion) throw new Error("analysis_version_unavailable");
+      const contentGeneration = contentGenerationRef.current;
+      const operation = conversationMutationRef.current.then(async () => {
+        const repositories = repositoriesRef.current;
+        if (!repositories || contentGeneration !== contentGenerationRef.current || deletedConversationsRef.current.has(selectedId)) return false;
+        const converted = await repositories.convertConversationToAnalysis({
+          conversationId: selectedId, analysisId: analysis.id, analysisVersion, convertedAt: now(),
+        });
+        if (!converted || contentGeneration !== contentGenerationRef.current || deletedConversationsRef.current.has(selectedId)) return false;
+        if (mountedRef.current) {
+          setConversations((current) => newestConversations(current.map((item) => item.id === selectedId ? converted.conversation : item)));
+          if (conversationRef.current?.id === selectedId) {
+            const convertedLoadedMessages = messagesRef.current.map((message) => ({ ...message, contextOrigin: "general" as const }));
+            conversationRef.current = converted.conversation;
+            messagesRef.current = convertedLoadedMessages;
+            setConversation(converted.conversation);
+            setMessages(convertedLoadedMessages);
+            setEvents((current) => current.some((event) => event.id === converted.event.id) ? current : [...current, converted.event]);
+            setNotice("Contexto del análisis añadido");
+            setAnnouncement("Contexto del análisis añadido");
+          }
         }
-      }
-      return true;
-    });
-    conversationMutationRef.current = operation.then(() => undefined, () => undefined);
-    await operation;
+        return true;
+      });
+      conversationMutationRef.current = operation.then(() => undefined, () => undefined);
+      await operation;
+    } catch {
+      if (mountedRef.current) setError("No se pudo añadir el contexto del análisis. Vuelve a intentarlo.");
+    } finally {
+      contextAdditionInFlightRef.current = false;
+      if (mountedRef.current) setConversationTransitionPending(false);
+    }
   }, [activeAnalysis, ensureActiveAnalysisVersion]);
 
   const continuePersonInAssistant = useCallback(async (personId: string) => {

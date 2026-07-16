@@ -5,6 +5,7 @@ import { BrainCircuit, CheckCircle2, LoaderCircle, Plus, RefreshCw, Server, Tras
 import { useAssistant } from "@/components/assistant/AssistantProvider";
 import { Card } from "@/components/common/Card";
 import { normalizeBaseUrl, type ProviderConfig, type ProviderType } from "@/lib/assistant/catalog/domain";
+import { clearAiExplanationCache } from "@/lib/ai/explainCache";
 
 const PRESETS: Readonly<Record<Exclude<ProviderType, "openai-compatible">, Readonly<{ label: string; baseUrl: string; envVarName: string }>>> = {
   gemini: { label: "Gemini", baseUrl: "https://generativelanguage.googleapis.com", envVarName: "GEMINI_API_KEY" },
@@ -60,6 +61,11 @@ export function AssistantAiSettings() {
     setDraft(undefined);
   }
 
+  function clearExplanationCache() {
+    clearAiExplanationCache();
+    setMessage("Caché de explicaciones IA borrada.");
+  }
+
   return <div className="flex flex-col gap-5">
     <Card className="p-4 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -84,7 +90,7 @@ export function AssistantAiSettings() {
         </div>
       </article>) : <p className="rounded-2xl bg-slate-50 p-4 text-sm text-muted">No hay proveedores configurados.</p>}</div>
     </Card>
-    <Card className="p-4 sm:p-6"><div className="flex items-center gap-3"><Server className="text-primary" aria-hidden="true" /><h2 className="text-lg font-semibold text-ink">Privacidad local</h2></div><p className="mt-3 text-sm leading-6 text-muted">Las API keys se leen solo desde variables de entorno del servidor. Conversaciones y contexto sanitizado permanecen en IndexedDB.</p><button type="button" className="btn-secondary mt-4" onClick={() => void clearAssistantContent()}><Trash2 aria-hidden="true" />Borrar conversaciones y contexto</button></Card>
+    <Card className="p-4 sm:p-6"><div className="flex items-center gap-3"><Server className="text-primary" aria-hidden="true" /><h2 className="text-lg font-semibold text-ink">Privacidad local</h2></div><p className="mt-3 text-sm leading-6 text-muted">Las API keys se leen solo desde variables de entorno del servidor. Conversaciones y contexto sanitizado permanecen en IndexedDB.</p><div className="mt-4 flex flex-wrap gap-2"><button type="button" className="btn-secondary" onClick={clearExplanationCache}><Trash2 aria-hidden="true" />Borrar caché de explicaciones</button><button type="button" className="btn-secondary" onClick={() => void clearAssistantContent()}><Trash2 aria-hidden="true" />Borrar conversaciones y contexto</button></div></Card>
     {message ? <p role="status" className="rounded-xl bg-blue-50 px-4 py-3 text-sm font-semibold text-primary">{message}</p> : null}
     {error ? <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-danger">{error}</p> : null}
   </div>;

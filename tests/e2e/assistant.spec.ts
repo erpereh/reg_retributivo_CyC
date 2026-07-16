@@ -192,7 +192,8 @@ test("converts general context, associates multiple people and reuses it from Pe
   await page.reload();
   await page.getByRole("tab", { name: "Asistente" }).click();
   await page.getByRole("button", { name: "Crear conversación general" }).click();
-  await page.getByRole("button", { name: "Convertir al análisis activo" }).click();
+  await page.getByRole("button", { name: "Añadir contexto" }).click();
+  await expect(page.getByText("Contexto del análisis añadido")).toBeVisible();
   await page.getByRole("button", { name: "Gestionar personas asociadas" }).click();
   await page.getByRole("checkbox", { name: "Matrícula 10048" }).click();
   await page.getByRole("checkbox", { name: "Matrícula 10049" }).click();
@@ -357,7 +358,10 @@ test("keyboard navigation and the local non-encrypted storage warning remain acc
 test("provider settings never expose or persist API key values", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("tab", { name: "Ajustes" }).click();
+  await expect(page.getByRole("heading", { name: "Parámetros de análisis" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Inteligencia Artificial" })).toHaveCount(0);
   await page.getByRole("tab", { name: "IA", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Borrar caché de explicaciones" })).toBeVisible();
   await page.getByLabel("Tipo de proveedor").selectOption("openai-compatible");
   await page.getByRole("button", { name: "Añadir proveedor" }).click();
   await expect(page.getByLabel("Variable de entorno")).toHaveValue("OPENAI_COMPATIBLE_MY_PROVIDER_API_KEY");

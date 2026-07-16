@@ -48,8 +48,16 @@ describe("Phase 6 core integrations", () => {
     const first = await createAnalysisVersionSnapshot("a1", left, now);
     const second = await createAnalysisVersionSnapshot("a1", right, now);
     expect(first.analysisVersion).toBe(second.analysisVersion);
-    expect(first.canonical).not.toContain("Ana");
-    expect(first.canonical).not.toContain("secret.pdf");
+    expect(first).not.toHaveProperty("canonical");
+  });
+
+  test("hashes analyses above the former canonical limit without persisting the canonical payload", async () => {
+    const oversizedAnalysis = { result: { concepts: [{ code: "C-1", status: "x".repeat(2_000_100), amount: 208 }] } };
+    const snapshot = await createAnalysisVersionSnapshot("a-large", oversizedAnalysis, now);
+
+    expect(snapshot.analysisVersion).toMatch(/^[a-f0-9]{64}$/);
+    expect(snapshot).not.toHaveProperty("canonical");
+    expect(JSON.stringify(snapshot).length).toBeLessThan(512);
   });
 
   test("updates only future conversation context and preserves historical message versions", async () => {

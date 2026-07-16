@@ -7,9 +7,22 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { AssistantProvider } from "@/components/assistant/AssistantProvider";
 import { AssistantAiSettings } from "@/components/settings/AssistantAiSettings";
 import { openAssistantDatabase } from "@/lib/assistant/storage/database";
+import { AI_EXPLANATION_CACHE_KEY } from "@/lib/ai/explainCache";
 
 describe("Assistant provider settings", () => {
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+  test("clears only the explanation cache from the IA settings surface", async () => {
+    const factory = new IDBFactory(); vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    window.localStorage.setItem(AI_EXPLANATION_CACHE_KEY, JSON.stringify({ cached: true }));
+    window.localStorage.setItem("retributivo.history.v1", "history");
+    render(<AssistantProvider factory={factory} dbName="settings-explanation-cache"><AssistantAiSettings /></AssistantProvider>);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Borrar caché de explicaciones" }));
+    expect(window.localStorage.getItem(AI_EXPLANATION_CACHE_KEY)).toBeNull();
+    expect(window.localStorage.getItem("retributivo.history.v1")).toBe("history");
+    expect(screen.getByText("Caché de explicaciones IA borrada.")).toBeVisible();
+  });
 
   test("stores only non-sensitive provider configuration and never renders a model selector or key value", async () => {
     const factory = new IDBFactory(); vi.stubGlobal("IDBKeyRange", IDBKeyRange);

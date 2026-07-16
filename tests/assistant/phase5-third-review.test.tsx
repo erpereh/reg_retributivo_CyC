@@ -204,7 +204,7 @@ describe("Phase 5 third-review regressions", () => {
     await waitFor(() => expect(screen.getByTestId("mutation-conversation")).toHaveTextContent("conversation-a"));
     fireEvent.click(screen.getByRole("button", { name: "Enviar carrera" }));
     await startedPromise;
-    expect(screen.getByRole("button", { name: "Convertir al análisis activo" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Añadir contexto" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Forzar conversión" }));
     await waitFor(() => expect(screen.getByTestId("mutation-conversation")).toHaveTextContent('"type":"analysis"'));
     release();

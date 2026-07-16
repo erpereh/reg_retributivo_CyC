@@ -1,9 +1,8 @@
 "use client";
 
-import { BrainCircuit, CheckCircle2, LockKeyhole, ShieldCheck, SlidersHorizontal, Trash2, Wifi } from "lucide-react";
+import { CheckCircle2, LockKeyhole, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAppState } from "@/components/app/AppState";
-import { StatusBadge } from "@/components/common/StatusBadge";
 import { Card } from "@/components/common/Card";
 import { SectionHeader } from "@/components/common/SectionHeader";
 import { SectionTabs } from "@/components/common/SectionTabs";
@@ -11,7 +10,6 @@ import { EmployeeExclusionsCard } from "@/components/settings/EmployeeExclusions
 import { ConceptMapEditor } from "@/components/settings/concept-map/ConceptMapEditor";
 import { NormalizedConceptsManager } from "@/components/settings/normalized-concepts/NormalizedConceptsManager";
 import { AssistantAiSettings } from "@/components/settings/AssistantAiSettings";
-import { clearAiExplanationCache } from "@/lib/ai/explainCache";
 
 type SettingsSection = "general" | "exclusions" | "concepts" | "ai" | "privacy";
 type ConceptSection = "non-normalized" | "normalized";
@@ -44,14 +42,11 @@ function SettingsPanel({ id, labelledBy, label, active, children }: Readonly<{ i
 }
 
 export function SettingsView() {
-  const { settings, updateSettings, aiStatus, aiTesting, aiTestMessage, refreshAiStatus, testAiConnection, assistantNavigationIntent, consumeAssistantNavigationIntent } = useAppState();
+  const { settings, updateSettings, assistantNavigationIntent, consumeAssistantNavigationIntent } = useAppState();
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
   const [visited, setVisited] = useState<ReadonlySet<SettingsSection>>(() => new Set(["general"]));
   const [conceptView, setConceptView] = useState<ConceptSection>("non-normalized");
   const [visitedConcepts, setVisitedConcepts] = useState<ReadonlySet<ConceptSection>>(() => new Set(["non-normalized"]));
-  const [aiCacheMessage, setAiCacheMessage] = useState<string | undefined>();
-
-  useEffect(() => { void refreshAiStatus(); }, [refreshAiStatus]);
   useEffect(() => {
     if (assistantNavigationIntent?.type !== "settings_ai") return;
     setVisited((current) => new Set(current).add("ai"));
@@ -69,11 +64,6 @@ export function SettingsView() {
     setConceptView(value);
   }
 
-  function clearAiCache() {
-    clearAiExplanationCache();
-    setAiCacheMessage("Caché de explicaciones IA borrada.");
-  }
-
   return (
     <div className="flex flex-col gap-5">
       <SectionHeader title="Ajustes" subtitle="Configura el análisis, las exclusiones y los conceptos sin alterar los resultados ya calculados." />
@@ -82,58 +72,20 @@ export function SettingsView() {
       {visited.has("general") ? (
         <SettingsPanel id="settings-general-panel" labelledBy="settings-general-tab" label="General" active={activeSection === "general"}>
           <Card data-surface="settings-layout" className="overflow-hidden p-0">
-            <div className="grid xl:grid-cols-[1.05fr_0.95fr]">
-              <section aria-labelledby="settings-ai-heading" className="min-w-0 p-4 sm:p-6">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <span className="flex size-11 items-center justify-center rounded-xl bg-blue-50 text-primary"><BrainCircuit aria-hidden="true" /></span>
-                    <div>
-                      <h2 id="settings-ai-heading" className="text-lg font-semibold text-ink">Inteligencia Artificial</h2>
-                      <p className="mt-1 text-sm text-muted">Explicaciones bajo demanda; nunca recalcula resultados.</p>
-                    </div>
-                  </div>
-                  <StatusBadge value={aiStatus?.configured ? "API configurada" : "API no configurada"} />
+            <section data-surface="settings-parameters" aria-labelledby="settings-analysis-heading" className="min-w-0 p-4 sm:p-6">
+              <div className="flex items-center gap-3">
+                <span className="flex size-11 items-center justify-center rounded-xl bg-blue-50 text-primary"><SlidersHorizontal aria-hidden="true" /></span>
+                <div>
+                  <h2 id="settings-analysis-heading" className="text-lg font-semibold text-ink">Parámetros de análisis</h2>
+                  <p className="mt-1 text-sm text-muted">Valores por defecto para nuevos análisis.</p>
                 </div>
-
-                <div data-surface="settings-model" className="mt-5 rounded-2xl bg-slate-50/90 px-4 py-4">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted">Modelo actual</p>
-                  <p className="mt-1 font-mono text-sm font-semibold text-ink">{aiStatus?.model ?? settings.aiModel}</p>
-                  <p className="mt-2 text-sm leading-6 text-muted">La API key se configura en el entorno y no se guarda en el navegador.</p>
-                </div>
-
-                <section aria-labelledby="settings-connection-heading" className="mt-5 border-t border-line pt-5">
-                  <h3 id="settings-connection-heading" className="text-sm font-semibold text-ink">Conexión y caché</h3>
-                  <p className="mt-1 text-sm leading-6 text-muted">Comprueba la disponibilidad de IA o borra solo las explicaciones almacenadas.</p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button type="button" onClick={() => void testAiConnection()} disabled={aiTesting || !aiStatus?.configured} className="btn-primary">
-                      <Wifi aria-hidden="true" />{aiTesting ? "Probando conexión..." : "Probar conexión IA"}
-                    </button>
-                    <button type="button" onClick={clearAiCache} className="btn-secondary"><Trash2 aria-hidden="true" />Borrar caché de explicaciones</button>
-                  </div>
-                  {aiTestMessage ? <p className="mt-3 rounded-xl bg-blue-50 px-4 py-3 text-sm font-semibold text-primary" aria-live="polite">{aiTestMessage}</p> : null}
-                  {aiCacheMessage ? <p className="mt-3 rounded-xl bg-blue-50 px-4 py-3 text-sm font-semibold text-primary" aria-live="polite">{aiCacheMessage}</p> : null}
-                </section>
-              </section>
-
-              <section
-                data-surface="settings-parameters"
-                aria-labelledby="settings-analysis-heading"
-                className="border-t border-line bg-slate-50/70 p-4 sm:p-6 xl:border-l xl:border-t-0"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="flex size-11 items-center justify-center rounded-xl bg-white text-primary"><SlidersHorizontal aria-hidden="true" /></span>
-                  <div>
-                    <h2 id="settings-analysis-heading" className="text-lg font-semibold text-ink">Parámetros de análisis</h2>
-                    <p className="mt-1 text-sm text-muted">Valores por defecto para nuevos análisis.</p>
-                  </div>
-                </div>
-                <div className="mt-5 grid gap-4">
-                  <NumberSetting id="defaultTolerance" label="Tolerancia salarial por defecto" value={settings.defaultTolerance} onChange={(defaultTolerance) => updateSettings({ defaultTolerance })} helper="Importes dentro de esta tolerancia se consideran OK." />
-                  <NumberSetting id="reviewThreshold" label="Umbral Revisar" value={settings.reviewThreshold} onChange={(reviewThreshold) => updateSettings({ reviewThreshold })} helper="Desde este importe se marca como revisión si supera la tolerancia." />
-                  <NumberSetting id="incidentThreshold" label="Umbral Incidencia" value={settings.incidentThreshold} onChange={(incidentThreshold) => updateSettings({ incidentThreshold })} helper="Desde este importe se marca como incidencia salarial." />
-                </div>
-              </section>
-            </div>
+              </div>
+              <div className="mt-5 grid gap-4 lg:grid-cols-3">
+                <NumberSetting id="defaultTolerance" label="Tolerancia salarial por defecto" value={settings.defaultTolerance} onChange={(defaultTolerance) => updateSettings({ defaultTolerance })} helper="Importes dentro de esta tolerancia se consideran OK." />
+                <NumberSetting id="reviewThreshold" label="Umbral Revisar" value={settings.reviewThreshold} onChange={(reviewThreshold) => updateSettings({ reviewThreshold })} helper="Desde este importe se marca como revisión si supera la tolerancia." />
+                <NumberSetting id="incidentThreshold" label="Umbral Incidencia" value={settings.incidentThreshold} onChange={(incidentThreshold) => updateSettings({ incidentThreshold })} helper="Desde este importe se marca como incidencia salarial." />
+              </div>
+            </section>
           </Card>
         </SettingsPanel>
       ) : null}

@@ -123,6 +123,15 @@ describe("assistant conversation UI", () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
+  test("offers Añadir contexto for an active general conversation", async () => {
+    const factory = new IDBFactory();
+    await seedUi(factory, "add-context-label", "general");
+    render(<AssistantProvider activeAnalysis={activeAnalysis} factory={factory} dbName="add-context-label"><AssistantView /></AssistantProvider>);
+
+    expect(await screen.findByRole("button", { name: "Añadir contexto" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Convertir al análisis activo" })).toBeNull();
+  });
+
   test("loads safe Markdown dynamically, rejects raw HTML and unsafe links, and renders only typed actions", async () => {
     const factory = new IDBFactory();
     await seedUi(factory, "safe-markdown", "analysis");

@@ -91,7 +91,7 @@ export interface AnalysisVersionSnapshot {
   id: string;
   analysisId: string;
   analysisVersion: string;
-  canonical: string;
+  canonical?: string;
   createdAt: string;
 }
 

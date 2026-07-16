@@ -3,7 +3,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { SettingsView } from "@/components/settings/SettingsView";
-import { AI_EXPLANATION_CACHE_KEY } from "@/lib/ai/explainCache";
 
 const defaultConceptMap = [
   {
@@ -195,8 +194,9 @@ describe("SettingsView", () => {
     expect(generalTab.getAttribute("aria-selected")).toBe("true");
     expect(generalPanel.getAttribute("data-surface")).toBe("settings-panel");
     expect(generalPanel.querySelector('[data-surface="settings-layout"]')).toBeTruthy();
-    expect(generalPanel.querySelector('[data-surface="settings-model"]')).toBeTruthy();
+    expect(generalPanel.querySelector('[data-surface="settings-model"]')).toBeNull();
     expect(generalPanel.querySelector('[data-surface="settings-parameters"]')).toBeTruthy();
+    expect(within(generalPanel).queryByRole("heading", { name: "Inteligencia Artificial" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Conceptos del análisis" })).toBeNull();
 
     fireEvent.click(conceptsTab);
@@ -210,22 +210,15 @@ describe("SettingsView", () => {
     expect(screen.queryByRole("heading", { name: "Conceptos del análisis" })).toBeNull();
   });
 
-  test("renders AI configuration without global toggles and clears only AI explanation cache", () => {
-    window.localStorage.setItem(AI_EXPLANATION_CACHE_KEY, JSON.stringify({ cached: true }));
-    window.localStorage.setItem("retributivo.history.v1", "history");
-
+  test("keeps legacy AI controls out of General because providers live in IA", () => {
     render(<SettingsView />);
 
     expect(screen.getByRole("heading", { name: "Ajustes" })).toBeTruthy();
     expect(screen.queryByRole("switch", { name: /Activar IA por defecto/i })).toBeNull();
     expect(screen.queryByRole("switch", { name: /Abrir explicación IA automáticamente/i })).toBeNull();
-    expect(screen.getByRole("button", { name: /Probar conexión IA/i })).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: /Borrar caché de explicaciones/i }));
-
-    expect(window.localStorage.getItem(AI_EXPLANATION_CACHE_KEY)).toBeNull();
-    expect(window.localStorage.getItem("retributivo.history.v1")).toBe("history");
-    expect(screen.getByText(/Caché de explicaciones IA borrada/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Probar conexión IA/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Borrar caché de explicaciones/i })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Parámetros de análisis" })).toBeTruthy();
   });
 
   test("renders the concept analysis editor with only active/desactivated usage controls", () => {
