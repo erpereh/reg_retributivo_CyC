@@ -83,17 +83,17 @@ export function AssistantShell({ assistant }: Readonly<{ assistant: AssistantCon
   };
 
   return (
-    <section ref={chatFallback} tabIndex={-1} aria-label="Área de conversación" data-testid="assistant-shell" className="assistant-workbench">
+    <section ref={chatFallback} tabIndex={-1} aria-label="Área de conversación" data-testid="assistant-shell" className="assistant-workbench flex min-h-0 flex-1 overflow-hidden">
       <div className="assistant-workbench__mobilebar xl:hidden">
-        <button ref={conversationsTrigger} type="button" aria-label="Abrir conversaciones" aria-expanded={drawer === "conversations"} onClick={() => setDrawer("conversations")}>
+        <button ref={conversationsTrigger} type="button" className="min-h-11 min-w-11" aria-label="Abrir conversaciones" aria-expanded={drawer === "conversations"} onClick={() => setDrawer("conversations")}>
           <MessageSquareText aria-hidden="true" className="size-4" /><span>Conversaciones</span>
         </button>
-        <button ref={contextTrigger} type="button" className="lg:hidden" aria-label="Abrir contexto" aria-expanded={drawer === "context"} onClick={() => setDrawer("context")}>
+        <button ref={contextTrigger} type="button" className="min-h-11 min-w-11 lg:hidden" aria-label="Abrir contexto" aria-expanded={drawer === "context"} onClick={() => setDrawer("context")}>
           <PanelRight aria-hidden="true" className="size-4" /><span>Contexto</span>
         </button>
       </div>
 
-      <div className="assistant-workbench__grid">
+      <div className="assistant-workbench__grid grid min-h-0 min-w-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_19rem] xl:grid-cols-[17rem_minmax(0,1fr)_19rem]">
         <div className="assistant-workbench__conversations hidden xl:block">{conversationPanel}</div>
         <ConversationTimeline assistant={assistant} onShowContextUsage={showContextUsage} onOpenSource={setOpenSource} />
         <div className="assistant-workbench__context hidden lg:block">{contextPanel(drawer !== "context", drawer !== "context")}</div>
