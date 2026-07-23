@@ -51,12 +51,7 @@ function Brand({ collapsed }: Readonly<{ collapsed: boolean }>) {
       </span>
       <AnimatePresence initial={false}>
         {!collapsed ? (
-          <motion.span
-            initial={{ opacity: 0, x: -8 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -8 }}
-            className="app-brand__copy"
-          >
+          <motion.span initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} className="app-brand__copy">
             <strong>Registro Retributivo</strong>
             <small>Control y comparativa salarial</small>
           </motion.span>
@@ -66,17 +61,7 @@ function Brand({ collapsed }: Readonly<{ collapsed: boolean }>) {
   );
 }
 
-function Sidebar({
-  collapsed,
-  mobileOpen,
-  onCollapse,
-  onCloseMobile,
-}: Readonly<{
-  collapsed: boolean;
-  mobileOpen: boolean;
-  onCollapse: () => void;
-  onCloseMobile: () => void;
-}>) {
+function Sidebar({ collapsed, mobileOpen, onCollapse, onCloseMobile }: Readonly<{ collapsed: boolean; mobileOpen: boolean; onCollapse: () => void; onCloseMobile: () => void }>) {
   const { view, setView } = useAppState();
   const reduceMotion = useReducedMotion();
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -101,19 +86,12 @@ function Sidebar({
     <aside className={cn("app-sidebar", collapsed && "app-sidebar--collapsed", mobileOpen && "app-sidebar--mobile-open")} aria-label="Navegación de la aplicación">
       <div className="app-sidebar__header">
         <Brand collapsed={collapsed} />
-        <button type="button" className="app-icon-button app-sidebar__mobile-close" onClick={onCloseMobile} aria-label="Cerrar navegación">
-          <X className="size-4" />
-        </button>
+        <button type="button" className="app-icon-button app-sidebar__mobile-close" onClick={onCloseMobile} aria-label="Cerrar navegación"><X className="size-4" /></button>
       </div>
 
       <div className="app-sidebar__context" aria-label="Espacio de trabajo">
         <span className="app-sidebar__context-icon">RR</span>
-        {!collapsed ? (
-          <span className="min-w-0">
-            <strong>Comparativa retributiva</strong>
-            <small>Procesamiento local y privado</small>
-          </span>
-        ) : null}
+        {!collapsed ? <span className="min-w-0"><strong>Comparativa retributiva</strong><small>Procesamiento local y privado</small></span> : null}
       </div>
 
       <nav className="app-nav" role="tablist" aria-label="Vistas principales" aria-orientation="vertical">
@@ -128,28 +106,17 @@ function Sidebar({
               type="button"
               role="tab"
               aria-selected={active}
-              aria-label={collapsed ? item.label : undefined}
+              aria-label={item.label}
               tabIndex={active ? 0 : -1}
               className={cn("app-nav__item", active && "app-nav__item--active")}
               onClick={() => selectAt(index)}
               onKeyDown={(event) => onKeyDown(event, index)}
               title={collapsed ? item.label : undefined}
             >
-              {active ? (
-                <motion.span
-                  layoutId="sidebar-active-item"
-                  className="app-nav__active"
-                  transition={reduceMotion ? { duration: 0 } : { type: "spring", stiffness: 430, damping: 36 }}
-                />
-              ) : null}
+              {active ? <motion.span layoutId="sidebar-active-item" className="app-nav__active" transition={reduceMotion ? { duration: 0 } : { type: "spring", stiffness: 430, damping: 36 }} /> : null}
               <Icon className="app-nav__icon" aria-hidden="true" />
-              {!collapsed ? (
-                <span className="app-nav__copy">
-                  <strong>{item.label}</strong>
-                  <small>{item.description}</small>
-                </span>
-              ) : null}
-              {item.id === "asistente" && !collapsed ? <span className="app-nav__badge">IA</span> : null}
+              {!collapsed ? <span className="app-nav__copy" aria-hidden="true"><strong>{item.label}</strong><small>{item.description}</small></span> : null}
+              {item.id === "asistente" && !collapsed ? <span className="app-nav__badge" aria-hidden="true">IA</span> : null}
             </button>
           );
         })}
@@ -158,12 +125,7 @@ function Sidebar({
       <div className="app-sidebar__footer">
         <div className={cn("app-privacy-note", collapsed && "app-privacy-note--compact")}>
           <span className="app-privacy-note__dot" />
-          {!collapsed ? (
-            <span>
-              <strong>Datos protegidos</strong>
-              <small>Sin cuentas ni datos bancarios</small>
-            </span>
-          ) : null}
+          {!collapsed ? <span><strong>Datos protegidos</strong><small>Sin cuentas ni datos bancarios</small></span> : null}
         </div>
         <button type="button" className="app-collapse-button" onClick={onCollapse} aria-label={collapsed ? "Ampliar navegación" : "Contraer navegación"}>
           {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
@@ -181,25 +143,17 @@ function Topbar({ onOpenMobile }: Readonly<{ onOpenMobile: () => void }>) {
   return (
     <header className="app-topbar" data-surface="floating-header">
       <div className="app-topbar__title">
-        <button type="button" className="app-icon-button app-topbar__menu" onClick={onOpenMobile} aria-label="Abrir navegación">
-          <Menu className="size-5" />
-        </button>
+        <button type="button" className="app-icon-button app-topbar__menu" onClick={onOpenMobile} aria-label="Abrir navegación"><Menu className="size-5" /></button>
         <span className="app-topbar__crumb">Registro Retributivo</span>
         <ChevronLeft className="size-3.5 rotate-180 text-muted/60" aria-hidden="true" />
         <strong>{current.label}</strong>
       </div>
       <div className="app-topbar__actions">
-        <span className="app-system-status" aria-label="Estado del sistema">
-          <span /> Sistema listo
-        </span>
+        <span className="app-system-status" aria-label="Estado del sistema"><span /> Sistema listo</span>
         <button type="button" className="btn-secondary app-topbar__secondary" disabled={!result || exporting} onClick={() => void exportActiveAnalysis()}>
-          <Download className="size-4" aria-hidden="true" />
-          <span>{exporting ? "Exportando…" : "Exportar Excel"}</span>
+          <Download className="size-4" aria-hidden="true" /><span>{exporting ? "Exportando…" : "Exportar Excel"}</span>
         </button>
-        <button type="button" className="btn-primary" onClick={resetForNewAnalysis}>
-          <Plus className="size-4" aria-hidden="true" />
-          <span>Nuevo análisis</span>
-        </button>
+        <button type="button" className="btn-primary" onClick={resetForNewAnalysis}><Plus className="size-4" aria-hidden="true" /><span>Nuevo análisis</span></button>
       </div>
     </header>
   );
@@ -226,48 +180,16 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
   }, [view]);
 
   return (
-    <div
-      data-slot="app-shell"
-      data-surface="canvas"
-      className={cn("app-frame", collapsed && "app-frame--collapsed", view === "asistente" && "app-frame--assistant")}
-    >
-      <Sidebar
-        collapsed={collapsed}
-        mobileOpen={mobileOpen}
-        onCollapse={() => setCollapsed((value) => !value)}
-        onCloseMobile={() => setMobileOpen(false)}
-      />
+    <div data-slot="app-shell" data-surface="canvas" className={cn("app-frame", collapsed && "app-frame--collapsed", view === "asistente" && "app-frame--assistant")}>
+      <Sidebar collapsed={collapsed} mobileOpen={mobileOpen} onCollapse={() => setCollapsed((value) => !value)} onCloseMobile={() => setMobileOpen(false)} />
       <AnimatePresence>
-        {mobileOpen ? (
-          <motion.button
-            type="button"
-            aria-label="Cerrar navegación"
-            className="app-sidebar-backdrop"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setMobileOpen(false)}
-          />
-        ) : null}
+        {mobileOpen ? <motion.button type="button" aria-label="Cerrar navegación" className="app-sidebar-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setMobileOpen(false)} /> : null}
       </AnimatePresence>
-
       <section className="app-workspace" data-slot="app-content" data-surface="transparent">
         <Topbar onOpenMobile={() => setMobileOpen(true)} />
-        <main
-          ref={mainRef}
-          className={cn("app-main", view === "asistente" && "app-main--assistant")}
-          tabIndex={-1}
-        >
-          {hydrating ? (
-            <DashboardSkeleton />
-          ) : (
-            <motion.div
-              key={view}
-              initial={reduceMotion ? false : { opacity: 0, y: 10, filter: "blur(2px)" }}
-              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-              transition={{ duration: reduceMotion ? 0 : 0.26, ease: [0.22, 1, 0.36, 1] }}
-              className={view === "asistente" ? "flex min-h-0 flex-1 flex-col" : undefined}
-            >
+        <main ref={mainRef} className={cn("app-main", view === "asistente" && "app-main--assistant")} tabIndex={-1}>
+          {hydrating ? <DashboardSkeleton /> : (
+            <motion.div key={view} initial={reduceMotion ? false : { opacity: 0, y: 10, filter: "blur(2px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} transition={{ duration: reduceMotion ? 0 : 0.26, ease: [0.22, 1, 0.36, 1] }} className={view === "asistente" ? "flex min-h-0 flex-1 flex-col" : undefined}>
               {children}
             </motion.div>
           )}
