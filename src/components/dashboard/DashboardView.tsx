@@ -28,12 +28,10 @@ export function DashboardView() {
           <span className="dashboard-hero__tag"><Sparkles className="size-3.5" /> Comparativa automatizada</span>
           <SectionHeader
             title="Comparativa Recibos vs Registro Retributivo"
-            subtitle="Importa los documentos, valida el cuadre y revisa las diferencias sin alterar la lógica salarial ni exponer datos sensibles."
+            subtitle="Resumen del análisis retributivo: diferencias matched, conceptos pendientes, Recibo sin Reg. Retrib. y estado general del cuadre."
             actions={activeAnalysis ? (
               <Card className="analysis-active-card px-3.5 py-3">
-                <span className="flex size-10 items-center justify-center rounded-2xl bg-indigo-50 text-primary">
-                  <Clock3 className="size-4" aria-hidden="true" />
-                </span>
+                <span className="flex size-10 items-center justify-center rounded-2xl bg-indigo-50 text-primary"><Clock3 className="size-4" aria-hidden="true" /></span>
                 <div>
                   <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-muted">Análisis activo</p>
                   <p className="mt-0.5 text-sm font-semibold text-ink">{formatDate(activeAnalysis.createdAt)}</p>
@@ -54,11 +52,7 @@ export function DashboardView() {
         <UploadPanel />
       </motion.div>
 
-      {excludedCount ? (
-        <p className="inline-flex self-start rounded-full border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-muted shadow-subtle">
-          Exclusiones aplicadas: {excludedCount} matrículas
-        </p>
-      ) : null}
+      {excludedCount ? <p className="inline-flex self-start rounded-full border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-muted shadow-subtle">Exclusiones aplicadas: {excludedCount} matrículas</p> : null}
 
       <SummaryCards summary={result?.summary} internalExcelChecks={result?.internalExcelChecks} />
       <ChartsPanel result={result} />
