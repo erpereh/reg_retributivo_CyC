@@ -31,16 +31,44 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Unit and integration tests
-        run: pnpm test
+        shell: bash
+        run: |
+          mkdir -p artifacts/test-report
+          set +e
+          pnpm exec vitest run --reporter=verbose --reporter=json --outputFile=artifacts/test-report/vitest.json 2>&1 | tee artifacts/test-report/vitest.log
+          code=${PIPESTATUS[0]}
+          echo "TEST_EXIT_CODE=$code" >> "$GITHUB_ENV"
+          exit 0
+
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-redesign-test-report
+          path: artifacts/test-report
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Production build
-        run: pnpm build
+        shell: bash
+        run: |
+          set +e
+          pnpm build 2>&1 | tee artifacts/test-report/build.log
+          code=${PIPESTATUS[0]}
+          echo "BUILD_EXIT_CODE=$code" >> "$GITHUB_ENV"
+          exit 0
 
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Capture redesigned views
-        run: pnpm exec playwright test tests/e2e/ui-redesign-screenshots.spec.ts
+        shell: bash
+        run: |
+          set +e
+          pnpm exec playwright test tests/e2e/ui-redesign-screenshots.spec.ts 2>&1 | tee artifacts/test-report/playwright.log
+          code=${PIPESTATUS[0]}
+          echo "PLAYWRIGHT_EXIT_CODE=$code" >> "$GITHUB_ENV"
+          exit 0
 
       - name: Upload screenshots
         if: always()
@@ -50,3 +78,10 @@ jobs:
           path: artifacts/ui-screenshots
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Validation gate
+        shell: bash
+        run: |
+          test "${TEST_EXIT_CODE:-1}" = "0"
+          test "${BUILD_EXIT_CODE:-1}" = "0"
+          test "${PLAYWRIGHT_EXIT_CODE:-1}" = "0"
