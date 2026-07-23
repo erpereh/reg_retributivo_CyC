@@ -3,6 +3,7 @@ import { Fira_Code, Fira_Sans } from "next/font/google";
 import { ThemeProvider } from "@/components/theme/ThemeProvider";
 import { ThemeScript } from "@/components/theme/ThemeScript";
 import "./globals.css";
+import "./theme-overrides.css";
 
 const body = Fira_Sans({
   subsets: ["latin"],
