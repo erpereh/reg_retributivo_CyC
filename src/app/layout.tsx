@@ -4,6 +4,7 @@ import { ThemeProvider } from "@/components/theme/ThemeProvider";
 import { ThemeScript } from "@/components/theme/ThemeScript";
 import "./globals.css";
 import "./theme-overrides.css";
+import "./shell-v2.css";
 
 const body = Fira_Sans({
   subsets: ["latin"],
