@@ -25,8 +25,8 @@ const SETTINGS_SECTIONS = [
 ] as const;
 
 const CONCEPT_SECTIONS = [
-  { value: "non-normalized", label: "No normalizados", tabId: "concepts-non-normalized-tab", panelId: "concepts-non-normalized-panel" },
-  { value: "normalized", label: "Normalizados", tabId: "concepts-normalized-tab", panelId: "concepts-normalized-panel" },
+  { value: "non-normalized", label: "No Norm.", tabId: "concepts-non-normalized-tab", panelId: "concepts-non-normalized-panel" },
+  { value: "normalized", label: "Normalizado", tabId: "concepts-normalized-tab", panelId: "concepts-normalized-panel" },
 ] as const;
 
 function NumberSetting({ id, label, value, onChange, helper }: Readonly<{ id: string; label: string; value: number; onChange: (value: number) => void; helper: string }>) {
@@ -100,8 +100,8 @@ export function SettingsView() {
         <SettingsPanel id="settings-concepts-panel" labelledBy="settings-concepts-tab" label="Conceptos" active={activeSection === "concepts"}>
           <div className="flex flex-col gap-4">
             <SectionTabs label="Vistas de conceptos" value={conceptView} items={CONCEPT_SECTIONS} onValueChange={selectConceptView} />
-            {visitedConcepts.has("non-normalized") ? <SettingsPanel id="concepts-non-normalized-panel" labelledBy="concepts-non-normalized-tab" label="No normalizados" active={conceptView === "non-normalized"}><ConceptMapEditor /></SettingsPanel> : null}
-            {visitedConcepts.has("normalized") ? <SettingsPanel id="concepts-normalized-panel" labelledBy="concepts-normalized-tab" label="Normalizados" active={conceptView === "normalized"}><NormalizedConceptsManager /></SettingsPanel> : null}
+            {visitedConcepts.has("non-normalized") ? <SettingsPanel id="concepts-non-normalized-panel" labelledBy="concepts-non-normalized-tab" label="No Norm." active={conceptView === "non-normalized"}><ConceptMapEditor /></SettingsPanel> : null}
+            {visitedConcepts.has("normalized") ? <SettingsPanel id="concepts-normalized-panel" labelledBy="concepts-normalized-tab" label="Normalizado" active={conceptView === "normalized"}><NormalizedConceptsManager /></SettingsPanel> : null}
           </div>
         </SettingsPanel>
       ) : null}
