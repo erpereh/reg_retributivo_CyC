@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils/classNames";
 export interface SectionTabItem<T extends string> {
   readonly value: T;
   readonly label: string;
+  readonly accessibleLabel?: string;
   readonly tabId?: string;
   readonly panelId?: string;
 }
@@ -48,6 +49,7 @@ export function SectionTabs<T extends string>({ label, value, items, onValueChan
               ref={(node) => { refs.current[index] = node; }}
               type="button"
               role="tab"
+              aria-label={item.accessibleLabel}
               aria-selected={selected}
               aria-controls={item.panelId}
               id={item.tabId}

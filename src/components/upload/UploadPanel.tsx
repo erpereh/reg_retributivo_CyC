@@ -50,8 +50,8 @@ function DropCard({
         onDrop(event);
       }}
       animate={{
-        borderColor: isActive ? "rgba(37,99,235,0.75)" : "rgba(226,232,240,1)",
-        backgroundColor: isActive ? "rgba(239,246,255,1)" : "rgba(248,250,252,0.85)",
+        borderColor: isActive ? "var(--ui-primary)" : "var(--ui-border)",
+        backgroundColor: isActive ? "var(--ui-primary-soft)" : "var(--ui-surface-muted)",
       }}
       transition={{ duration: 0.2 }}
       className="min-w-0 rounded-2xl border border-dashed p-4"
