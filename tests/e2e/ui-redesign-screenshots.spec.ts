@@ -58,8 +58,8 @@ test("captura todas las vistas del rediseño en claro, oscuro y móvil", async (
     }
   }
 
-  await page.setViewportSize({ width: 390, height: 844 });
   await openView(page, "Dashboard");
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "Abrir navegación" }).click();
   await expect(page.getByLabel("Navegación de la aplicación")).toBeVisible();
   await capture(page, "10-navegacion-movil-oscuro");
