@@ -6,16 +6,18 @@ import { useAppState } from "@/components/app/AppState";
 import { Card } from "@/components/common/Card";
 import { SectionHeader } from "@/components/common/SectionHeader";
 import { SectionTabs } from "@/components/common/SectionTabs";
+import { AppearanceSettings } from "@/components/settings/AppearanceSettings";
+import { AssistantAiSettings } from "@/components/settings/AssistantAiSettings";
 import { EmployeeExclusionsCard } from "@/components/settings/EmployeeExclusionsCard";
 import { ConceptMapEditor } from "@/components/settings/concept-map/ConceptMapEditor";
 import { NormalizedConceptsManager } from "@/components/settings/normalized-concepts/NormalizedConceptsManager";
-import { AssistantAiSettings } from "@/components/settings/AssistantAiSettings";
 
-type SettingsSection = "general" | "exclusions" | "concepts" | "ai" | "privacy";
+type SettingsSection = "general" | "appearance" | "exclusions" | "concepts" | "ai" | "privacy";
 type ConceptSection = "non-normalized" | "normalized";
 
 const SETTINGS_SECTIONS = [
   { value: "general", label: "General", tabId: "settings-general-tab", panelId: "settings-general-panel" },
+  { value: "appearance", label: "Apariencia", tabId: "settings-appearance-tab", panelId: "settings-appearance-panel" },
   { value: "exclusions", label: "Exclusiones", tabId: "settings-exclusions-tab", panelId: "settings-exclusions-panel" },
   { value: "concepts", label: "Conceptos", tabId: "settings-concepts-tab", panelId: "settings-concepts-panel" },
   { value: "ai", label: "IA", tabId: "settings-ai-tab", panelId: "settings-ai-panel" },
@@ -23,8 +25,8 @@ const SETTINGS_SECTIONS = [
 ] as const;
 
 const CONCEPT_SECTIONS = [
-  { value: "non-normalized", label: "No Norm.", tabId: "concepts-non-normalized-tab", panelId: "concepts-non-normalized-panel" },
-  { value: "normalized", label: "Normalizado", tabId: "concepts-normalized-tab", panelId: "concepts-normalized-panel" },
+  { value: "non-normalized", label: "No normalizados", tabId: "concepts-non-normalized-tab", panelId: "concepts-non-normalized-panel" },
+  { value: "normalized", label: "Normalizados", tabId: "concepts-normalized-tab", panelId: "concepts-normalized-panel" },
 ] as const;
 
 function NumberSetting({ id, label, value, onChange, helper }: Readonly<{ id: string; label: string; value: number; onChange: (value: number) => void; helper: string }>) {
@@ -47,6 +49,7 @@ export function SettingsView() {
   const [visited, setVisited] = useState<ReadonlySet<SettingsSection>>(() => new Set(["general"]));
   const [conceptView, setConceptView] = useState<ConceptSection>("non-normalized");
   const [visitedConcepts, setVisitedConcepts] = useState<ReadonlySet<ConceptSection>>(() => new Set(["non-normalized"]));
+
   useEffect(() => {
     if (assistantNavigationIntent?.type !== "settings_ai") return;
     setVisited((current) => new Set(current).add("ai"));
@@ -66,7 +69,7 @@ export function SettingsView() {
 
   return (
     <div className="flex flex-col gap-5">
-      <SectionHeader title="Ajustes" subtitle="Configura el análisis, las exclusiones y los conceptos sin alterar los resultados ya calculados." />
+      <SectionHeader title="Ajustes" subtitle="Configura el análisis y adapta la interfaz a tu forma de trabajar sin modificar resultados ya calculados." />
       <SectionTabs label="Secciones de ajustes" value={activeSection} items={SETTINGS_SECTIONS} onValueChange={selectSection} />
 
       {visited.has("general") ? (
@@ -77,27 +80,28 @@ export function SettingsView() {
                 <span className="flex size-11 items-center justify-center rounded-xl bg-blue-50 text-primary"><SlidersHorizontal aria-hidden="true" /></span>
                 <div>
                   <h2 id="settings-analysis-heading" className="text-lg font-semibold text-ink">Parámetros de análisis</h2>
-                  <p className="mt-1 text-sm text-muted">Valores por defecto para nuevos análisis.</p>
+                  <p className="mt-1 text-sm text-muted">Valores que se aplicarán al iniciar un nuevo análisis.</p>
                 </div>
               </div>
               <div className="mt-5 grid gap-4 lg:grid-cols-3">
-                <NumberSetting id="defaultTolerance" label="Tolerancia salarial por defecto" value={settings.defaultTolerance} onChange={(defaultTolerance) => updateSettings({ defaultTolerance })} helper="Importes dentro de esta tolerancia se consideran OK." />
-                <NumberSetting id="reviewThreshold" label="Umbral Revisar" value={settings.reviewThreshold} onChange={(reviewThreshold) => updateSettings({ reviewThreshold })} helper="Desde este importe se marca como revisión si supera la tolerancia." />
-                <NumberSetting id="incidentThreshold" label="Umbral Incidencia" value={settings.incidentThreshold} onChange={(incidentThreshold) => updateSettings({ incidentThreshold })} helper="Desde este importe se marca como incidencia salarial." />
+                <NumberSetting id="defaultTolerance" label="Tolerancia salarial" value={settings.defaultTolerance} onChange={(defaultTolerance) => updateSettings({ defaultTolerance })} helper="Las diferencias dentro de este margen se consideran cuadradas." />
+                <NumberSetting id="reviewThreshold" label="Umbral de revisión" value={settings.reviewThreshold} onChange={(reviewThreshold) => updateSettings({ reviewThreshold })} helper="A partir de este importe una fila pasa a revisión." />
+                <NumberSetting id="incidentThreshold" label="Umbral de incidencia" value={settings.incidentThreshold} onChange={(incidentThreshold) => updateSettings({ incidentThreshold })} helper="A partir de este importe la diferencia se destaca como incidencia." />
               </div>
             </section>
           </Card>
         </SettingsPanel>
       ) : null}
 
+      {visited.has("appearance") ? <SettingsPanel id="settings-appearance-panel" labelledBy="settings-appearance-tab" label="Apariencia" active={activeSection === "appearance"}><AppearanceSettings /></SettingsPanel> : null}
       {visited.has("exclusions") ? <SettingsPanel id="settings-exclusions-panel" labelledBy="settings-exclusions-tab" label="Exclusiones" active={activeSection === "exclusions"}><EmployeeExclusionsCard /></SettingsPanel> : null}
 
       {visited.has("concepts") ? (
         <SettingsPanel id="settings-concepts-panel" labelledBy="settings-concepts-tab" label="Conceptos" active={activeSection === "concepts"}>
           <div className="flex flex-col gap-4">
             <SectionTabs label="Vistas de conceptos" value={conceptView} items={CONCEPT_SECTIONS} onValueChange={selectConceptView} />
-            {visitedConcepts.has("non-normalized") ? <SettingsPanel id="concepts-non-normalized-panel" labelledBy="concepts-non-normalized-tab" label="No Norm." active={conceptView === "non-normalized"}><ConceptMapEditor /></SettingsPanel> : null}
-            {visitedConcepts.has("normalized") ? <SettingsPanel id="concepts-normalized-panel" labelledBy="concepts-normalized-tab" label="Normalizado" active={conceptView === "normalized"}><NormalizedConceptsManager /></SettingsPanel> : null}
+            {visitedConcepts.has("non-normalized") ? <SettingsPanel id="concepts-non-normalized-panel" labelledBy="concepts-non-normalized-tab" label="No normalizados" active={conceptView === "non-normalized"}><ConceptMapEditor /></SettingsPanel> : null}
+            {visitedConcepts.has("normalized") ? <SettingsPanel id="concepts-normalized-panel" labelledBy="concepts-normalized-tab" label="Normalizados" active={conceptView === "normalized"}><NormalizedConceptsManager /></SettingsPanel> : null}
           </div>
         </SettingsPanel>
       ) : null}
@@ -109,7 +113,7 @@ export function SettingsView() {
           <Card className="p-4 sm:p-6">
             <div className="flex items-center gap-3">
               <span className="flex size-11 items-center justify-center rounded-xl bg-emerald-50 text-success"><ShieldCheck aria-hidden="true" /></span>
-              <div><h2 className="text-lg font-semibold text-ink">Privacidad</h2><p className="mt-1 text-sm text-muted">Garantías aplicadas a exportación e IA.</p></div>
+              <div><h2 className="text-lg font-semibold text-ink">Privacidad</h2><p className="mt-1 text-sm text-muted">Garantías aplicadas a exportación, almacenamiento e IA.</p></div>
             </div>
             <ul className="mt-5 divide-y divide-line border-y border-line">
               {[
