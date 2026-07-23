@@ -4,6 +4,7 @@ import { ThemeProvider } from "@/components/theme/ThemeProvider";
 import { ThemeScript } from "@/components/theme/ThemeScript";
 import "./globals.css";
 import "./theme-overrides.css";
+import "./dark-accent-overrides.css";
 import "./shell-v2.css";
 import "./dashboard-v2.css";
 import "./settings-v2.css";
