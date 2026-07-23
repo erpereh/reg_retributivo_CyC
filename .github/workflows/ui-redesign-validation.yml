@@ -11,7 +11,7 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -61,11 +61,11 @@ jobs:
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Capture redesigned views
+      - name: Exercise real files and capture every view
         shell: bash
         run: |
           set +e
-          pnpm exec playwright test tests/e2e/ui-redesign-screenshots.spec.ts 2>&1 | tee artifacts/test-report/playwright.log
+          pnpm exec playwright test tests/e2e/ui-redesign-screenshots.spec.ts tests/e2e/real-fixtures-app.spec.ts 2>&1 | tee artifacts/test-report/playwright.log
           code=${PIPESTATUS[0]}
           echo "PLAYWRIGHT_EXIT_CODE=$code" >> "$GITHUB_ENV"
           exit 0
@@ -74,8 +74,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ui-redesign-screenshots
-          path: artifacts/ui-screenshots
+          name: ui-real-fixtures-screenshots
+          path: |
+            artifacts/ui-screenshots
+            artifacts/real-fixtures-screenshots
           if-no-files-found: warn
           retention-days: 14
 
