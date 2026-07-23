@@ -9,6 +9,7 @@ import "./dashboard-v2.css";
 import "./settings-v2.css";
 import "./common-v2.css";
 import "./cuadre-v2.css";
+import "./assistant-v2.css";
 
 const body = Fira_Sans({
   subsets: ["latin"],
