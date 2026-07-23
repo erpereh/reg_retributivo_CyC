@@ -11,7 +11,6 @@ import {
   ShieldCheck,
   Sparkles,
   Tags,
-  UploadCloud,
   UsersRound,
 } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
@@ -23,7 +22,10 @@ import { StatusBadge } from "@/components/common/StatusBadge";
 import { ChartsPanel } from "@/components/dashboard/ChartsPanel";
 import { SummaryCards } from "@/components/dashboard/SummaryCards";
 import { UploadPanel } from "@/components/upload/UploadPanel";
-import type { AppView } from "@/lib/types";
+import type { AppView, StoredAnalysis } from "@/lib/types";
+
+const DASHBOARD_TITLE = "Comparativa Recibos vs Registro Retributivo";
+const DASHBOARD_SUBTITLE = "Resumen del análisis retributivo: diferencias matched, conceptos pendientes, Recibo sin Reg. Retrib. y estado general del cuadre.";
 
 function formatDate(value?: string): string {
   if (!value) return "Sin análisis activo";
@@ -42,8 +44,9 @@ const QUICK_ACTIONS: readonly { view: AppView; label: string; description: strin
   { view: "cuadre-excel", label: "Abrir Cuadre", description: "Valida desglose, normalizados y variables.", icon: FileSpreadsheet },
 ] as const;
 
-function EmptyDashboard() {
-  const { history, setView } = useAppState();
+function EmptyDashboard({ activeAnalysis, aiBadge }: Readonly<{ activeAnalysis?: Pick<StoredAnalysis, "createdAt">; aiBadge: string }>) {
+  const state = useAppState();
+  const history = state.history ?? [];
   const reduceMotion = useReducedMotion();
 
   return (
@@ -51,8 +54,14 @@ function EmptyDashboard() {
       <section className="dashboard-welcome">
         <div className="dashboard-welcome__copy">
           <span className="dashboard-hero__tag"><Sparkles className="size-3.5" /> Comparativa retributiva profesional</span>
-          <h1>Valida recibos y Registro Retributivo con una visión clara.</h1>
-          <p>Carga los documentos, revisa diferencias por persona y concepto, y conserva cada análisis de forma local y privada.</p>
+          <h1>{DASHBOARD_TITLE}</h1>
+          <p>{DASHBOARD_SUBTITLE}</p>
+          {activeAnalysis ? (
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-2 text-xs font-semibold text-muted shadow-subtle"><Clock3 className="size-4" />{formatDate(activeAnalysis.createdAt)}</span>
+              <StatusBadge value={aiBadge} />
+            </div>
+          ) : null}
           <div className="dashboard-hero__trust">
             <span><ShieldCheck className="size-4" /> Procesamiento local</span>
             <span><ShieldCheck className="size-4" /> Sin datos bancarios</span>
@@ -82,7 +91,7 @@ function EmptyDashboard() {
       <UploadPanel />
 
       {history.length ? (
-        <button type="button" className="dashboard-history-link" onClick={() => setView("historial")}>
+        <button type="button" className="dashboard-history-link" onClick={() => state.setView?.("historial")}>
           <History className="size-4" /><span><strong>Ya tienes {history.length} {history.length === 1 ? "análisis guardado" : "análisis guardados"}</strong><small>Consulta o recupera resultados anteriores.</small></span><ArrowRight className="size-4" />
         </button>
       ) : null}
@@ -96,7 +105,7 @@ export function DashboardView() {
   const excludedCount = result?.excludedEmployeeIdsApplied?.length ?? 0;
   const sourceFiles = useMemo(() => [...new Set((result?.payrollRecords ?? []).map((row) => row.sourceFile).filter(Boolean))], [result?.payrollRecords]);
 
-  if (!result || !activeAnalysis) return <EmptyDashboard />;
+  if (!result || !activeAnalysis) return <EmptyDashboard activeAnalysis={activeAnalysis} aiBadge={aiBadge} />;
 
   return (
     <div className="flex flex-col gap-6" data-surface="dashboard-view">
@@ -105,8 +114,8 @@ export function DashboardView() {
         <div className="dashboard-hero__content">
           <span className="dashboard-hero__tag"><Sparkles className="size-3.5" /> Análisis activo</span>
           <SectionHeader
-            title="Resumen del análisis retributivo"
-            subtitle="Consulta el estado general y accede a las áreas que requieren revisión."
+            title={DASHBOARD_TITLE}
+            subtitle={DASHBOARD_SUBTITLE}
             actions={(
               <Card className="analysis-active-card px-3.5 py-3">
                 <span className="flex size-10 items-center justify-center rounded-2xl bg-indigo-50 text-primary"><Clock3 className="size-4" aria-hidden="true" /></span>
