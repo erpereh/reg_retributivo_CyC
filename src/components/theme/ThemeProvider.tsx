@@ -20,7 +20,16 @@ export interface ThemeContextValue extends ThemePreferences {
   readonly resetTheme: () => void;
 }
 
-const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
+const NOOP = () => undefined;
+const FALLBACK_THEME_CONTEXT: ThemeContextValue = {
+  ...DEFAULT_THEME_PREFERENCES,
+  effectiveTheme: "light",
+  setMode: NOOP,
+  setAccent: NOOP,
+  cycleTheme: NOOP,
+  resetTheme: NOOP,
+};
+const ThemeContext = createContext<ThemeContextValue>(FALLBACK_THEME_CONTEXT);
 
 function currentSystemDark(): boolean {
   return typeof window !== "undefined" && Boolean(window.matchMedia?.("(prefers-color-scheme: dark)").matches);
@@ -78,7 +87,5 @@ export function ThemeProvider({ children }: Readonly<{ children: ReactNode }>) {
 }
 
 export function useTheme(): ThemeContextValue {
-  const value = useContext(ThemeContext);
-  if (!value) throw new Error("useTheme debe usarse dentro de ThemeProvider");
-  return value;
+  return useContext(ThemeContext);
 }
