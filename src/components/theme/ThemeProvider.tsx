@@ -42,10 +42,10 @@ export function ThemeProvider({ children }: Readonly<{ children: ReactNode }>) {
   useEffect(() => {
     if (preferences.mode !== "system" || !window.matchMedia) return;
     const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const update = () => setSystemDark(media.matches);
-    update();
-    media.addEventListener?.("change", update);
-    return () => media.removeEventListener?.("change", update);
+    const updateSystemTheme = () => setSystemDark(media.matches);
+    updateSystemTheme();
+    media.addEventListener?.("change", updateSystemTheme);
+    return () => media.removeEventListener?.("change", updateSystemTheme);
   }, [preferences.mode]);
 
   useEffect(() => {
@@ -60,21 +60,19 @@ export function ThemeProvider({ children }: Readonly<{ children: ReactNode }>) {
   const setMode = useCallback((mode: AppearanceMode) => update({ mode }), [update]);
   const setAccent = useCallback((accent: AccentColor) => update({ accent }), [update]);
   const resetTheme = useCallback(() => setPreferences(DEFAULT_THEME_PREFERENCES), []);
-  const cycleTheme = useCallback(() => {
-    setPreferences((current) => ({
-      ...current,
-      mode: current.effectiveTheme === "dark" ? "light" : "dark",
-    } as ThemePreferences & { effectiveTheme?: EffectiveTheme }));
-  }, []);
+  const cycleTheme = useCallback(
+    () => setMode(effectiveTheme === "dark" ? "light" : "dark"),
+    [effectiveTheme, setMode],
+  );
 
   const value = useMemo<ThemeContextValue>(() => ({
     ...preferences,
     effectiveTheme,
     setMode,
     setAccent,
-    cycleTheme: () => setMode(effectiveTheme === "dark" ? "light" : "dark"),
+    cycleTheme,
     resetTheme,
-  }), [effectiveTheme, preferences, resetTheme, setAccent, setMode]);
+  }), [cycleTheme, effectiveTheme, preferences, resetTheme, setAccent, setMode]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
