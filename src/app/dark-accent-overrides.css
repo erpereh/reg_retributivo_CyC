@@ -1,0 +1,32 @@
+[data-theme="dark"][data-accent="violet"] {
+  --ui-primary-soft: #292545;
+  --ui-primary-ring: rgba(145, 130, 255, .28);
+}
+
+[data-theme="dark"][data-accent="blue"] {
+  --ui-primary-soft: #192b46;
+  --ui-primary-ring: rgba(79, 151, 255, .26);
+}
+
+[data-theme="dark"][data-accent="emerald"] {
+  --ui-primary-soft: #17362d;
+  --ui-primary-ring: rgba(43, 190, 143, .25);
+}
+
+[data-theme="dark"][data-accent="orange"] {
+  --ui-primary-soft: #3a291b;
+  --ui-primary-ring: rgba(241, 147, 67, .26);
+}
+
+[data-theme="dark"][data-accent="rose"] {
+  --ui-primary-soft: #3c2030;
+  --ui-primary-ring: rgba(231, 101, 151, .26);
+}
+
+[data-theme="dark"] [data-surface="drop-zone"] {
+  color: var(--ui-text);
+}
+
+[data-theme="dark"] [data-surface="drop-zone"] .btn-secondary {
+  background: var(--ui-surface-elevated) !important;
+}
