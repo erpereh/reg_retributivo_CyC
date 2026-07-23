@@ -20,14 +20,15 @@ const ICONS: Record<GlobalSearchKind, typeof Search> = {
 };
 
 export function GlobalSearch() {
-  const { result, history, setView, setFilters, openStoredAnalysis } = useAppState();
+  const state = useAppState();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const reduceMotion = useReducedMotion();
-  const index = useMemo(() => buildGlobalSearchIndex(result, history), [history, result]);
+  const history = state.history ?? [];
+  const index = useMemo(() => buildGlobalSearchIndex(state.result, history), [history, state.result]);
   const results = useMemo(() => searchGlobalIndex(index, query), [index, query]);
   const groups = useMemo(() => groupGlobalSearchResults(results), [results]);
 
@@ -57,14 +58,14 @@ export function GlobalSearch() {
   }
 
   async function select(entry: GlobalSearchEntry) {
-    if (entry.kind === "analysis" && entry.analysisId) {
-      await openStoredAnalysis(entry.analysisId);
-      setView("dashboard");
+    if (entry.kind === "analysis" && entry.analysisId && state.openStoredAnalysis) {
+      await state.openStoredAnalysis(entry.analysisId);
+      state.setView?.("dashboard");
       close();
       return;
     }
-    if (entry.query) setFilters({ ...EMPTY_FILTERS, query: entry.query });
-    setView(entry.targetView);
+    if (entry.query) state.setFilters?.({ ...EMPTY_FILTERS, query: entry.query });
+    state.setView?.(entry.targetView);
     close();
   }
 
