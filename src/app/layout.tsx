@@ -5,6 +5,7 @@ import { ThemeScript } from "@/components/theme/ThemeScript";
 import "./globals.css";
 import "./theme-overrides.css";
 import "./shell-v2.css";
+import "./dashboard-v2.css";
 import "./settings-v2.css";
 
 const body = Fira_Sans({
