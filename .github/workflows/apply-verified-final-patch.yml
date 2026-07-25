@@ -1,0 +1,38 @@
+name: Apply verified final patch
+
+on:
+  push:
+    branches:
+      - chatgpt/reference-ui-final
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/reference-ui-final
+          fetch-depth: 0
+      - name: Decode, verify and apply
+        shell: bash
+        run: |
+          base64 --decode .chatgpt/final-upload.b64 > /tmp/final-upload.patch.gz
+          echo '47ffaa22ee4d77dbb04ca7f94289901a2b58de152696e282659d735563f2de53  /tmp/final-upload.patch.gz' | sha256sum --check
+          gzip -dc /tmp/final-upload.patch.gz > /tmp/final-upload.patch
+          echo 'cac47ded48fe036fff52c6aa220084145ec89be9f0f19a0db42e39855fbb3080  /tmp/final-upload.patch' | sha256sum --check
+          git apply --check /tmp/final-upload.patch
+          git apply /tmp/final-upload.patch
+          rm -rf .chatgpt
+          rm -f .github/workflows/apply-verified-final-patch.yml
+          rm -f .github/workflows/apply-final-fixes.yml
+          rm -f .github/workflows/export-source.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'fix(ui): complete verified assistant and real source flow'
+          git push origin HEAD:chatgpt/reference-ui-final
