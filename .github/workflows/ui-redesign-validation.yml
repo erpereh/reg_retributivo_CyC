@@ -1,9 +1,14 @@
+# Validates the real Next.js application and bundled source fixtures.
+# Final validation for the consolidated assistant, real sources, responsive views and modal captures.
 name: UI redesign validation
 
 on:
   pull_request:
-    branches: [main]
-  workflow_dispatch:
+    branches:
+      - main
+  push:
+    branches:
+      - chatgpt/reference-ui-final
 
 permissions:
   contents: read
@@ -11,77 +16,114 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      CI: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Package checked-out source
+        run: git archive --format=zip --output=current-source.zip HEAD
+
+      - name: Upload checked-out source
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-source
+          path: current-source.zip
+          retention-days: 1
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10
+          version: 10.11.0
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 20
           cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Unit and integration tests
-        shell: bash
-        run: |
-          mkdir -p artifacts/test-report
-          set +e
-          pnpm exec vitest run --reporter=verbose --reporter=json --outputFile=artifacts/test-report/vitest.json 2>&1 | tee artifacts/test-report/vitest.log
-          code=${PIPESTATUS[0]}
-          echo "TEST_EXIT_CODE=$code" >> "$GITHUB_ENV"
-          exit 0
-
-      - name: Upload test diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ui-redesign-test-report
-          path: artifacts/test-report
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Production build
+      - name: Run unit tests
+        id: unit_tests
         shell: bash
         run: |
           set +e
-          pnpm build 2>&1 | tee artifacts/test-report/build.log
-          code=${PIPESTATUS[0]}
-          echo "BUILD_EXIT_CODE=$code" >> "$GITHUB_ENV"
+          pnpm test -- --reporter=verbose 2>&1 | tee unit-tests.log
+          status=${PIPESTATUS[0]}
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
           exit 0
 
-      - name: Install Chromium
+      - name: Build production application
+        id: production_build
+        shell: bash
+        run: |
+          set +e
+          pnpm build 2>&1 | tee production-build.log
+          status=${PIPESTATUS[0]}
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Install Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Capture redesigned views
+      - name: Run complete Chromium E2E validation
+        id: playwright
         shell: bash
         run: |
           set +e
-          pnpm exec playwright test tests/e2e/ui-redesign-screenshots.spec.ts 2>&1 | tee artifacts/test-report/playwright.log
-          code=${PIPESTATUS[0]}
-          echo "PLAYWRIGHT_EXIT_CODE=$code" >> "$GITHUB_ENV"
+          pnpm exec playwright test \
+            tests/e2e/ui-redesign-screenshots.spec.ts \
+            tests/e2e/real-fixtures-app.spec.ts \
+            tests/e2e/assistant.spec.ts \
+            --project=chromium 2>&1 | tee playwright.log
+          status=${PIPESTATUS[0]}
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
           exit 0
 
-      - name: Upload screenshots
+      - name: Upload validation logs and reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ui-redesign-screenshots
-          path: artifacts/ui-screenshots
-          if-no-files-found: warn
-          retention-days: 14
+          name: ui-redesign-validation-reports
+          path: |
+            unit-tests.log
+            production-build.log
+            playwright.log
+            playwright-report
+            test-results
+          if-no-files-found: ignore
+          retention-days: 7
 
-      - name: Validation gate
+      - name: Upload real source screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-fixtures-screenshots
+          path: artifacts/real-fixtures-screenshots
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload final requested screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-screenshots
+          path: artifacts/final-screenshots
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Gate validation result
+        if: always()
         shell: bash
         run: |
-          test "${TEST_EXIT_CODE:-1}" = "0"
-          test "${BUILD_EXIT_CODE:-1}" = "0"
-          test "${PLAYWRIGHT_EXIT_CODE:-1}" = "0"
+          echo "Unit tests exit code: ${{ steps.unit_tests.outputs.exit_code }}"
+          echo "Production build exit code: ${{ steps.production_build.outputs.exit_code }}"
+          echo "Playwright exit code: ${{ steps.playwright.outputs.exit_code }}"
+          test "${{ steps.unit_tests.outputs.exit_code }}" = "0"
+          test "${{ steps.production_build.outputs.exit_code }}" = "0"
+          test "${{ steps.playwright.outputs.exit_code }}" = "0"

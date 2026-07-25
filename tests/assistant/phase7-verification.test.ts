@@ -52,6 +52,28 @@ describe("Phase 7 verification contracts", () => {
     });
   });
 
+  it("plans and synthesizes a real person profile from local tool evidence", async () => {
+    const adapter = new DeterministicE2EAdapter();
+    const plan = await adapter.planTools({
+      apiKey: "", modelId: "e2e-model",
+      messages: [
+        { role: "system", content: "Análisis: analysis-real. Matrículas asociadas: 10048." },
+        { role: "user", content: "Consulta la matrícula 10048" },
+      ],
+      tools: [{ name: "getPersonProfile", description: "Ficha", parameters: {} }],
+    });
+    expect(plan.toolCalls).toEqual([{ id: "e2e-get-person-profile", name: "getPersonProfile", args: { analysisId: "analysis-real", personId: "10048" } }]);
+
+    const evidence = [[{ tool: "getPersonProfile", status: "success", data: { personId: "10048", totals: { registro: 63862.04, payroll: 64070.09, difference: 208.05 }, completeness: { mismatches: 1 }, comparisons: [{ pdfConcept: "Teletrabajo", difference: 208.05, cause: { label: "Teletrabajo", confidence: "alta" } }] } }]];
+    const chunks: string[] = [];
+    for await (const event of adapter.streamResponse({ apiKey: "", modelId: "e2e-model", messages: [{ role: "user", content: `Consulta la matrícula 10048\n\nResultados locales sanitizados para la síntesis final:\n${JSON.stringify(evidence)}` }] })) {
+      if (event.type === "text_delta") chunks.push(event.delta);
+    }
+    expect(chunks.join("")).toContain("matrícula 10048");
+    expect(chunks.join("")).toContain("208,05");
+    expect(chunks.join("")).toContain("Teletrabajo");
+  });
+
   it("builds an exclusively sanitized fixture above 5,000 chunks", () => {
     const chunks = createSanitizedPerformanceFixture(5_200);
     expect(chunks).toHaveLength(5_200);

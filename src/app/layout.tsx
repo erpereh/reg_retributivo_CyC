@@ -11,6 +11,8 @@ import "./settings-v2.css";
 import "./common-v2.css";
 import "./cuadre-v2.css";
 import "./assistant-v2.css";
+import "./reference-ui.css";
+import "./assistant-clone.css";
 
 const body = Fira_Sans({
   subsets: ["latin"],

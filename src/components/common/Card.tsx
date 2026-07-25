@@ -14,12 +14,12 @@ export function Card({ children, className, interactive = false, tone = "default
   return (
     <motion.div
       data-slot="card"
-      whileHover={interactive ? { y: -2 } : undefined}
+      whileHover={undefined}
       transition={{ duration: 0.18, ease: "easeOut" }}
       className={cn(
-        "min-w-0 overflow-hidden rounded-[22px] border bg-white/95 text-ink shadow-card backdrop-blur-sm",
-        tone === "blue" ? "border-primary/20 bg-gradient-to-br from-white via-white to-indigo-50/70" : "border-line/80",
-        interactive && "transition-[border-color,box-shadow] duration-200 hover:border-primary/25 hover:shadow-card-hover",
+        "min-w-0 overflow-hidden rounded-[14px] border bg-white text-ink shadow-none",
+        tone === "blue" ? "border-primary/15 bg-indigo-50/35" : "border-line",
+        interactive && "transition-colors duration-150 hover:border-primary/25",
         className,
       )}
       {...props}

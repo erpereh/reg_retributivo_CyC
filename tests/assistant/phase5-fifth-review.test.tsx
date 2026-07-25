@@ -186,8 +186,7 @@ describe("Phase 5 fifth-review regressions", () => {
     await createStartedPromise;
     expect(screen.getByRole("button", { name: "Nueva conversación" })).toBeDisabled();
     expect(screen.getByRole("button", { name: /conversation-a/ })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /Renombrar conversaci.n/ })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /Eliminar conversaci.n/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Más acciones de conversación" })).toBeEnabled();
     releaseCreate();
     await waitFor(() => expect(screen.getByTestId("double-done")).toHaveTextContent("true"));
     expect(createdWrites).toBe(1);
@@ -260,7 +259,8 @@ describe("Phase 5 fifth-review regressions", () => {
     repositories.clearAssistantContent = async () => { clearStarted(); await clearGate; await originalClear(); clearDone(); };
     render(<AssistantProvider repositoriesFactory={async () => repositories}><AssistantView /><AssistantAiSettings /><StateProbe /></AssistantProvider>);
     await screen.findByRole("heading", { name: "conversation-a" });
-    fireEvent.click(screen.getByRole("button", { name: /Eliminar conversaci.n/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Más acciones de conversación" }));
+    fireEvent.click(screen.getByRole("button", { name: "Eliminar conversación" }));
     await deleteStartedPromise;
     fireEvent.click(screen.getByRole("button", { name: "Borrar conversaciones y contexto" }));
     releaseDelete();

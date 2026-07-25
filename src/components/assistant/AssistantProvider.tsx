@@ -102,6 +102,7 @@ export interface AssistantContextValue {
   modelCatalog: ModelCatalogEntry[];
   modelPreferences: ModelPreferences;
   checkingCompatibilityEntryIds: readonly string[];
+  activeAnalysisSummary?: { registroFileName: string; pdfCount: number; uniquePeople: number; periods: readonly string[] };
   saveProviderConfig(config: ProviderConfig): Promise<void>;
   deleteProviderConfig(providerId: string): Promise<void>;
   checkProvider(providerId: string): Promise<void>;
@@ -1304,8 +1305,11 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
   }, [checkModelCompatibility, modelCatalog, modelPreferences, persistModelPreferences, providerConfigs, updateSelectedConversation]);
   const openModelSettings = useCallback(() => onNavigate?.({ type: "settings_ai" }), [onNavigate]);
 
-  const availablePersonIds = useMemo(() => conversation?.type === "analysis" && activeAnalysis && activeAnalysis.id === conversation.analysisId
-    ? activeAnalysis.result.people.map((person) => person.employeeNumber) : [], [activeAnalysis, conversation]);
+  const hasActiveAnalysisContext = conversation?.type === "analysis" && activeAnalysis?.id === conversation.analysisId;
+  const activeAnalysisResult = activeAnalysis?.result;
+  const activeAnalysisPeople = hasActiveAnalysisContext ? activeAnalysisResult?.people : undefined;
+  const availablePersonIds = useMemo(() => hasActiveAnalysisContext
+    ? (activeAnalysisPeople ?? []).map((person) => person.employeeNumber) : [], [activeAnalysisPeople, hasActiveAnalysisContext]);
   const repeatableMessageIds = useMemo(() => streaming || selectionLoading ? [] : messages.flatMap((message) => (
     message.role === "assistant" && resolveRepeatTarget(message.id) ? [message.id] : []
   )), [conversation, messages, resolveRepeatTarget, selectionLoading, streaming]);
@@ -1314,9 +1318,9 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     ready, conversations, hasMoreConversations: Boolean(conversationCursor), conversation, messages, repeatableMessageIds, hasMoreMessages: Boolean(messageCursor), sources, revealedSourceIds, events, actions, actionOutputs, resolvingActionIds, snapshots, documents, indexJobs,
     streaming, selectionLoading, conversationTransitionPending, announcement, notice, error, createGeneralConversation, loadMoreConversations, selectConversation, renameConversation, archiveConversation, deleteConversation,
     loadMoreMessages, send, stop, retryResponse, regenerateResponse, copyResponse, acceptAction, rejectAction, convertToActiveAnalysis, associatePerson, continuePersonInAssistant, addPerson, removePerson, setPrimaryPerson,
-    requestPersonProfile, openModelSettings, updateConversationPreferences, selectConversationModel, availablePersonIds, people: conversation?.type === "analysis" && activeAnalysis && activeAnalysis.id === conversation.analysisId ? activeAnalysis.result.people : [], canSend: Boolean(adapter) || Boolean(conversation && providerConfigs.some((provider) => provider.id === conversation.providerId && provider.enabled) && modelCatalog.some((entry) => entry.providerId === conversation.providerId && entry.canonicalModelId === conversation.modelId && modelCompatibility(entry, conversation.type).selectable)), providerConfigs, modelCatalog, modelPreferences, checkingCompatibilityEntryIds, saveProviderConfig, deleteProviderConfig, checkProvider, refreshProviderCatalog, checkModelCompatibility, toggleModelFavorite, assistantSettings,
+    requestPersonProfile, openModelSettings, updateConversationPreferences, selectConversationModel, availablePersonIds, activeAnalysisSummary: activeAnalysis && activeAnalysisResult ? { registroFileName: activeAnalysis.registroFileName, pdfCount: activeAnalysis.pdfCount, uniquePeople: activeAnalysisResult.summary?.uniquePeople ?? (hasActiveAnalysisContext ? activeAnalysisPeople?.length ?? 0 : 0), periods: hasActiveAnalysisContext ? [...new Set((activeAnalysisPeople ?? []).flatMap((person) => person.periods ?? []))].sort() : [] } : undefined, people: hasActiveAnalysisContext ? activeAnalysisPeople ?? [] : [], canSend: Boolean(adapter) || Boolean(conversation && providerConfigs.some((provider) => provider.id === conversation.providerId && provider.enabled) && modelCatalog.some((entry) => entry.providerId === conversation.providerId && entry.canonicalModelId === conversation.modelId && modelCompatibility(entry, conversation.type).selectable)), providerConfigs, modelCatalog, modelPreferences, checkingCompatibilityEntryIds, saveProviderConfig, deleteProviderConfig, checkProvider, refreshProviderCatalog, checkModelCompatibility, toggleModelFavorite, assistantSettings,
     updateAssistantSettings, clearAssistantContent,
-  }), [acceptAction, actionOutputs, actions, activeAnalysis, adapter, addPerson, announcement, archiveConversation, assistantSettings, associatePerson, availablePersonIds, checkModelCompatibility, checkProvider, checkingCompatibilityEntryIds, clearAssistantContent, conversation, conversationCursor, conversations, deleteProviderConfig, documents,
+  }), [acceptAction, actionOutputs, actions, activeAnalysis, activeAnalysisPeople, activeAnalysisResult, adapter, addPerson, announcement, archiveConversation, assistantSettings, associatePerson, availablePersonIds, hasActiveAnalysisContext, checkModelCompatibility, checkProvider, checkingCompatibilityEntryIds, clearAssistantContent, conversation, conversationCursor, conversations, deleteProviderConfig, documents,
     convertToActiveAnalysis, continuePersonInAssistant, copyResponse, createGeneralConversation, deleteConversation, error, events, loadMoreConversations,
     loadMoreMessages, messageCursor, messages, modelCatalog, modelPreferences, notice, openModelSettings, providerConfigs, refreshProviderCatalog, regenerateResponse, removePerson, renameConversation, repeatableMessageIds, requestPersonProfile, retryResponse,
     conversationTransitionPending, indexJobs, rejectAction, revealedSourceIds, resolvingActionIds, saveProviderConfig, selectConversation, selectConversationModel, selectionLoading, send, setPrimaryPerson, snapshots, sources, stop, streaming, toggleModelFavorite, updateAssistantSettings, updateConversationPreferences]);

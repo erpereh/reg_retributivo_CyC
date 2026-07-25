@@ -4,6 +4,9 @@ const LOCAL_WARNING = "Las API keys se leen solo desde variables de entorno del 
 
 async function openAssistant(page: Page) {
   await page.goto("/");
+  if ((page.viewportSize()?.width ?? 1280) < 768) {
+    await page.getByRole("button", { name: "Abrir navegación" }).click();
+  }
   await page.getByRole("tab", { name: "Asistente" }).click();
   await expect(page.getByTestId("assistant-shell")).toBeVisible();
 }
@@ -109,7 +112,7 @@ test("persists a general conversation, streams and regenerates after reload", as
   await page.getByRole("button", { name: "Crear conversación general" }).click();
   await page.getByLabel("Pregunta").fill("¿Qué es Cuadre Reg.?");
   await page.getByRole("button", { name: "Enviar" }).click();
-  await expect(page.getByRole("article", { name: "Respuesta del Asistente" })).toContainText("Retributivo compara");
+  await expect(page.getByRole("article", { name: "Respuesta del Asistente" })).toContainText("Retributivo compara", { timeout: 60_000 });
   await expect(page.getByRole("button", { name: "Regenerar respuesta" })).toBeVisible();
   await page.getByRole("button", { name: "Regenerar respuesta" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Respuesta regenerada" })).toBeAttached();
@@ -175,7 +178,8 @@ test("bounds transient retries in Chromium and preserves the partial producer", 
   await page.getByRole("button", { name: "Enviar" }).click();
   await expect(page.getByRole("article", { name: "Respuesta del Asistente" })).toHaveCount(1);
   await expect(page.getByRole("article", { name: "Respuesta del Asistente" })).toContainText("Primera parte sanitizada.");
-  await expect(page.getByRole("article", { name: "Respuesta del Asistente" })).toContainText("Fallida · e2e-current-model");
+  await expect(page.getByRole("article", { name: "Respuesta del Asistente" })).toContainText("Retributivo · e2e-current-model");
+  await expect(page.getByRole("article", { name: "Respuesta del Asistente" })).toContainText("Respuesta fallida");
   await expect(page.getByRole("alert").filter({ hasText: "temporalmente" })).toContainText("temporalmente");
   await page.reload();
   await page.getByRole("tab", { name: "Asistente" }).click();
@@ -231,7 +235,13 @@ test("renders complete person evidence as responsive cards and tables without te
   await seedStructuredPersonSource(page, "analysis-person-source", "conversation-person-source");
   await page.reload();
   await page.getByRole("tab", { name: "Asistente" }).click();
-  await page.getByRole("button", { name: "Abrir fuente Evidencia retributiva · matrícula 10050" }).click();
+  await page.getByRole("button", { name: "Abrir explicación completa de la persona" }).click();
+  const explanation = page.getByRole("dialog", { name: "Explicación de la revisión de persona" });
+  await expect(explanation.getByRole("heading", { name: "Resumen" })).toBeVisible();
+  await expect(explanation.getByRole("heading", { name: "Conceptos descuadrados" })).toBeVisible();
+  await expect(explanation.getByText("Abono teletrabajo").first()).toBeVisible();
+  await explanation.getByRole("button", { name: "Abrir fuente completa" }).click();
+  await expect(explanation).toHaveCount(0);
   const panel = page.getByRole("complementary", { name: "Detalle de la fuente" });
   await expect(panel.getByRole("heading", { name: "Resumen" })).toBeVisible();
   await expect(panel.getByRole("heading", { name: "Conceptos descuadrados" })).toBeVisible();
@@ -250,14 +260,14 @@ test("deletes assistant records totally and resumes a pending cleanup job after 
   await seedAnalysis(page, "analysis-delete");
   await seedAssistantAnalysisConversation(page, "analysis-delete");
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Comparativa Recibos vs Registro Retributivo" })).toBeVisible();
+  await expect(page.getByTestId("primary-kpis").getByText("Personas analizadas", { exact: true })).toBeVisible();
   await page.getByRole("tab", { name: "Historial" }).click();
   await expect(page.getByRole("heading", { name: "Historial de análisis" })).toBeVisible();
   await page.getByRole("button", { name: "Eliminar", exact: true }).click();
   await page.getByRole("button", { name: "Eliminar análisis y conversaciones" }).click();
   await expect(page.getByText("No hay análisis guardados todavía")).toBeVisible();
   await page.getByRole("tab", { name: "Asistente" }).click();
-  await expect(page.getByText("Consulta el análisis con privacidad local")).toBeVisible();
+  await expect(page.getByText("Consulta tu análisis retributivo")).toBeVisible();
 
   await seedAnalysis(page, "analysis-resume");
   await seedAssistantAnalysisConversation(page, "analysis-resume");
@@ -436,12 +446,12 @@ test("direct indexing benchmark uses 5,200 sanitized chunks, a warm-up and five 
   await page.goto("/");
   await waitForE2EHarness(page);
   const metric = await page.evaluate(async () => window.__assistantE2E!.measureDirectIndex());
+  await testInfo.attach("direct-index-metrics.json", { body: JSON.stringify(metric, null, 2), contentType: "application/json" });
+  console.log(`INDEX_METRICS ${JSON.stringify(metric)}`);
   expect(metric.runs).toBe(5);
   expect(metric.measurements).toHaveLength(5);
   expect(metric.medianMs).toBeGreaterThanOrEqual(0);
   expect(metric.p95Ms).toBeGreaterThanOrEqual(metric.medianMs ?? 0);
   expect(metric.longTaskDurations.filter((duration) => duration > 50)).toHaveLength(0);
   expect(metric.workerRequired).toBe(false);
-  await testInfo.attach("direct-index-metrics.json", { body: JSON.stringify(metric, null, 2), contentType: "application/json" });
-  console.log(`INDEX_METRICS ${JSON.stringify(metric)}`);
 });

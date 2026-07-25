@@ -18,20 +18,28 @@ export async function measureDirectIndexForE2E(): Promise<IndexMeasurementSummar
   const chunks = createSanitizedPerformanceFixture(5_200);
   const executor = new DirectIndexExecutor();
   executor.execute(chunks);
-  await pause(0);
-  const longTaskDurations: number[] = [];
+  await pause(100);
+  const longTaskEntries: PerformanceEntry[] = [];
   const observer = typeof PerformanceObserver === "undefined" ? undefined : new PerformanceObserver((list) => {
-    longTaskDurations.push(...list.getEntries().map((entry) => entry.duration));
+    longTaskEntries.push(...list.getEntries());
   });
   observer?.observe({ entryTypes: ["longtask"] });
   const measurements: number[] = [];
+  const measurementWindows: Array<{ readonly start: number; readonly end: number }> = [];
   for (let run = 0; run < 5; run += 1) {
     const start = performance.now();
     executor.execute(chunks);
-    measurements.push(performance.now() - start);
+    const end = performance.now();
+    measurements.push(end - start);
+    measurementWindows.push({ start, end });
     await pause(0);
   }
+  await pause(0);
+  longTaskEntries.push(...(observer?.takeRecords() ?? []));
   observer?.disconnect();
+  const longTaskDurations = longTaskEntries.filter((entry) => measurementWindows.some(({ start, end }) => (
+    entry.startTime < end && entry.startTime + entry.duration > start
+  ))).map((entry) => entry.duration);
   const summary = summarizeIndexMeasurements(measurements, longTaskDurations);
   return { ...summary, measurements, longTaskDurations };
 }

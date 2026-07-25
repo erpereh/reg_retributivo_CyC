@@ -92,7 +92,7 @@ describe("assistant model selector regressions", () => {
     fireEvent.click(selector);
     const catalog = screen.getByRole("dialog", { name: "Catálogo de modelos" });
     expect(within(catalog).getByRole("heading", { name: "Gemini" })).toBeVisible();
-    const firstModelButton = within(catalog).getAllByRole("button").find((button) => button.querySelector("span")?.textContent === "gemini-chat-1");
+    const firstModelButton = within(catalog).getByRole("button", { name: "gemini-chat-1" });
     expect(firstModelButton).toBeEnabled();
     expect(within(catalog).getAllByText(/^gemini-chat-/)).toHaveLength(39);
   });

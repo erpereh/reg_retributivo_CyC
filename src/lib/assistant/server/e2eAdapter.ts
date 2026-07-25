@@ -39,16 +39,53 @@ export class DeterministicE2EAdapter implements AIProviderAdapter {
     return { tokens: Math.max(1, Math.ceil(text.length / 4)), estimated: true };
   }
   async probeCapabilities(): Promise<BehavioralProbeResult> { return E2E_CAPABILITIES; }
-  async planTools(): Promise<{ toolCalls: readonly [] }> { return { toolCalls: [] }; }
+  async planTools(request: Parameters<AIProviderAdapter["planTools"]>[0]): Promise<Awaited<ReturnType<AIProviderAdapter["planTools"]>>> {
+    const latestQuestion = [...request.messages].reverse().find((message) => message.role === "user")?.content ?? "";
+    const systemContext = request.messages.find((message) => message.role === "system")?.content ?? "";
+    const personMatch = /matrícula\s+([\p{L}\p{N}._-]+)/iu.exec(latestQuestion);
+    const analysisMatch = /Análisis:\s*([^.]*)\.\s*Matrículas asociadas:/u.exec(systemContext);
+    const supportsPersonProfile = request.tools.some((tool) => tool.name === "getPersonProfile");
+    if (personMatch && analysisMatch && supportsPersonProfile) {
+      return { toolCalls: [{ id: "e2e-get-person-profile", name: "getPersonProfile", args: { analysisId: analysisMatch[1]!.trim(), personId: personMatch[1]! } }] };
+    }
+    return { toolCalls: [] };
+  }
 
   async *streamResponse(request: StreamResponseRequest): AsyncIterable<ProviderStreamEvent> {
-    const reversedMessages = [...request.messages].reverse();
-    const userQuestion = reversedMessages.find((message) => message.role === "user")?.content ?? "";
-    const partial = reversedMessages.find((message) => message.role === "assistant")?.content ?? "";
     const wait = (milliseconds: number) => new Promise<void>((resolve, reject) => {
       const timer = setTimeout(resolve, milliseconds);
       request.signal?.addEventListener("abort", () => { clearTimeout(timer); reject(request.signal?.reason); }, { once: true });
     });
+    const reversedMessages = [...request.messages].reverse();
+    const userQuestion = reversedMessages.find((message) => message.role === "user")?.content ?? "";
+    const partial = reversedMessages.find((message) => message.role === "assistant")?.content ?? "";
+    const synthesisMarker = "Resultados locales sanitizados para la síntesis final:\n";
+    const synthesisMessage = reversedMessages.find((message) => message.role === "user" && message.content.includes(synthesisMarker));
+    if (synthesisMessage) {
+      try {
+        const rounds = JSON.parse(synthesisMessage.content.split(synthesisMarker)[1] ?? "[]") as Array<Array<{ tool?: string; status?: string; data?: unknown }>>;
+        const profile = rounds.flat().find((entry) => entry.tool === "getPersonProfile" && entry.status !== "failed")?.data as {
+          personId?: string; totals?: { registro?: number; payroll?: number; difference?: number }; completeness?: { mismatches?: number };
+          comparisons?: Array<{ pdfConcept?: string; registroCode?: string; difference?: number; cause?: { label?: string; confidence?: string } }>;
+        } | undefined;
+        if (profile?.personId && profile.totals) {
+          const money = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" });
+          const mismatches = (profile.comparisons ?? []).filter((item) => Math.abs(item.difference ?? 0) > 0.009).slice(0, 3);
+          const concepts = mismatches.map((item) => `${item.pdfConcept ?? item.registroCode ?? "Concepto"}: ${money.format(item.difference ?? 0)} (${item.cause?.label ?? "revisión pendiente"}, confianza ${item.cause?.confidence ?? "baja"})`).join("; ");
+          const text = `La matrícula ${profile.personId} presenta una diferencia de ${money.format(profile.totals.difference ?? 0)}: el Registro suma ${money.format(profile.totals.registro ?? 0)} y los recibos ${money.format(profile.totals.payroll ?? 0)}. Se han identificado ${profile.completeness?.mismatches ?? mismatches.length} conceptos descuadrados.${concepts ? ` Principales evidencias: ${concepts}.` : ""} Recomendación: revisar las evidencias originales y confirmar el criterio de inclusión de cada concepto.`;
+          for (const delta of [text.slice(0, Math.ceil(text.length / 2)), text.slice(Math.ceil(text.length / 2))]) {
+            if (request.signal?.aborted) throw request.signal.reason;
+            await wait(15);
+            yield { type: "text_delta", delta };
+          }
+          yield { type: "usage", usage: { inputTokens: Math.max(1, Math.ceil(synthesisMessage.content.length / 4)), outputTokens: Math.max(1, Math.ceil(text.length / 4)), totalTokens: Math.max(2, Math.ceil((synthesisMessage.content.length + text.length) / 4)), estimated: true } };
+          yield { type: "done", finishReason: "stop" };
+          return;
+        }
+      } catch {
+        // Fall through to the generic deterministic response.
+      }
+    }
     if (partial.includes("Primera parte sanitizada")) {
       if (request.modelId === "e2e-current-model") throw new ProviderAdapterError("transient", "e2e_current_continuation_transient");
       yield { type: "text_delta", delta: "Continuación por e2e-default-model." };

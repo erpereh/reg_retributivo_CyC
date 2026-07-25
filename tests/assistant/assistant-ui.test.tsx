@@ -4,6 +4,7 @@ import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { AssistantMessage } from "@/components/assistant/AssistantMessage";
 import { AssistantProvider } from "@/components/assistant/AssistantProvider";
 import { AssistantView } from "@/components/assistant/AssistantView";
 import { ActionProposal } from "@/components/assistant/ActionProposal";
@@ -68,6 +69,43 @@ function source(id: string, availability: SourceReference["availability"], label
   };
 }
 
+function personAnalysisSource(): SourceReference {
+  return {
+    id: "source-person",
+    conversationId: "conversation-ui",
+    messageId: "message-assistant",
+    analysisId: "analysis-1",
+    personId: "10050",
+    sourceType: "person_analysis",
+    sanitizedSourceLabel: "Evidencia retributiva · matrícula 10050",
+    availability: "available",
+    conceptIds: [],
+    excerpt: "Matrícula 10050 sin diferencia.",
+    sanitizedHash: "source-person-hash",
+    presentation: {
+      kind: "person_analysis",
+      personId: "10050",
+      evidence: {
+        personId: "10050",
+        laborContext: {},
+        totals: { registro: 1000, payroll: 1000, difference: 0 },
+        blocks: {
+          salary: { registro: 1000, payroll: 1000, difference: 0 },
+          salaryComplement: { registro: 0, payroll: 0, difference: 0 },
+          extraSalary: { registro: 0, payroll: 0, difference: 0 },
+        },
+        status: "OK",
+        periods: [],
+        registro: { concepts: [] },
+        payroll: { periods: [] },
+        comparisons: [],
+        cuadre: {},
+        completeness: { registroConcepts: 0, payrollPeriods: 0, payrollConcepts: 0, comparisons: 0, mismatches: 0 },
+      },
+    } as SourceReference["presentation"],
+  };
+}
+
 async function seedUi(factory: IDBFactory, dbName: string, type: "general" | "analysis" = "general") {
   const repositories = await createIndexedDbRepositories({ factory, dbName });
   await repositories.conversations.put(baseConversation(type));
@@ -122,6 +160,35 @@ describe("assistant conversation UI", () => {
     installBrowser();
   });
   afterEach(() => vi.unstubAllGlobals());
+
+  test("opens the full source drawer from the person explanation modal", async () => {
+    const personSource = personAnalysisSource();
+    const onOpenSource = vi.fn();
+    render(<AssistantMessage
+      message={message({ sourceRefIds: [personSource.id], actionIds: [] })}
+      sources={[personSource]}
+      revealedSourceIds={[]}
+      actions={[]}
+      actionOutputs={{}}
+      resolvingActionIds={[]}
+      actionsDisabled={false}
+      latestAssistant
+      repeatable
+      onCopy={vi.fn()}
+      onRetry={vi.fn()}
+      onRegenerate={vi.fn()}
+      onAcceptAction={vi.fn()}
+      onRejectAction={vi.fn()}
+      onOpenSource={onOpenSource}
+    />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Abrir explicación completa de la persona" }));
+    const dialog = screen.getByRole("dialog", { name: "Explicación de la revisión de persona" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Abrir fuente completa" }));
+
+    expect(onOpenSource).toHaveBeenCalledWith(personSource);
+    expect(screen.queryByRole("dialog", { name: "Explicación de la revisión de persona" })).toBeNull();
+  });
 
   test("offers Añadir contexto for an active general conversation", async () => {
     const factory = new IDBFactory();
