@@ -1,4 +1,4 @@
-name: Diagnose ChatGPT UI subparts
+name: Diagnose ChatGPT UI bundle
 
 on:
   pull_request:
@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   diagnose:
@@ -25,12 +25,37 @@ jobs:
           ref: chatgpt/reference-ui-final
           fetch-depth: 0
 
-      - name: Persist subpart hash report
+      - name: Build hash report
         shell: bash
         run: |
-          sha256sum .chatgpt/part-02-[0-3].txt > .chatgpt/subpart-hashes.txt
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .chatgpt/subpart-hashes.txt
-          git commit -m "chore: record staged subpart hashes"
-          git push origin HEAD:chatgpt/reference-ui-final
+          sha256sum .chatgpt/part-02-[0-3].txt > /tmp/subpart-hashes.txt
+          set +e
+          cat \
+            .chatgpt/part-00.txt \
+            .chatgpt/part-01.txt \
+            .chatgpt/part-02-0.txt \
+            .chatgpt/part-02-1.txt \
+            .chatgpt/part-02-2.txt \
+            .chatgpt/part-02-3.txt \
+            .chatgpt/part-03.txt \
+            .chatgpt/part-04.txt \
+            .chatgpt/part-05.txt \
+            .chatgpt/part-06.txt \
+            .chatgpt/part-07.txt \
+            .chatgpt/part-08.txt \
+            | tr -d '[:space:]' \
+            | base64 --decode > /tmp/changes.tar.gz
+          decode_status=$?
+          set -e
+          printf 'decode_status=%s\n' "$decode_status" >> /tmp/subpart-hashes.txt
+          sha256sum /tmp/changes.tar.gz >> /tmp/subpart-hashes.txt
+
+      - name: Upload diagnostic report
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatgpt-ui-bundle-diagnostics
+          path: |
+            /tmp/subpart-hashes.txt
+            /tmp/changes.tar.gz
+          if-no-files-found: error
+          retention-days: 1
