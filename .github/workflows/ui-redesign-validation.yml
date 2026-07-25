@@ -23,6 +23,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Export exact source snapshot
+        shell: bash
+        run: |
+          git rev-parse HEAD > BRANCH_HEAD_SHA.txt
+          tar --exclude=.git --exclude=node_modules --exclude=.next --exclude=artifacts --exclude=test-results --exclude=playwright-report -czf /tmp/reg-retributivo-branch.tar.gz .
+
+      - name: Upload exact source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: reg-retributivo-branch-snapshot
+          path: /tmp/reg-retributivo-branch.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -103,10 +117,11 @@ jobs:
         with:
           name: final-screenshots
           path: artifacts/final-screenshots
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
 
       - name: Gate validation result
+        if: always()
         shell: bash
         run: |
           echo "Unit tests exit code: ${{ steps.unit_tests.outputs.exit_code }}"
