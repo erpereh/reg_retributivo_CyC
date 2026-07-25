@@ -1,5 +1,5 @@
 # Validates the real Next.js application and bundled source fixtures.
-# Final production validation after privacy, model selector and real-source fixes.
+# Definitive validation after selecting provider models by their visible label.
 name: UI redesign validation
 
 on:
