@@ -6,9 +6,6 @@ on:
       - main
     types:
       - synchronize
-  push:
-    branches:
-      - chatgpt/reference-ui-final
 
 permissions:
   contents: write
@@ -31,12 +28,11 @@ jobs:
           echo "e532bac2e4601d92e9c681b43a829b9ec4fd8904ed2b7b4a6905e1a28489e3a3  /tmp/final.patch.gz" | sha256sum --check
           gzip -dc /tmp/final.patch.gz > /tmp/final.patch
           echo "7a6dc3131bed74b7188712b0ccd79644f4b7e2a6dcfa13634a8f966fcb410393  /tmp/final.patch" | sha256sum --check
-          git apply --check /tmp/final.patch
 
       - name: Apply and commit patch
         shell: bash
         run: |
-          git apply /tmp/final.patch
+          git apply --3way --index /tmp/final.patch
           rm -rf .chatgpt
           rm -f .github/workflows/apply-final-validation-patch.yml
           git config user.name "github-actions[bot]"
