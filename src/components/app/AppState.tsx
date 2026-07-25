@@ -560,7 +560,8 @@ export function useAppState(): AppStateValue {
   return context;
 }
 
-export function matchesDashboardQuery(value: string | undefined, query: string): boolean {
-  if (!query.trim()) return true;
-  return normalizeComparableText(value).includes(normalizeComparableText(query));
+export function matchesQuery(values: readonly (string | undefined)[], query: string): boolean {
+  if (!query) return true;
+  const normalized = normalizeComparableText(query);
+  return values.some((value) => normalizeComparableText(value).includes(normalized));
 }
