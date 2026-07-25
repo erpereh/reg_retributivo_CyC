@@ -26,10 +26,12 @@ jobs:
           ref: chatgpt/reference-ui-final
           fetch-depth: 0
 
-      - name: Decode and verify staged bundle
+      - name: Verify staged bundle parts
         shell: bash
         run: |
+          sha256sum .chatgpt/part-*.txt
           cat .chatgpt/part-*.txt | tr -d '[:space:]' | base64 --decode > /tmp/changes.tar.gz
+          sha256sum /tmp/changes.tar.gz
           echo "13aaf372174a1ee8de5b70b0d87eedc65ceae8b241f53f6a384676a648cfe624  /tmp/changes.tar.gz" | sha256sum --check
 
       - name: Apply files and remove staging helpers
