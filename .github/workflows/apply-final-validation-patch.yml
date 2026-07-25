@@ -28,12 +28,32 @@ jobs:
           echo "e532bac2e4601d92e9c681b43a829b9ec4fd8904ed2b7b4a6905e1a28489e3a3  /tmp/final.patch.gz" | sha256sum --check
           gzip -dc /tmp/final.patch.gz > /tmp/final.patch
           echo "7a6dc3131bed74b7188712b0ccd79644f4b7e2a6dcfa13634a8f966fcb410393  /tmp/final.patch" | sha256sum --check
-          git apply --exclude=.github/workflows/ui-redesign-validation.yml --check /tmp/final.patch
+          tr -d '[:space:]' < .chatgpt/real-fixtures-app.spec.ts.gz.b64 | base64 --decode > /tmp/real-fixtures-app.spec.ts.gz
+          echo "670ef1b33572eab0fcbeac0d7caa55678a25a36961563deb0fa8ab527fd71867  /tmp/real-fixtures-app.spec.ts.gz" | sha256sum --check
+          git apply \
+            --include=src/app/assistant-clone.css \
+            --include=src/components/assistant/AssistantProvider.tsx \
+            --include=src/components/assistant/ConversationTimeline.tsx \
+            --include=src/components/layout/AppShell.tsx \
+            --include=src/lib/assistant/server/e2eAdapter.ts \
+            --include=tests/assistant/phase6-integration-review.test.tsx \
+            --include=tests/assistant/phase7-verification.test.ts \
+            --check /tmp/final.patch
 
-      - name: Apply and commit patch
+      - name: Apply and commit final files
         shell: bash
         run: |
-          git apply --exclude=.github/workflows/ui-redesign-validation.yml /tmp/final.patch
+          git apply \
+            --include=src/app/assistant-clone.css \
+            --include=src/components/assistant/AssistantProvider.tsx \
+            --include=src/components/assistant/ConversationTimeline.tsx \
+            --include=src/components/layout/AppShell.tsx \
+            --include=src/lib/assistant/server/e2eAdapter.ts \
+            --include=tests/assistant/phase6-integration-review.test.tsx \
+            --include=tests/assistant/phase7-verification.test.ts \
+            /tmp/final.patch
+          mkdir -p tests/e2e
+          gzip -dc /tmp/real-fixtures-app.spec.ts.gz > tests/e2e/real-fixtures-app.spec.ts
           rm -rf .chatgpt
           rm -f .github/workflows/apply-final-validation-patch.yml
           git config user.name "github-actions[bot]"
