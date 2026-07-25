@@ -231,7 +231,13 @@ test("renders complete person evidence as responsive cards and tables without te
   await seedStructuredPersonSource(page, "analysis-person-source", "conversation-person-source");
   await page.reload();
   await page.getByRole("tab", { name: "Asistente" }).click();
-  await page.getByRole("button", { name: "Abrir fuente Evidencia retributiva · matrícula 10050" }).click();
+  await page.getByRole("button", { name: "Abrir explicación completa de la persona" }).click();
+  const explanation = page.getByRole("dialog", { name: "Explicación de la revisión de persona" });
+  await expect(explanation.getByRole("heading", { name: "Resumen" })).toBeVisible();
+  await expect(explanation.getByRole("heading", { name: "Conceptos descuadrados" })).toBeVisible();
+  await expect(explanation.getByText("Abono teletrabajo").first()).toBeVisible();
+  await explanation.getByRole("button", { name: "Abrir fuente completa" }).click();
+  await expect(explanation).toHaveCount(0);
   const panel = page.getByRole("complementary", { name: "Detalle de la fuente" });
   await expect(panel.getByRole("heading", { name: "Resumen" })).toBeVisible();
   await expect(panel.getByRole("heading", { name: "Conceptos descuadrados" })).toBeVisible();
@@ -257,7 +263,7 @@ test("deletes assistant records totally and resumes a pending cleanup job after 
   await page.getByRole("button", { name: "Eliminar análisis y conversaciones" }).click();
   await expect(page.getByText("No hay análisis guardados todavía")).toBeVisible();
   await page.getByRole("tab", { name: "Asistente" }).click();
-  await expect(page.getByText("Consulta el análisis con privacidad local")).toBeVisible();
+  await expect(page.getByText("Consulta tu análisis retributivo")).toBeVisible();
 
   await seedAnalysis(page, "analysis-resume");
   await seedAssistantAnalysisConversation(page, "analysis-resume");

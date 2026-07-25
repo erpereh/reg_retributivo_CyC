@@ -100,70 +100,68 @@ function EmptyDashboard({ activeAnalysis, aiBadge }: Readonly<{ activeAnalysis?:
 }
 
 export function DashboardView() {
-  const { activeAnalysis, result, aiStatus, setView } = useAppState();
+  const { activeAnalysis, result, aiStatus, setView, resetForNewAnalysis } = useAppState();
   const aiBadge = aiStatus?.configured && aiStatus.enabled ? "IA disponible" : "IA no configurada";
   const excludedCount = result?.excludedEmployeeIdsApplied?.length ?? 0;
   const sourceFiles = useMemo(() => [...new Set((result?.payrollRecords ?? []).map((row) => row.sourceFile).filter(Boolean))], [result?.payrollRecords]);
 
   if (!result || !activeAnalysis) return <EmptyDashboard activeAnalysis={activeAnalysis} aiBadge={aiBadge} />;
 
+  const metrics = [
+    { label: "Personas analizadas", value: result.summary.uniquePeople, detail: `${result.summary.matchedPeople} con datos cruzados`, icon: UsersRound },
+    { label: "Con diferencias", value: result.summary.peopleWithDifferences, detail: "Fuera de la tolerancia", icon: CheckCircle2 },
+    { label: "Recibos procesados", value: result.summary.pdfsAnalyzed, detail: result.summary.pdfsFailed ? `${result.summary.pdfsFailed} con error` : "Procesamiento completado", icon: FileText },
+    { label: "Documentos", value: sourceFiles.length + 1, detail: "PDF y Registro Retributivo", icon: FileSpreadsheet },
+  ] as const;
+
   return (
-    <div className="flex flex-col gap-6" data-surface="dashboard-view">
-      <section className="dashboard-hero">
-        <div className="dashboard-hero__glow" aria-hidden="true" />
-        <div className="dashboard-hero__content">
-          <span className="dashboard-hero__tag"><Sparkles className="size-3.5" /> Análisis activo</span>
-          <SectionHeader
-            title={DASHBOARD_TITLE}
-            subtitle={DASHBOARD_SUBTITLE}
-            actions={(
-              <Card className="analysis-active-card px-3.5 py-3">
-                <span className="flex size-10 items-center justify-center rounded-2xl bg-indigo-50 text-primary"><Clock3 className="size-4" aria-hidden="true" /></span>
-                <div><p className="text-[11px] font-bold uppercase tracking-[0.12em] text-muted">Procesado</p><p className="mt-0.5 text-sm font-semibold text-ink">{formatDate(activeAnalysis.createdAt)}</p></div>
-                <StatusBadge value={aiBadge} />
-              </Card>
-            )}
-          />
-          <div className="dashboard-hero__trust">
-            <span><ShieldCheck className="size-4" /> {activeAnalysis.pdfCount} recibos</span>
-            <span><ShieldCheck className="size-4" /> {result.summary.uniquePeople} personas</span>
-            <span><ShieldCheck className="size-4" /> Tolerancia {result.summary.tolerance} €</span>
-          </div>
+    <div className="dashboard-reference" data-surface="dashboard-view">
+      <header className="dashboard-reference__header">
+        <div className="dashboard-reference__header-copy">
+          <h1>Buenos días</h1>
+          <p>Este es el resumen del análisis retributivo activo.</p>
         </div>
-      </section>
+        <button type="button" className="btn-primary min-h-10 px-4" onClick={resetForNewAnalysis}><FileSpreadsheet className="size-4" />Nuevo análisis</button>
+      </header>
 
-      {excludedCount ? <p className="inline-flex self-start rounded-full border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-muted shadow-subtle">Exclusiones aplicadas: {excludedCount} matrículas</p> : null}
-
-      <SummaryCards summary={result.summary} internalExcelChecks={result.internalExcelChecks} />
-
-      <section className="dashboard-quick-actions" aria-label="Accesos rápidos">
-        {QUICK_ACTIONS.map((item) => {
-          const Icon = item.icon;
+      <section className="dashboard-reference__metrics" aria-label="Indicadores principales">
+        {metrics.map((metric) => {
+          const Icon = metric.icon;
           return (
-            <button key={item.view} type="button" onClick={() => setView(item.view)}>
-              <span><Icon className="size-5" /></span>
-              <div><strong>{item.label}</strong><small>{item.description}</small></div>
-              <ArrowRight className="size-4" />
-            </button>
+            <Card key={metric.label} className="dashboard-reference__metric">
+              <div className="dashboard-reference__metric-top"><span>{metric.label}</span><span className="dashboard-reference__metric-icon"><Icon className="size-4" /></span></div>
+              <strong>{metric.value}</strong>
+              <small>{metric.detail}</small>
+            </Card>
           );
         })}
       </section>
 
-      <section className="dashboard-lower-grid">
-        <Card className="analysis-files-card p-0">
-          <div className="analysis-files-card__header"><div><p>Documentos y fuentes</p><h2>Archivos del análisis</h2></div><span>{sourceFiles.length + 1} archivos</span></div>
-          <div className="analysis-files-card__list">
-            <div><span className="analysis-files-card__icon analysis-files-card__icon--excel"><FileSpreadsheet className="size-4" /></span><div><strong>{activeAnalysis.registroFileName}</strong><small>Registro Retributivo</small></div><StatusBadge value="Procesado" /></div>
-            {sourceFiles.slice(0, 5).map((file) => <div key={file}><span className="analysis-files-card__icon"><FileText className="size-4" /></span><div><strong>{file}</strong><small>Recibo PDF</small></div><StatusBadge value="Procesado" /></div>)}
-            {sourceFiles.length > 5 ? <p className="analysis-files-card__more">Y {sourceFiles.length - 5} archivos más incluidos en el análisis.</p> : null}
+      <section className="dashboard-reference__grid">
+        <Card className="dashboard-reference__section">
+          <div className="dashboard-reference__section-header"><div><h2>Resumen del análisis</h2><p>Estado de la comparativa entre recibos y Registro Retributivo</p></div><StatusBadge value="Procesado" /></div>
+          <div className="dashboard-reference__overview">
+            <div><span>Personas con diferencia</span><strong>{result.summary.peopleWithDifferences}</strong></div>
+            <div><span>Conceptos pendientes</span><strong>{result.summary.conceptsPendingReview ?? 0}</strong></div>
+            <div><span>Tolerancia aplicada</span><strong>{result.summary.tolerance} €</strong></div>
           </div>
+          <div className="mt-4"><SummaryCards summary={result.summary} internalExcelChecks={result.internalExcelChecks} /></div>
         </Card>
 
-        <button type="button" className="assistant-banner" onClick={() => setView("asistente")}>
-          <span className="assistant-banner__icon"><Bot className="size-6" /></span>
-          <div><p>Asistente contextual</p><strong>Pregunta sobre los resultados del análisis</strong><small>Consulta personas, conceptos, diferencias y fuentes sin salir de la aplicación.</small></div>
-          <ArrowRight className="size-5" />
-        </button>
+        <div className="flex flex-col gap-3">
+          <button type="button" className="dashboard-reference__assistant" onClick={() => setView("asistente") }>
+            <span className="dashboard-reference__assistant-icon"><Bot className="size-4" /></span>
+            <span><strong>Asistente retributivo</strong><p>Pregunta por personas, conceptos, diferencias o fuentes del análisis.</p><small>Abrir asistente →</small></span>
+          </button>
+          <Card className="dashboard-reference__section">
+            <div className="dashboard-reference__section-header"><div><h2>Análisis activo</h2><p>{formatDate(activeAnalysis.createdAt)}</p></div><StatusBadge value={aiBadge} /></div>
+            <div className="analysis-files-card__list">
+              <div><span className="analysis-files-card__icon analysis-files-card__icon--excel"><FileSpreadsheet className="size-4" /></span><div><strong>{activeAnalysis.registroFileName}</strong><small>Registro Retributivo</small></div></div>
+              <div><span className="analysis-files-card__icon"><FileText className="size-4" /></span><div><strong>{activeAnalysis.pdfCount} recibos</strong><small>{sourceFiles.length} fuentes detectadas</small></div></div>
+              {excludedCount ? <p className="analysis-files-card__more">{excludedCount} matrículas excluidas por configuración.</p> : null}
+            </div>
+          </Card>
+        </div>
       </section>
 
       <ChartsPanel result={result} />
