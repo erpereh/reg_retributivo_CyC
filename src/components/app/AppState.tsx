@@ -274,23 +274,16 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
       const readJson = async <T,>(response: Response): Promise<T> => {
         const text = await response.text();
         let payload: unknown;
-        try {
-          payload = text ? JSON.parse(text) : undefined;
-        } catch {
-          throw new Error(response.status === 413 ? "Los archivos superan el límite de subida. Se procesarán por partes." : `Respuesta no válida del servidor (${response.status}).`);
-        }
-        if (!response.ok) {
-          throw new Error((payload as { error?: string } | undefined)?.error ?? `No se pudo analizar (${response.status}).`);
-        }
+        try { payload = text ? JSON.parse(text) : undefined; }
+        catch { throw new Error(response.status === 413 ? "Los archivos superan el límite de subida." : `Respuesta no válida del servidor (${response.status}).`); }
+        if (!response.ok) throw new Error((payload as { error?: string } | undefined)?.error ?? `No se pudo analizar (${response.status}).`);
         return payload as T;
       };
 
       setStatus("Procesando Excel...");
       const registroForm = new FormData();
       registroForm.append("registro", registroFile);
-      const registroResponse = await fetch("/api/analyze/registro", { method: "POST", body: registroForm });
-      const registroParsed = await readJson<Record<string, unknown>>(registroResponse);
-
+      const registroParsed = await readJson<Record<string, unknown>>(await fetch("/api/analyze/registro", { method: "POST", body: registroForm }));
       const payrollRecords: unknown[] = [];
       const pdfErrors: unknown[] = [];
       for (let index = 0; index < pdfFiles.length; index += 1) {
@@ -298,19 +291,15 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
         setStatus(`Procesando recibo ${index + 1} de ${pdfFiles.length}...`);
         const pdfForm = new FormData();
         pdfForm.append("pdf", file);
-        const pdfResponse = await fetch("/api/analyze/pdf", { method: "POST", body: pdfForm });
-        const parsed = await readJson<{ records: unknown[]; errors: unknown[] }>(pdfResponse);
+        const parsed = await readJson<{ records: unknown[]; errors: unknown[] }>(await fetch("/api/analyze/pdf", { method: "POST", body: pdfForm }));
         payrollRecords.push(...parsed.records);
         pdfErrors.push(...parsed.errors);
       }
-
       setStatus("Comparando resultados...");
-      const finalizeResponse = await fetch("/api/analyze/finalize", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
+      const result = await readJson<AnalysisResult>(await fetch("/api/analyze/finalize", {
+        method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ registroParsed, payrollRecords, pdfErrors, config }),
-      });
-      const result = await readJson<AnalysisResult>(finalizeResponse);
+      }));
       const replaceActive = Boolean(options?.replaceActive && activeAnalysis);
       const record: StoredAnalysis = {
         id: replaceActive ? activeAnalysis!.id : createId(),
@@ -405,30 +394,25 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
         const payload = (await response.json()) as { error?: string };
         throw new Error(payload.error ?? "No se pudo exportar.");
       }
-
-      const disposition = response.headers.get("content-disposition") ?? "";
-      const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] ?? "registro-retributivo.xlsx";
-      downloadBlob(await response.blob(), filename);
-      setSuccess("Exportación descargada.");
-      pushMessageToast("success", "Exportación lista", "Se ha descargado el Excel del análisis.");
+      const blob = await response.blob();
+      const date = analysis.createdAt.slice(0, 10);
+      downloadBlob(blob, `comparativa_reg_retributivo_${date}.xlsx`);
+      setSuccess("Excel exportado correctamente.");
+      pushMessageToast("success", "Excel exportado", "Excel exportado correctamente.");
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Error inesperado.";
       setError(message);
-      pushMessageToast("error", "Error de exportación", message);
+      pushMessageToast("error", "Error al exportar", message);
     } finally {
       setExporting(false);
     }
   }, [pushMessageToast, settings]);
 
   const exportActiveAnalysis = useCallback(async () => {
-    if (!activeAnalysis) {
-      const message = "No hay un análisis activo para exportar.";
-      setError(message);
-      pushMessageToast("warning", "Sin análisis", message);
-      return;
+    if (activeAnalysis) {
+      await exportAnalysis(activeAnalysis, "active");
     }
-    await exportAnalysis(activeAnalysis, "active");
-  }, [activeAnalysis, exportAnalysis, pushMessageToast]);
+  }, [activeAnalysis, exportAnalysis]);
 
   const exportStoredAnalysis = useCallback(async (analysis: StoredAnalysis) => {
     await exportAnalysis(analysis, "history");
@@ -437,131 +421,213 @@ export function AppStateProvider({ children }: Readonly<{ children: ReactNode }>
   const resetForNewAnalysis = useCallback(() => {
     setPdfFiles([]);
     setRegistroFile(undefined);
+    setActiveAnalysis(undefined);
+    saveActiveAnalysisId(undefined);
+    setFilters(EMPTY_FILTERS);
     setError(undefined);
     setSuccess(undefined);
     setStatus("Pendiente de archivos");
-    setView("upload");
+    setView("dashboard");
   }, []);
 
   const openStoredAnalysis = useCallback(async (id: string) => {
     const analysis = await getAnalysis(id);
     if (!analysis) {
-      const message = "No se encontró el análisis seleccionado.";
+      const message = "No se pudo abrir el análisis guardado.";
       setError(message);
-      pushMessageToast("error", "Análisis no disponible", message);
+      pushMessageToast("error", "Historial no disponible", message);
       return;
     }
-    saveActiveAnalysisId(id);
+
     setActiveAnalysis(analysis);
-    setStatus("Análisis cargado desde historial");
+    saveActiveAnalysisId(id);
+    setFilters(EMPTY_FILTERS);
+    setStatus("Análisis activo actualizado desde el historial");
+    setSuccess("Análisis activo actualizado.");
+    pushMessageToast("info", "Historial cargado", "Análisis activo actualizado.");
     setView("dashboard");
   }, [pushMessageToast]);
 
-  const removeStoredAnalysis = useCallback(async (id: string, policy: CleanupPolicy) => {
-    const repositories = await createIndexedDbRepositories();
-    try {
-      const job = await createAnalysisCleanupJob(repositories, id, policy);
-      if (policy === "delete_conversations") await runAnalysisCleanupJob(repositories, job.id, deleteAnalysis);
-      else await runAnalysisCleanupBatch(repositories, job.id);
-      await refreshHistory();
+  const removeStoredAnalysis = useCallback(
+    async (id: string, policy: CleanupPolicy) => {
+      const repositories = await createIndexedDbRepositories();
+      try {
+        const fresh = createAnalysisCleanupJob(id, policy, new Date().toISOString());
+        const previous = await repositories.cleanupJobs.get(fresh.id);
+        const job = previous?.status === "failed" ? { ...previous, status: "pending" as const, updatedAt: fresh.updatedAt } : fresh;
+        await repositories.cleanupJobs.put(job);
+        await runAnalysisCleanupJob(repositories, job.id, deleteAnalysis);
+      } finally { repositories.close(); }
       if (activeAnalysis?.id === id) {
-        const nextHistory = await listAnalyses();
-        const nextActive = nextHistory[0];
-        saveActiveAnalysisId(nextActive?.id);
-        setActiveAnalysis(nextActive);
+        setActiveAnalysis(undefined);
       }
-      pushMessageToast("success", "Análisis eliminado");
-    } finally {
-      repositories.close();
-    }
-  }, [activeAnalysis?.id, pushMessageToast, refreshHistory]);
+      await refreshHistory();
+      setSuccess("Análisis eliminado del historial.");
+      pushMessageToast("info", "Historial actualizado", "Análisis eliminado del historial.");
+    },
+    [activeAnalysis?.id, pushMessageToast, refreshHistory],
+  );
 
   const clearStoredHistory = useCallback(async (policy: CleanupPolicy) => {
-    for (const analysis of await listAnalyses()) {
-      await removeStoredAnalysis(analysis.id, policy);
+    const repositories = await createIndexedDbRepositories();
+    let failure: unknown;
+    try {
+      await runAnalysisCleanupBatch(repositories, history.map((analysis) => analysis.id), policy, deleteAnalysis);
+    } catch (caught) {
+      failure = caught;
+    } finally { repositories.close(); }
+    const remaining = await listAnalyses();
+    setHistory(remaining);
+    if (activeAnalysis && !remaining.some((analysis) => analysis.id === activeAnalysis.id)) setActiveAnalysis(undefined);
+    if (failure) {
+      pushMessageToast("error", "Limpieza incompleta", failure instanceof Error ? failure.message : "No se pudo completar la limpieza coordinada.");
+      throw failure;
     }
-  }, [removeStoredAnalysis]);
+    setSuccess("Historial eliminado.");
+    pushMessageToast("info", "Historial eliminado", "Se eliminaron los análisis guardados.");
+  }, [activeAnalysis, history, pushMessageToast]);
+
+  const navigateAssistantIntent = useCallback((intent: AppNavigationIntent) => {
+    if ("analysisId" in intent && activeAnalysis?.id !== intent.analysisId) return;
+    setAssistantNavigationIntent(intent);
+    if (intent.type === "settings_ai") {
+      setView("ajustes");
+    } else if (intent.type === "open_person") {
+      setFilters((current) => ({ ...current, query: intent.personId }));
+      setView("personas");
+    } else if (intent.type === "open_cuadre") {
+      if (intent.personId) setFilters((current) => ({ ...current, query: intent.personId ?? "" }));
+      setView("cuadre-excel");
+    } else if (intent.type === "open_grouping") {
+      setFilters((current) => ({ ...current, query: intent.groupingId }));
+      setView("agrupaciones");
+    } else {
+      setView("asistente");
+    }
+  }, [activeAnalysis?.id]);
+  const consumeAssistantNavigationIntent = useCallback(() => setAssistantNavigationIntent(undefined), []);
 
   const testAiConnection = useCallback(async () => {
     setAiTesting(true);
     setAiTestMessage(undefined);
+
     try {
       const response = await fetch("/api/ai/test", { method: "POST" });
       const payload = (await response.json()) as { ok?: boolean; error?: string; model?: string };
-      if (!response.ok || !payload.ok) throw new Error(payload.error ?? "No se pudo comprobar la conexión IA.");
-      setAiTestMessage(`Conexión correcta con ${payload.model ?? "Gemini"}.`);
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error ?? "No se pudo probar la conexión IA.");
+      }
+
+      setAiTestMessage(`Conexión IA correcta con ${payload.model ?? settings.aiModel}.`);
+      pushMessageToast("success", "IA configurada", `Conexion IA correcta con ${payload.model ?? settings.aiModel}.`);
+      await refreshAiStatus();
     } catch (caught) {
-      setAiTestMessage(caught instanceof Error ? caught.message : "No se pudo comprobar la conexión IA.");
+      const message = caught instanceof Error ? caught.message : "No se pudo probar la conexión IA.";
+      setAiTestMessage(message);
+      pushMessageToast("error", "IA no disponible", message);
     } finally {
       setAiTesting(false);
     }
-  }, []);
+  }, [pushMessageToast, refreshAiStatus, settings.aiModel]);
 
-  const navigateAssistantIntent = useCallback((intent: AppNavigationIntent) => {
-    setAssistantNavigationIntent(intent);
-    setView(intent.view);
-    if (intent.view === "people") {
-      setFilters({ ...EMPTY_FILTERS, query: intent.employeeNumber ?? intent.personName ?? "" });
-    } else if (intent.view === "concepts") {
-      setFilters({ ...EMPTY_FILTERS, query: intent.conceptCode ?? intent.conceptName ?? "" });
-    }
-  }, []);
-
-  const consumeAssistantNavigationIntent = useCallback(() => setAssistantNavigationIntent(undefined), []);
-
-  const value = useMemo<AppStateValue>(() => ({
-    view,
-    pdfFiles,
-    registroFile,
-    activeAnalysis,
-    result: activeAnalysis?.result,
-    history,
-    settings,
-    filters,
-    status,
-    error,
-    success,
-    toasts,
-    analyzing,
-    exporting,
-    hydrating,
-    aiStatus,
-    aiTesting,
-    aiTestMessage,
-    assistantNavigationIntent,
-    setView,
-    navigateAssistantIntent,
-    consumeAssistantNavigationIntent,
-    setPdfFiles,
-    setRegistroFile,
-    updateSettings,
-    setFilters,
-    pushToast,
-    dismissToast,
-    analyze,
-    saveConceptMapAndRefresh,
-    saveExclusionsAndRefresh,
-    exportActiveAnalysis,
-    exportStoredAnalysis,
-    resetForNewAnalysis,
-    openStoredAnalysis,
-    removeStoredAnalysis,
-    clearStoredHistory,
-    refreshAiStatus,
-    testAiConnection,
-  }), [activeAnalysis, aiStatus, aiTestMessage, aiTesting, analyze, analyzing, assistantNavigationIntent, clearStoredHistory, consumeAssistantNavigationIntent, error, exportActiveAnalysis, exportStoredAnalysis, exporting, filters, history, hydrating, navigateAssistantIntent, openStoredAnalysis, pdfFiles, pushToast, registroFile, removeStoredAnalysis, resetForNewAnalysis, saveConceptMapAndRefresh, saveExclusionsAndRefresh, settings, status, success, testAiConnection, toasts, updateSettings, view, refreshAiStatus]);
+  const value = useMemo<AppStateValue>(
+    () => ({
+      view,
+      pdfFiles,
+      registroFile,
+      activeAnalysis,
+      result: activeAnalysis?.result,
+      history,
+      settings,
+      filters,
+      status,
+      error,
+      success,
+      toasts,
+      analyzing,
+      exporting,
+      hydrating,
+      aiStatus,
+      aiTesting,
+      aiTestMessage,
+      assistantNavigationIntent,
+      setView,
+      navigateAssistantIntent,
+      consumeAssistantNavigationIntent,
+      setPdfFiles,
+      setRegistroFile,
+      updateSettings,
+      setFilters,
+      pushToast,
+      dismissToast,
+      analyze,
+      saveConceptMapAndRefresh,
+      saveExclusionsAndRefresh,
+      exportActiveAnalysis,
+      exportStoredAnalysis,
+      resetForNewAnalysis,
+      openStoredAnalysis,
+      removeStoredAnalysis,
+      clearStoredHistory,
+      refreshAiStatus,
+      testAiConnection,
+    }),
+    [
+      activeAnalysis,
+      assistantNavigationIntent,
+      aiStatus,
+      aiTestMessage,
+      aiTesting,
+      analyze,
+      saveConceptMapAndRefresh,
+      saveExclusionsAndRefresh,
+      clearStoredHistory,
+      consumeAssistantNavigationIntent,
+      dismissToast,
+      error,
+      exportActiveAnalysis,
+      exportAnalysis,
+      exportStoredAnalysis,
+      exporting,
+      filters,
+      history,
+      navigateAssistantIntent,
+      hydrating,
+      openStoredAnalysis,
+      pdfFiles,
+      pushToast,
+      refreshAiStatus,
+      registroFile,
+      removeStoredAnalysis,
+      resetForNewAnalysis,
+      settings,
+      status,
+      success,
+      testAiConnection,
+      toasts,
+      updateSettings,
+      view,
+      analyzing,
+    ],
+  );
 
   return <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>;
 }
 
 export function useAppState(): AppStateValue {
   const context = useContext(AppStateContext);
-  if (!context) throw new Error("useAppState must be used inside AppStateProvider");
+  if (!context) {
+    throw new Error("useAppState debe usarse dentro de AppStateProvider.");
+  }
+
   return context;
 }
 
 export function matchesQuery(values: readonly (string | undefined)[], query: string): boolean {
-  if (!query) return true;
+  if (!query) {
+    return true;
+  }
+
   const normalized = normalizeComparableText(query);
   return values.some((value) => normalizeComparableText(value).includes(normalized));
 }
