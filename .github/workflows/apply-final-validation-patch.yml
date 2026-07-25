@@ -1,6 +1,11 @@
 name: Apply final validation patch
 
 on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - synchronize
   push:
     branches:
       - chatgpt/reference-ui-final
