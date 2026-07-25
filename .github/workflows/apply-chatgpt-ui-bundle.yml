@@ -1,9 +1,11 @@
 name: Diagnose ChatGPT UI subparts
 
 on:
-  push:
+  pull_request:
     branches:
-      - chatgpt/reference-ui-final
+      - main
+    types:
+      - synchronize
 
 concurrency:
   group: chatgpt-ui-bundle-transfer
