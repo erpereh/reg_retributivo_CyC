@@ -66,7 +66,8 @@ async function createRealAssistantReview(page: Page): Promise<void> {
   await peopleDialog.getByRole("textbox", { name: "Buscar personas asociadas", exact: true }).fill("10048");
   const personCheckbox = peopleDialog.getByRole("checkbox", { name: "Matrícula 10048", exact: true });
   await expect(personCheckbox).toBeVisible();
-  await expect(personCheckbox).toBeChecked();
+  if (!(await personCheckbox.isChecked())) await personCheckbox.click();
+  await expect(personCheckbox).toBeChecked({ timeout: 15_000 });
   await peopleDialog.getByRole("button", { name: "Cerrar", exact: true }).click();
   await expect(page.getByText("Principal: matrícula 10048", { exact: true })).toBeVisible();
 

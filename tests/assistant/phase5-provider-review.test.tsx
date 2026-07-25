@@ -163,9 +163,14 @@ describe("Phase 5 reviewed provider behavior", () => {
     render(<AssistantProvider factory={factory} dbName="phase5-model-routing"><AssistantView /></AssistantProvider>);
     await screen.findByRole("heading", { name: "conversation-model" });
     fireEvent.click(screen.getByRole("button", { name: /Modelo de conversación:/ }));
-    expect(screen.getByRole("button", { name: new RegExp(selected.name, "i") })).toBeEnabled();
-    expect(screen.getByRole("button", { name: new RegExp(fallback.name, "i") })).toBeEnabled();
-    expect(screen.queryByRole("button", { name: new RegExp(incompatible.name, "i") })).toBeNull();
+    const modelDialog = screen.getByRole("dialog", { name: "Catálogo de modelos" });
+    const selectedButton = within(modelDialog).getByText(selected.name, { selector: "strong", exact: true }).closest("button");
+    const fallbackButton = within(modelDialog).getByText(fallback.name, { selector: "strong", exact: true }).closest("button");
+    expect(selectedButton).not.toBeNull();
+    expect(fallbackButton).not.toBeNull();
+    expect(selectedButton as HTMLButtonElement).toBeEnabled();
+    expect(fallbackButton as HTMLButtonElement).toBeEnabled();
+    expect(within(modelDialog).queryByText(incompatible.name, { selector: "strong", exact: true })).toBeNull();
     const composer = screen.getByRole("textbox", { name: "Pregunta" });
     fireEvent.change(composer, { target: { value: "¿Qué es Retributivo?" } });
     fireEvent.keyDown(composer, { key: "Enter" });

@@ -152,8 +152,9 @@ describe("assistant vertical slice", () => {
     const streamGeneral = vi.spyOn(adapter, "streamGeneral");
     render(<AssistantProvider activeAnalysis={activeAnalysis} factory={factory} dbName="scope-bridge-test" adapter={adapter}><AssistantView /></AssistantProvider>);
     fireEvent.click(await screen.findByRole("button", { name: /Crear conversación general/i })); await screen.findAllByText("Consulta general");
+    const composer = await getEnabledComposer();
     const db = await openAssistantDatabase(factory, "scope-bridge-test"); await new Promise<void>((resolve, reject) => { const transaction = db.transaction("conversations", "readwrite"); transaction.objectStore("conversations").clear(); transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error); }); db.close();
-    fireEvent.change(await getEnabledComposer(), { target: { value: "¿Qué es Cuadre Reg.?" } }); fireEvent.click(screen.getByRole("button", { name: /Enviar/i }));
+    fireEvent.change(composer, { target: { value: "¿Qué es Cuadre Reg.?" } }); fireEvent.click(screen.getByRole("button", { name: /Enviar/i }));
     await screen.findByRole("alert"); expect(streamGeneral).not.toHaveBeenCalled();
   });
 });

@@ -92,8 +92,9 @@ describe("assistant model selector regressions", () => {
     fireEvent.click(selector);
     const catalog = screen.getByRole("dialog", { name: "Catálogo de modelos" });
     expect(within(catalog).getByRole("heading", { name: /Gemini/i })).toBeVisible();
-    const firstModelButton = within(catalog).getByRole("button", { name: /gemini-chat-1/i });
-    expect(firstModelButton).toBeEnabled();
+    const firstModelButton = within(catalog).getByText("gemini-chat-1", { selector: "strong", exact: true }).closest("button");
+    expect(firstModelButton).not.toBeNull();
+    expect(firstModelButton as HTMLButtonElement).toBeEnabled();
     expect(within(catalog).getAllByText(/^gemini-chat-/)).toHaveLength(39);
   });
 
