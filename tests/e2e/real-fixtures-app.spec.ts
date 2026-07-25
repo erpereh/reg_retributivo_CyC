@@ -57,7 +57,7 @@ async function createRealAssistantReview(page: Page): Promise<void> {
   if (await createConversation.isVisible()) await createConversation.click();
   await expect(page.getByRole("heading", { name: "Consulta general", exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "Añadir contexto", exact: true }).click();
+  await page.getByRole("button", { name: /^Añadir contexto/u }).click();
   await expect(page.getByText("Contexto del análisis añadido", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Gestionar personas asociadas", exact: true }).click();
