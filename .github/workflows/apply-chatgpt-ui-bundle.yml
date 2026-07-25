@@ -4,13 +4,10 @@ on:
   push:
     branches:
       - chatgpt/reference-ui-final
-  pull_request:
-    branches:
-      - main
-    types:
-      - opened
-      - synchronize
-      - reopened
+
+concurrency:
+  group: chatgpt-ui-bundle-transfer
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -30,26 +27,6 @@ jobs:
         shell: bash
         run: |
           sha256sum .chatgpt/part-02-[0-3].txt > .chatgpt/subpart-hashes.txt
-          set +e
-          cat \
-            .chatgpt/part-00.txt \
-            .chatgpt/part-01.txt \
-            .chatgpt/part-02-0.txt \
-            .chatgpt/part-02-1.txt \
-            .chatgpt/part-02-2.txt \
-            .chatgpt/part-02-3.txt \
-            .chatgpt/part-03.txt \
-            .chatgpt/part-04.txt \
-            .chatgpt/part-05.txt \
-            .chatgpt/part-06.txt \
-            .chatgpt/part-07.txt \
-            .chatgpt/part-08.txt \
-            | tr -d '[:space:]' \
-            | base64 --decode > /tmp/changes.tar.gz
-          decode_status=$?
-          set -e
-          printf 'decode_status=%s\n' "$decode_status" >> .chatgpt/subpart-hashes.txt
-          sha256sum /tmp/changes.tar.gz >> .chatgpt/subpart-hashes.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .chatgpt/subpart-hashes.txt
