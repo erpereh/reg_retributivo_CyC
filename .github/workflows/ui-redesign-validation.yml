@@ -1,3 +1,4 @@
+# Validates the real Next.js application and bundled source fixtures.
 name: UI redesign validation
 
 on:
