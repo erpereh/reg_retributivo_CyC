@@ -137,7 +137,7 @@ function Sidebar({
 }: Readonly<{ collapsed: boolean; mobileOpen: boolean; onCollapse: () => void; onCloseMobile: () => void }>) {
   const { view, setView, activeAnalysis } = useAppState();
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
-  const people = activeAnalysis?.result.summary.uniquePeople ?? 0;
+  const people = activeAnalysis?.result?.summary.uniquePeople ?? 0;
   const documents = activeAnalysis ? activeAnalysis.pdfCount + 1 : 0;
 
   function selectAt(index: number) {
@@ -182,11 +182,14 @@ function Sidebar({
 
       <div className="app-sidebar__footer">
         <button
+          ref={(node) => { refs.current[NAVIGATION.length - 1] = node; }}
           type="button"
           role="tab"
           aria-selected={view === SETTINGS_ITEM.id}
+          tabIndex={view === SETTINGS_ITEM.id ? 0 : -1}
           className={cn("app-nav__item app-nav__settings", view === SETTINGS_ITEM.id && "app-nav__item--active")}
-          onClick={() => setView(SETTINGS_ITEM.id)}
+          onClick={() => selectAt(NAVIGATION.length - 1)}
+          onKeyDown={(event) => onKeyDown(event, NAVIGATION.length - 1)}
           title={collapsed ? SETTINGS_ITEM.label : undefined}
         >
           {view === SETTINGS_ITEM.id ? <span className="app-nav__active" /> : null}

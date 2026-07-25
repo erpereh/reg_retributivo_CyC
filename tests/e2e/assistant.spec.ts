@@ -4,6 +4,9 @@ const LOCAL_WARNING = "Las API keys se leen solo desde variables de entorno del 
 
 async function openAssistant(page: Page) {
   await page.goto("/");
+  if ((page.viewportSize()?.width ?? 1280) < 768) {
+    await page.getByRole("button", { name: "Abrir navegación" }).click();
+  }
   await page.getByRole("tab", { name: "Asistente" }).click();
   await expect(page.getByTestId("assistant-shell")).toBeVisible();
 }

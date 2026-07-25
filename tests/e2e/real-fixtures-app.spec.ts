@@ -146,7 +146,7 @@ test("procesa las fuentes reales, valida toda la aplicación y genera las captur
 
   await page.getByRole("button", { name: "Analizar", exact: true }).click();
   await expect(page.getByRole("button", { name: /Analizando/u })).toBeDisabled();
-  await expect(page.getByText("Personas analizadas", { exact: true })).toBeVisible({ timeout: 12 * 60_000 });
+  await expect(page.getByTestId("primary-kpis").getByText("Personas analizadas", { exact: true })).toBeVisible({ timeout: 12 * 60_000 });
   await expect(page.getByText("21 recibos", { exact: true })).toBeVisible();
   await expect(page.getByText("Recibo sin Reg. Retrib.", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Conceptos pendientes de revisión", { exact: true })).toBeVisible();

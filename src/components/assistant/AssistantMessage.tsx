@@ -48,7 +48,7 @@ export function AssistantMessage({ message, sources, revealedSourceIds, actions,
           <span className={assistant ? "assistant-message-avatar assistant-message-avatar--bot" : "assistant-message-avatar"} aria-hidden="true">
             {assistant ? <Sparkles className="size-4" /> : <UserRound className="size-4" />}
           </span>
-          <span>{assistant ? `Retributivo${message.modelId ? ` · ${message.modelId}` : ""}` : "Tú"} · {messageTime(message.createdAt)}</span>
+          <span title={assistant && message.modelId ? message.modelId : undefined}>{assistant ? `Retributivo${message.modelId ? ` · ${message.modelId}` : ""}` : "Tú"} · {messageTime(message.createdAt)}</span>
           {assistant && message.status === "completed" ? <span className="assistant-message-status"><i />Configurado</span> : null}
         </div>
 
