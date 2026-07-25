@@ -93,7 +93,7 @@ export function AssistantComposer({ streaming, controlsDisabled = false, sendDis
                               {selectedEntry ? <Check className="size-4" /> : null}
                             </button>
                             <button type="button" className="assistant-favorite-model" aria-label={`${favoriteSet.has(entry.id) ? "Quitar de" : "Añadir a"} favoritos`} onClick={() => onToggleFavorite(entry.id)}><Star className={favoriteSet.has(entry.id) ? "size-4 fill-current" : "size-4"} /></button>
-                            {analysis && entry.capabilities.tools === "unknown" ? <button type="button" className="assistant-check-model" onClick={() => onCheckCompatibility(entry)}>Comprobar</button> : null}
+                            {analysis && entry.capabilities.tools === "unknown" ? <button type="button" className="assistant-check-model" aria-label="Comprobar compatibilidad" onClick={() => onCheckCompatibility(entry)}>Comprobar</button> : null}
                           </div>
                         );
                       })}

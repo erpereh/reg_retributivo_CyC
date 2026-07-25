@@ -89,7 +89,7 @@ describe("Phase 5 reviewed provider behavior", () => {
 
     expect(await screen.findByText("Parcial visible")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Detener respuesta" }));
-    expect(await screen.findByText("Detenida")).toBeVisible();
+    expect(await screen.findByText("Respuesta detenida")).toBeVisible();
     expect(screen.getByText("Parcial visible")).toBeVisible();
     expect(screen.queryByRole("alert")).toBeNull();
     await waitFor(() => expect(iteratorReturned).toBe(true));
@@ -165,9 +165,9 @@ describe("Phase 5 reviewed provider behavior", () => {
     fireEvent.click(screen.getByRole("button", { name: /Modelo de conversación:/ }));
     const options = screen.getAllByRole("button").filter((button) => button.textContent?.includes("-model"));
     const optionText = options.map((option) => option.textContent ?? "").join(" ");
-    expect(optionText).toContain(selected.modelId);
-    expect(optionText).toContain(fallback.modelId);
-    expect(optionText).not.toContain(incompatible.modelId);
+    expect(optionText).toContain(selected.name);
+    expect(optionText).toContain(fallback.name);
+    expect(optionText).not.toContain(incompatible.name);
     const composer = screen.getByRole("textbox", { name: "Pregunta" });
     fireEvent.change(composer, { target: { value: "¿Qué es Retributivo?" } });
     fireEvent.keyDown(composer, { key: "Enter" });

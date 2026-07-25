@@ -53,7 +53,7 @@ export function ConversationTimeline({ assistant, onShowContextUsage, onOpenSour
             <ChevronDown aria-hidden="true" className="size-4" />
           </button>
         ) : conversation ? (
-          <button type="button" className="assistant-linked-analysis" disabled={conversation.status !== "active" || assistant.streaming || assistant.selectionLoading || assistant.conversationTransitionPending} onClick={() => void assistant.convertToActiveAnalysis()}>
+          <button type="button" className="assistant-linked-analysis" aria-label="Añadir contexto" disabled={conversation.status !== "active" || assistant.streaming || assistant.selectionLoading || assistant.conversationTransitionPending} onClick={() => void assistant.convertToActiveAnalysis()}>
             <FileSpreadsheet aria-hidden="true" className="size-4" />
             <span><strong>Añadir contexto</strong><small>Vincular el análisis activo</small></span>
             <ChevronDown aria-hidden="true" className="size-4" />

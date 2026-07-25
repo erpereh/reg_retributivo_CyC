@@ -86,11 +86,11 @@ export function ConversationSidebar({ conversations, selectedId, hasMore, transi
 
       {selectedId ? (
         <div className="assistant-conversation-actions">
-          <button type="button" aria-label="Más acciones de conversación" onClick={() => setMenuOpen((open) => !open)}><MoreHorizontal className="size-4" /></button>
+          <button type="button" aria-label="Más acciones de conversación" disabled={transitionPending} onClick={() => setMenuOpen((open) => !open)}><MoreHorizontal className="size-4" /></button>
           {menuOpen ? (
             <div className="assistant-conversation-menu">
-              <button type="button" disabled={selectedReadOnly || transitionPending} onClick={() => { const value = window.prompt("Nuevo nombre de la conversación"); if (value?.trim()) onRename(value); setMenuOpen(false); }}><Pencil className="size-4" />Renombrar</button>
-              <button type="button" disabled={transitionPending} className="danger" onClick={() => { onDelete(); setMenuOpen(false); }}><Trash2 className="size-4" />Eliminar</button>
+              <button type="button" aria-label="Renombrar conversación" disabled={selectedReadOnly || transitionPending} onClick={() => { const value = window.prompt("Nuevo nombre de la conversación"); if (value?.trim()) onRename(value); setMenuOpen(false); }}><Pencil className="size-4" />Renombrar</button>
+              <button type="button" aria-label="Eliminar conversación" disabled={transitionPending} className="danger" onClick={() => { onDelete(); setMenuOpen(false); }}><Trash2 className="size-4" />Eliminar</button>
             </div>
           ) : null}
         </div>
