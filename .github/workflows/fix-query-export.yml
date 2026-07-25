@@ -1,0 +1,35 @@
+name: Fix query export
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Restore query helper
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('src/components/app/AppState.tsx')
+          s=p.read_text()
+          old='''export function matchesDashboardQuery(value: string | undefined, query: string): boolean {\n  if (!query.trim()) return true;\n  return normalizeComparableText(value).includes(normalizeComparableText(query));\n}\n'''
+          new='''export function matchesQuery(values: readonly (string | undefined)[], query: string): boolean {\n  if (!query) return true;\n  const normalized = normalizeComparableText(query);\n  return values.some((value) => normalizeComparableText(value).includes(normalized));\n}\n'''
+          if old not in s: raise SystemExit('query helper target not found')
+          p.write_text(s.replace(old,new,1))
+          PY
+          rm -f .github/workflows/fix-query-export.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'fix(ui): restore shared table query helper'
+          git push origin HEAD:main
