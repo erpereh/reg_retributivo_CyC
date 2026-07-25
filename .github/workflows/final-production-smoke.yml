@@ -1,0 +1,61 @@
+name: Final production smoke
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  smoke:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Verify Gemini production connectivity
+        shell: bash
+        run: |
+          curl --fail-with-body --silent --show-error -X POST \
+            https://registro-retributivo-cyc-git-test.vercel.app/api/ai/test \
+            -H 'content-type: application/json' \
+            -o gemini-smoke.json
+          cat gemini-smoke.json
+          node -e "const x=require('./gemini-smoke.json'); if(!x.ok) process.exit(1)"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Run real-source UI flow and capture every modal
+        run: pnpm exec playwright test tests/e2e/real-fixtures-app.spec.ts --project=chromium
+      - uses: actions/upload-artifact@v4
+        with:
+          name: final-production-captures
+          path: artifacts/final-screenshots
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gemini-production-smoke
+          path: gemini-smoke.json
+          retention-days: 7
+      - name: Remove temporary workflow
+        if: always()
+        shell: bash
+        run: |
+          rm -f .github/workflows/final-production-smoke.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'chore(ci): remove final production smoke workflow' || exit 0
+          git push origin HEAD:main
