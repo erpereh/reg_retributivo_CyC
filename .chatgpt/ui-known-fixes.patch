@@ -1,0 +1,69 @@
+diff --git a/src/components/assistant/AssistantMessage.tsx b/src/components/assistant/AssistantMessage.tsx
+index cbc97c3..c62b3f5 100644
+--- a/src/components/assistant/AssistantMessage.tsx
++++ b/src/components/assistant/AssistantMessage.tsx
+@@ -48,7 +48,7 @@ export function AssistantMessage({ message, sources, revealedSourceIds, actions,
+           <span className={assistant ? "assistant-message-avatar assistant-message-avatar--bot" : "assistant-message-avatar"} aria-hidden="true">
+             {assistant ? <Sparkles className="size-4" /> : <UserRound className="size-4" />}
+           </span>
+-          <span>{assistant ? `Retributivo${message.modelId ? ` · ${message.modelId}` : ""}` : "Tú"} · {messageTime(message.createdAt)}</span>
++          <span title={assistant && message.modelId ? message.modelId : undefined}>{assistant ? `Retributivo${message.modelId ? ` · ${message.modelId}` : ""}` : "Tú"} · {messageTime(message.createdAt)}</span>
+           {assistant && message.status === "completed" ? <span className="assistant-message-status"><i />Configurado</span> : null}
+         </div>
+ 
+diff --git a/src/components/layout/AppShell.tsx b/src/components/layout/AppShell.tsx
+index 11ff1ce..7c98cc9 100644
+--- a/src/components/layout/AppShell.tsx
++++ b/src/components/layout/AppShell.tsx
+@@ -137,7 +137,7 @@ function Sidebar({
+ }: Readonly<{ collapsed: boolean; mobileOpen: boolean; onCollapse: () => void; onCloseMobile: () => void }>) {
+   const { view, setView, activeAnalysis } = useAppState();
+   const refs = useRef<Array<HTMLButtonElement | null>>([]);
+-  const people = activeAnalysis?.result.summary.uniquePeople ?? 0;
++  const people = activeAnalysis?.result?.summary.uniquePeople ?? 0;
+   const documents = activeAnalysis ? activeAnalysis.pdfCount + 1 : 0;
+ 
+   function selectAt(index: number) {
+@@ -182,11 +182,14 @@ function Sidebar({
+ 
+       <div className="app-sidebar__footer">
+         <button
++          ref={(node) => { refs.current[NAVIGATION.length - 1] = node; }}
+           type="button"
+           role="tab"
+           aria-selected={view === SETTINGS_ITEM.id}
++          tabIndex={view === SETTINGS_ITEM.id ? 0 : -1}
+           className={cn("app-nav__item app-nav__settings", view === SETTINGS_ITEM.id && "app-nav__item--active")}
+-          onClick={() => setView(SETTINGS_ITEM.id)}
++          onClick={() => selectAt(NAVIGATION.length - 1)}
++          onKeyDown={(event) => onKeyDown(event, NAVIGATION.length - 1)}
+           title={collapsed ? SETTINGS_ITEM.label : undefined}
+         >
+           {view === SETTINGS_ITEM.id ? <span className="app-nav__active" /> : null}
+diff --git a/tests/e2e/assistant.spec.ts b/tests/e2e/assistant.spec.ts
+index 0d24126..6aa7c12 100644
+--- a/tests/e2e/assistant.spec.ts
++++ b/tests/e2e/assistant.spec.ts
+@@ -4,6 +4,9 @@ const LOCAL_WARNING = "Las API keys se leen solo desde variables de entorno del
+ 
+ async function openAssistant(page: Page) {
+   await page.goto("/");
++  if ((page.viewportSize()?.width ?? 1280) < 768) {
++    await page.getByRole("button", { name: "Abrir navegación" }).click();
++  }
+   await page.getByRole("tab", { name: "Asistente" }).click();
+   await expect(page.getByTestId("assistant-shell")).toBeVisible();
+ }
+diff --git a/tests/e2e/real-fixtures-app.spec.ts b/tests/e2e/real-fixtures-app.spec.ts
+index 9a45747..982a5fc 100644
+--- a/tests/e2e/real-fixtures-app.spec.ts
++++ b/tests/e2e/real-fixtures-app.spec.ts
+@@ -146,7 +146,7 @@ test("procesa las fuentes reales, valida toda la aplicación y genera las captur
+ 
+   await page.getByRole("button", { name: "Analizar", exact: true }).click();
+   await expect(page.getByRole("button", { name: /Analizando/u })).toBeDisabled();
+-  await expect(page.getByText("Personas analizadas", { exact: true })).toBeVisible({ timeout: 12 * 60_000 });
++  await expect(page.getByTestId("primary-kpis").getByText("Personas analizadas", { exact: true })).toBeVisible({ timeout: 12 * 60_000 });
+   await expect(page.getByText("21 recibos", { exact: true })).toBeVisible();
+   await expect(page.getByText("Recibo sin Reg. Retrib.", { exact: true }).first()).toBeVisible();
+   await expect(page.getByText("Conceptos pendientes de revisión", { exact: true })).toBeVisible();
