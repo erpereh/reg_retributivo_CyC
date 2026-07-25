@@ -1,0 +1,32 @@
+name: Export main source
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - run: git archive --format=zip --output=main-source.zip HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: main-source
+          path: main-source.zip
+          retention-days: 1
+      - name: Remove workflow
+        run: |
+          rm -f .github/workflows/export-main-source.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'chore(ci): remove source export workflow' || exit 0
+          git push origin HEAD:main
