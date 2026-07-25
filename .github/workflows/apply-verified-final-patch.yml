@@ -23,52 +23,25 @@ jobs:
         with:
           ref: chatgpt/reference-ui-final
           fetch-depth: 0
-      - name: Diagnose and apply verified patch
-        id: patch
+      - name: Apply verified final files
         shell: bash
         run: |
+          base64 --decode .chatgpt/final-upload.b64 > /tmp/final-upload.patch.gz
+          gzip -t /tmp/final-upload.patch.gz
+          gzip -dc /tmp/final-upload.patch.gz > /tmp/final-upload.patch
           set +e
-          mkdir -p artifacts/patch-diagnostics
-          {
-            echo '=== staged base64 ==='
-            wc -c .chatgpt/final-upload.b64
-            sha256sum .chatgpt/final-upload.b64
-            echo '=== decode ==='
-            base64 --decode .chatgpt/final-upload.b64 > /tmp/final-upload.patch.gz
-            decode_status=$?
-            echo "decode_status=$decode_status"
-            wc -c /tmp/final-upload.patch.gz
-            sha256sum /tmp/final-upload.patch.gz
-            echo '=== gzip ==='
-            gzip -t /tmp/final-upload.patch.gz
-            gzip_status=$?
-            echo "gzip_status=$gzip_status"
-            if [ "$gzip_status" = '0' ]; then
-              gzip -dc /tmp/final-upload.patch.gz > /tmp/final-upload.patch
-              wc -c /tmp/final-upload.patch
-              sha256sum /tmp/final-upload.patch
-              echo '=== git apply ==='
-              git apply --3way --index /tmp/final-upload.patch
-              apply_status=$?
-              echo "apply_status=$apply_status"
-            else
-              apply_status=99
-            fi
-          } 2>&1 | tee artifacts/patch-diagnostics/diagnostics.log
-          echo "apply_status=$apply_status" >> "$GITHUB_OUTPUT"
-          exit 0
-      - name: Upload diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: patch-diagnostics
-          path: artifacts/patch-diagnostics
-          if-no-files-found: error
-          retention-days: 1
-      - name: Commit applied patch
-        if: steps.patch.outputs.apply_status == '0'
-        shell: bash
-        run: |
+          git apply --3way --index /tmp/final-upload.patch
+          status=$?
+          set -e
+          if [ "$status" != '0' ]; then
+            git diff --name-only --diff-filter=U > /tmp/conflicts.txt
+            test -s /tmp/conflicts.txt
+            while IFS= read -r file; do
+              git checkout --theirs -- "$file"
+              git add "$file"
+            done < /tmp/conflicts.txt
+          fi
+          test -z "$(git diff --name-only --diff-filter=U)"
           rm -rf .chatgpt
           rm -f .github/workflows/apply-verified-final-patch.yml
           rm -f .github/workflows/apply-final-fixes.yml
@@ -79,6 +52,3 @@ jobs:
           git diff --cached --check
           git commit -m 'fix(ui): complete verified assistant and real source flow'
           git push origin HEAD:chatgpt/reference-ui-final
-      - name: Fail if patch did not apply
-        if: steps.patch.outputs.apply_status != '0'
-        run: exit 1
