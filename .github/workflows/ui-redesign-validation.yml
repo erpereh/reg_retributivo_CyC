@@ -24,6 +24,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Package checked-out source
+        run: git archive --format=zip --output=current-source.zip HEAD
+
+      - name: Upload checked-out source
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-source
+          path: current-source.zip
+          retention-days: 1
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
