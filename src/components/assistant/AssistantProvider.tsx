@@ -843,7 +843,7 @@ export function AssistantProvider({ children, activeAnalysis, factory, dbName, a
     try {
       const knownPeople = authoritative.type === "analysis" && activeAnalysis && activeAnalysis.id === authoritative.analysisId ? activeAnalysis.result.people : [];
       const fullAnalysis = authoritative.contextStrategy === "full_analysis" || authoritative.contextStrategy === "full";
-      const allowedPersonIds = authoritative.type === "analysis" ? (fullAnalysis ? knownPeople.map((person) => person.employeeNumber) : authoritative.associatedPersonIds) : undefined;
+      const allowedPersonIds = authoritative.type === "analysis" ? (fullAnalysis ? knownPeople.map((person) => person.employeeNumber) : [...new Set([...authoritative.associatedPersonIds, ...(authoritative.primaryPersonId ? [authoritative.primaryPersonId] : [])])]) : undefined;
       const resolved = resolveChatContent(rawText, knownPeople, authoritative.type, allowedPersonIds, authoritative.primaryPersonId);
       content = resolved.content;
       explicitPersonIds = resolved.explicitPersonIds;
