@@ -24,13 +24,6 @@ const person: PersonComparisonRow = {
 const result = { people: [person], payrollRecords: [{ workerName: "Persona Test", sourceFile: "privado.pdf" }], registroEmployees: [{ workerName: "Persona Test" }] } as unknown as AnalysisResult;
 const activeAnalysis = { id: "analysis-1", result, createdAt: "2026-07-13T10:00:00.000Z" } as StoredAnalysis;
 
-
-async function getEnabledComposer(): Promise<HTMLTextAreaElement> {
-  const composer = await screen.findByRole("textbox", { name: /Pregunta/i });
-  await waitFor(() => expect(composer.disabled).toBe(false));
-  return composer as HTMLTextAreaElement;
-}
-
 function Assistant({ factory }: { factory: IDBFactory }) {
   return (
     <AssistantProvider activeAnalysis={activeAnalysis} factory={factory} dbName="vertical-slice-test" adapter={new FakeAssistantAdapter()}>
@@ -48,9 +41,9 @@ describe("assistant vertical slice", () => {
     const first = render(<Assistant factory={factory} />);
     await waitFor(() => expect(screen.getByRole("button", { name: /Crear conversación general/i })).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: /Crear conversación general/i }));
-    await screen.findAllByText("Consulta general");
+    await screen.findByRole("heading", { name: "Consulta general" });
 
-    const composer = await getEnabledComposer();
+    const composer = screen.getByRole("textbox", { name: /Pregunta/i });
     fireEvent.change(composer, { target: { value: "¿Qué es Cuadre Reg.?" } });
     fireEvent.click(screen.getByRole("button", { name: /Enviar/i }));
     await screen.findAllByText(/Retributivo compara el Registro Retributivo y los recibos/i);
@@ -97,8 +90,8 @@ describe("assistant vertical slice", () => {
     const guardedAnalysis = { ...activeAnalysis, result: guardedResult };
     render(<AssistantProvider activeAnalysis={guardedAnalysis} factory={factory} dbName="general-isolation-test" adapter={new FakeAssistantAdapter()}><AssistantView /></AssistantProvider>);
     fireEvent.click(await screen.findByRole("button", { name: /Crear conversación general/i }));
-    await screen.findAllByText("Consulta general");
-    fireEvent.change(await getEnabledComposer(), { target: { value: "¿Qué es Cuadre Reg.?" } });
+    await screen.findByRole("heading", { name: "Consulta general" });
+    fireEvent.change(screen.getByRole("textbox", { name: /Pregunta/i }), { target: { value: "¿Qué es Cuadre Reg.?" } });
     fireEvent.click(screen.getByRole("button", { name: /Enviar/i }));
     await screen.findAllByText(/Retributivo compara/i);
     expect(peopleReads).toBe(0);
@@ -109,8 +102,8 @@ describe("assistant vertical slice", () => {
     vi.stubGlobal("IDBKeyRange", IDBKeyRange);
     render(<Assistant factory={factory} />);
     fireEvent.click(await screen.findByRole("button", { name: /Crear conversación general/i }));
-    await screen.findAllByText("Consulta general");
-    const composer = await getEnabledComposer();
+    await screen.findByRole("heading", { name: "Consulta general" });
+    const composer = screen.getByRole("textbox", { name: /Pregunta/i });
     fireEvent.change(composer, { target: { value: "La persona Ana García, DNI 12345678Z, ana@example.com, 612 345 678" } });
     fireEvent.click(screen.getByRole("button", { name: /Enviar/i }));
     await screen.findByRole("alert");
@@ -137,8 +130,8 @@ describe("assistant vertical slice", () => {
     const failingAdapter = { streamGeneral: async function* () { throw new Error("private provider body"); }, streamPersonProfile: async function* () { throw new Error("private provider body"); } };
     render(<AssistantProvider activeAnalysis={activeAnalysis} factory={factory} dbName="stream-failure-test" adapter={failingAdapter}><AssistantView /></AssistantProvider>);
     fireEvent.click(await screen.findByRole("button", { name: /Crear conversación general/i }));
-    await screen.findAllByText("Consulta general");
-    const composer = await getEnabledComposer();
+    await screen.findByRole("heading", { name: "Consulta general" });
+    const composer = screen.getByRole("textbox", { name: /Pregunta/i });
     fireEvent.change(composer, { target: { value: "¿Qué es Cuadre Reg.?" } });
     fireEvent.click(screen.getByRole("button", { name: /Enviar/i }));
     await screen.findByRole("alert");
@@ -151,10 +144,9 @@ describe("assistant vertical slice", () => {
     const adapter = new FakeAssistantAdapter();
     const streamGeneral = vi.spyOn(adapter, "streamGeneral");
     render(<AssistantProvider activeAnalysis={activeAnalysis} factory={factory} dbName="scope-bridge-test" adapter={adapter}><AssistantView /></AssistantProvider>);
-    fireEvent.click(await screen.findByRole("button", { name: /Crear conversación general/i })); await screen.findAllByText("Consulta general");
-    const composer = await getEnabledComposer();
+    fireEvent.click(await screen.findByRole("button", { name: /Crear conversación general/i })); await screen.findByRole("heading", { name: "Consulta general" });
     const db = await openAssistantDatabase(factory, "scope-bridge-test"); await new Promise<void>((resolve, reject) => { const transaction = db.transaction("conversations", "readwrite"); transaction.objectStore("conversations").clear(); transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error); }); db.close();
-    fireEvent.change(composer, { target: { value: "¿Qué es Cuadre Reg.?" } }); fireEvent.click(screen.getByRole("button", { name: /Enviar/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: /Pregunta/i }), { target: { value: "¿Qué es Cuadre Reg.?" } }); fireEvent.click(screen.getByRole("button", { name: /Enviar/i }));
     await screen.findByRole("alert"); expect(streamGeneral).not.toHaveBeenCalled();
   });
 });

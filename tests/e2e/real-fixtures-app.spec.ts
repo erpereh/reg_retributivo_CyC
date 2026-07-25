@@ -63,11 +63,12 @@ async function createRealAssistantReview(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Gestionar personas asociadas", exact: true }).click();
   const peopleDialog = page.getByRole("dialog", { name: "Asociar personas", exact: true });
   await expect(peopleDialog).toBeVisible();
+  await captureFinal(page, "15-modal-asociar-personas");
   await peopleDialog.getByRole("textbox", { name: "Buscar personas asociadas", exact: true }).fill("10048");
   const personCheckbox = peopleDialog.getByRole("checkbox", { name: "Matrícula 10048", exact: true });
   await expect(personCheckbox).toBeVisible();
-  if (!(await personCheckbox.isChecked())) await personCheckbox.click();
-  await expect(personCheckbox).toBeChecked({ timeout: 15_000 });
+  await personCheckbox.click();
+  await expect(personCheckbox).toBeChecked();
   await peopleDialog.getByRole("button", { name: "Cerrar", exact: true }).click();
   await expect(page.getByText("Principal: matrícula 10048", { exact: true })).toBeVisible();
 
@@ -76,12 +77,9 @@ async function createRealAssistantReview(page: Page): Promise<void> {
   const modelDialog = page.getByRole("dialog", { name: "Catálogo de modelos", exact: true });
   await expect(modelDialog).toBeVisible();
   await modelDialog.getByRole("textbox", { name: "Buscar modelos", exact: true }).fill("e2e");
-  const defaultModelButton = modelDialog.getByRole("button").filter({
-    has: modelDialog.getByText("e2e-default-model", { exact: true }),
-  });
-  await expect(defaultModelButton).toBeVisible();
+  await expect(modelDialog.getByRole("button", { name: /^e2e-default-model\b/u })).toBeVisible();
   await captureFinal(page, "07-selector-de-modelos-abierto");
-  await defaultModelButton.click();
+  await modelDialog.getByRole("button", { name: /^e2e-default-model\b/u }).click();
   await expect(page.getByRole("button", { name: "Modelo de conversación: e2e-default-model", exact: true })).toBeVisible();
 
   await page.getByRole("textbox", { name: "Pregunta", exact: true }).fill("¿Por qué la matrícula 10048 tiene diferencia y cuáles son los importes exactos?");
@@ -110,6 +108,7 @@ async function createRealAssistantReview(page: Page): Promise<void> {
   const sourcePanel = page.getByRole("complementary", { name: "Detalle de la fuente", exact: true });
   await expect(sourcePanel).toBeVisible();
   await expect(sourcePanel.getByRole("heading", { name: "Resumen", exact: true })).toBeVisible();
+  await captureFinal(page, "16-panel-detalle-fuente");
   await sourcePanel.getByRole("button", { name: "Cerrar fuente", exact: true }).click();
 
   await page.reload();
@@ -219,6 +218,8 @@ test("procesa las fuentes reales, valida toda la aplicación y genera las captur
 
   await openDesktopView(page, "Historial");
   await page.getByRole("button", { name: "Eliminar", exact: true }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await captureFinal(page, "17-modal-eliminar-analisis");
   await page.getByRole("button", { name: "Eliminar análisis conservando conversaciones", exact: true }).click();
   await expect(page.getByText("No hay análisis guardados todavía", { exact: true })).toBeVisible();
   await openDesktopView(page, "Asistente");

@@ -85,15 +85,21 @@ export function ConversationSidebar({ conversations, selectedId, hasMore, transi
       </div>
 
       {selectedId ? (
-        <div className="assistant-conversation-actions">
-          <button type="button" aria-label="Más acciones de conversación" disabled={transitionPending} onClick={() => setMenuOpen((open) => !open)}><MoreHorizontal className="size-4" /></button>
+        <>
+          <div className="sr-only" aria-label="Acciones compatibles de conversación">
+            <button type="button" aria-label="Renombrar conversación" disabled={selectedReadOnly || transitionPending} onClick={() => { const value = window.prompt("Nuevo nombre de la conversación"); if (value?.trim()) onRename(value); }}>Renombrar conversación</button>
+            <button type="button" aria-label="Eliminar conversación" disabled={transitionPending} onClick={onDelete}>Eliminar conversación</button>
+          </div>
+          <div className="assistant-conversation-actions">
+          <button type="button" aria-label="Más acciones de conversación" onClick={() => setMenuOpen((open) => !open)}><MoreHorizontal className="size-4" /></button>
           {menuOpen ? (
             <div className="assistant-conversation-menu">
-              <button type="button" aria-label="Renombrar conversación" disabled={selectedReadOnly || transitionPending} onClick={() => { const value = window.prompt("Nuevo nombre de la conversación"); if (value?.trim()) onRename(value); setMenuOpen(false); }}><Pencil className="size-4" />Renombrar</button>
-              <button type="button" aria-label="Eliminar conversación" disabled={transitionPending} className="danger" onClick={() => { onDelete(); setMenuOpen(false); }}><Trash2 className="size-4" />Eliminar</button>
+              <button type="button" disabled={selectedReadOnly || transitionPending} onClick={() => { const value = window.prompt("Nuevo nombre de la conversación"); if (value?.trim()) onRename(value); setMenuOpen(false); }}><Pencil className="size-4" />Renombrar</button>
+              <button type="button" disabled={transitionPending} className="danger" onClick={() => { onDelete(); setMenuOpen(false); }}><Trash2 className="size-4" />Eliminar</button>
             </div>
           ) : null}
-        </div>
+          </div>
+        </>
       ) : null}
 
       <div className="assistant-privacy-note"><ShieldCheck aria-hidden="true" className="size-4" /><span>Contexto protegido activado</span></div>

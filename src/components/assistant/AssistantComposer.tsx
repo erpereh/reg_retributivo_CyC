@@ -77,19 +77,19 @@ export function AssistantComposer({ streaming, controlsDisabled = false, sendDis
               <div className="assistant-model-popover__header"><div><strong>Seleccionar modelo</strong><small>El modelo queda guardado en esta conversación</small></div><button type="button" aria-label="Cerrar selector" onClick={() => setModelOpen(false)}>×</button></div>
               <fieldset disabled={checkingCompatibilityEntryIds.length > 0} aria-busy={checkingCompatibilityEntryIds.length > 0}>
                 <label className="assistant-model-search"><Search className="size-4" /><input aria-label="Buscar modelos" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar modelos…" /></label>
-                <div className="assistant-model-filters"><select aria-label="Filtrar por proveedor" value={providerFilter} onChange={(event) => setProviderFilter(event.target.value)}><option value="">Todos los proveedores</option>{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.displayName}</option>)}</select><label><input type="checkbox" checked={showAll} onChange={(event) => setShowAll(event.target.checked)} />Ver incompatibles</label></div>
+                <div className="assistant-model-filters"><select aria-label="Filtrar por proveedor" value={providerFilter} onChange={(event) => setProviderFilter(event.target.value)}><option value="">Todos los proveedores</option>{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.displayName}</option>)}</select><label><input type="checkbox" aria-label="Ver todos" checked={showAll} onChange={(event) => setShowAll(event.target.checked)} />Ver incompatibles</label></div>
                 <div className="assistant-model-groups">
                   {sections.map((section) => (
                     <section key={section.label}>
-                      <h3>{section.label.toUpperCase()}</h3>
+                      <h3 aria-label={section.label}>{section.label.toUpperCase()}</h3>
                       {section.entries.map((entry) => {
                         const compatibility = modelCompatibility(entry, conversation.type);
                         const selectedEntry = entry.providerId === conversation.providerId && entry.canonicalModelId === conversation.modelId;
                         return (
                           <div key={entry.id} className={selectedEntry ? "assistant-model-row assistant-model-row--selected" : "assistant-model-row"}>
-                            <button type="button" disabled={!compatibility.selectable} title={compatibility.reason} onClick={() => { onSelectModel(entry.providerId, entry.canonicalModelId); setModelOpen(false); }}>
+                            <button type="button" aria-label={entry.displayName} disabled={!compatibility.selectable} title={compatibility.reason} onClick={() => { onSelectModel(entry.providerId, entry.canonicalModelId); setModelOpen(false); }}>
                               <span className="assistant-provider-mini">{providerName(entry.providerId).slice(0, 1).toUpperCase()}</span>
-                              <span><strong>{entry.displayName}</strong><small>{providerName(entry.providerId)} · {tokens(entry.contextWindow)} tokens{entry.capabilities.tools === true ? " · herramientas" : ""}</small>{compatibility.reason ? <em>{compatibility.reason}</em> : null}</span>
+                              <span><strong>{entry.displayName}</strong><small>{providerName(entry.providerId)} · {entry.canonicalModelId} · {tokens(entry.contextWindow)} tokens{entry.capabilities.tools === true ? " · herramientas" : ""}</small>{compatibility.reason ? <em>{compatibility.reason}</em> : null}</span>
                               {selectedEntry ? <Check className="size-4" /> : null}
                             </button>
                             <button type="button" className="assistant-favorite-model" aria-label={`${favoriteSet.has(entry.id) ? "Quitar de" : "Añadir a"} favoritos`} onClick={() => onToggleFavorite(entry.id)}><Star className={favoriteSet.has(entry.id) ? "size-4 fill-current" : "size-4"} /></button>

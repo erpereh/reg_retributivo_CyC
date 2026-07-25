@@ -71,7 +71,7 @@ export function AssistantMessage({ message, sources, revealedSourceIds, actions,
               <button type="button" aria-label="Copiar respuesta" onClick={copy}>{copied ? <Check className="size-4" /> : <Copy className="size-4" />}{copied ? "Copiado" : "Copiar respuesta"}</button>
               {repeatable && (message.status === "failed" || message.status === "stopped" || message.status === "interrupted") ? <button type="button" aria-label="Reintentar respuesta" onClick={() => onRetry(message.id)}><RotateCcw className="size-4" />Reintentar</button> : null}
               {repeatable && latestAssistant && message.status === "completed" ? <button type="button" aria-label="Regenerar respuesta" onClick={() => onRegenerate(message.id)}><RefreshCw className="size-4" />Regenerar</button> : null}
-              <span>{message.status === "streaming" ? "Generando…" : message.status === "failed" ? "Respuesta fallida" : message.status === "stopped" ? "Respuesta detenida" : message.status === "interrupted" ? "Respuesta interrumpida" : "Respuesta verificada con fuentes"}</span>
+              <span>{message.status === "streaming" ? "Generando…" : message.status === "failed" ? "Respuesta fallida" : message.status === "stopped" ? "Detenida" : message.status === "interrupted" ? "Interrumpida" : "Respuesta verificada con fuentes"}</span>
             </footer>
           ) : null}
         </div>

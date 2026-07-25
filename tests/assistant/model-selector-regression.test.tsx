@@ -91,10 +91,9 @@ describe("assistant model selector regressions", () => {
     expect(screen.getByRole("button", { name: "Enviar" })).toBeDisabled();
     fireEvent.click(selector);
     const catalog = screen.getByRole("dialog", { name: "Catálogo de modelos" });
-    expect(within(catalog).getByRole("heading", { name: /Gemini/i })).toBeVisible();
-    const firstModelButton = within(catalog).getByText("gemini-chat-1", { selector: "strong", exact: true }).closest("button");
-    expect(firstModelButton).not.toBeNull();
-    expect(firstModelButton as HTMLButtonElement).toBeEnabled();
+    expect(within(catalog).getByRole("heading", { name: "Gemini" })).toBeVisible();
+    const firstModelButton = within(catalog).getByRole("button", { name: "gemini-chat-1" });
+    expect(firstModelButton).toBeEnabled();
     expect(within(catalog).getAllByText(/^gemini-chat-/)).toHaveLength(39);
   });
 
@@ -114,7 +113,7 @@ describe("assistant model selector regressions", () => {
     await seed(factory, "selector-analysis-rules", [model("with-tools", true), model("without-tools", false), model("unknown-tools", "unknown")], conversation("analysis"));
     render(<AssistantProvider factory={factory} dbName="selector-analysis-rules"><AssistantView /></AssistantProvider>);
     fireEvent.click(await screen.findByRole("button", { name: "Modelo de conversación: sin seleccionar" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Ver incompatibles" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Ver todos" }));
     expect(screen.getByRole("button", { name: /with-tools/i })).toBeEnabled();
     expect(screen.getByRole("button", { name: /without-tools/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /unknown-tools/i })).toBeDisabled();
@@ -134,7 +133,7 @@ describe("assistant model selector regressions", () => {
 
     render(<AssistantProvider factory={factory} dbName="selector-compatibility-failure"><AssistantView /></AssistantProvider>);
     fireEvent.click(await screen.findByRole("button", { name: "Modelo de conversación: sin seleccionar" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Ver incompatibles" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Ver todos" }));
     fireEvent.click(screen.getByRole("button", { name: "Comprobar compatibilidad" }));
 
     expect(await screen.findByText("No se pudo comprobar la compatibilidad del modelo. Puedes volver a intentarlo.")).toBeVisible();
@@ -157,7 +156,7 @@ describe("assistant model selector regressions", () => {
     }));
     render(<AssistantProvider factory={factory} dbName="selector-compatibility-pending"><AssistantView /></AssistantProvider>);
     fireEvent.click(await screen.findByRole("button", { name: "Modelo de conversación: sin seleccionar" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Ver incompatibles" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Ver todos" }));
     fireEvent.click(screen.getByRole("button", { name: "Comprobar compatibilidad" }));
 
     expect(screen.getByRole("button", { name: "Comprobar compatibilidad" })).toBeDisabled();
@@ -175,7 +174,7 @@ describe("assistant model selector regressions", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Modelo de conversación: sin seleccionar" }));
     expect(screen.getByText("confirmed-chat")).toBeVisible();
     expect(screen.queryByText("unknown-chat")).toBeNull();
-    fireEvent.click(screen.getByRole("checkbox", { name: "Ver incompatibles" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Ver todos" }));
     expect(screen.getByRole("button", { name: /unknown-chat/i })).toBeDisabled();
     expect(screen.getByText("La compatibilidad con chat no está confirmada.")).toBeVisible();
   });
@@ -269,7 +268,7 @@ describe("assistant model selector regressions", () => {
 
     render(<AssistantProvider factory={factory} dbName="selector-legacy-general"><AssistantView /></AssistantProvider>);
 
-    expect(await screen.findByText("Chat general", { exact: true })).toBeVisible();
+    expect(await screen.findByText("Chat general · sin datos retributivos")).toBeVisible();
     expect(screen.queryByText("Contexto añadido: Análisis activo")).toBeNull();
     expect(screen.queryByRole("button", { name: "Gestionar personas asociadas" })).toBeNull();
     const selector = screen.getByRole("button", { name: "Modelo de conversación: sin seleccionar" });
