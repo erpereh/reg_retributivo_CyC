@@ -256,7 +256,11 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
   }, [collapsed]);
 
   useEffect(() => {
-    if (previousView.current !== view) mainRef.current?.focus({ preventScroll: true });
+    if (previousView.current !== view) {
+      const activeElement = document.activeElement;
+      const navigationKeepsFocus = activeElement instanceof HTMLElement && activeElement.getAttribute("role") === "tab";
+      if (!navigationKeepsFocus) mainRef.current?.focus({ preventScroll: true });
+    }
     previousView.current = view;
   }, [view]);
 

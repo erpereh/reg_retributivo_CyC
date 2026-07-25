@@ -1,11 +1,10 @@
 "use client";
 
-import { ChevronDown, FileSpreadsheet, FileText, UserRound } from "lucide-react";
+import { ArchiveX, ChevronDown, FileSpreadsheet, FileText, UserRound } from "lucide-react";
 import { AssistantComposer } from "@/components/assistant/AssistantComposer";
 import { AssistantMessage } from "@/components/assistant/AssistantMessage";
 import { ConversationEvent } from "@/components/assistant/ConversationEvent";
 import type { AssistantContextValue } from "@/components/assistant/AssistantProvider";
-import { useAppState } from "@/components/app/AppState";
 import type { SourceReference } from "@/lib/assistant/domain";
 
 type TimelineItem =
@@ -27,7 +26,7 @@ function tokenPercent(used?: number, maximum?: number): number {
 }
 
 export function ConversationTimeline({ assistant, onShowContextUsage, onOpenSource }: Readonly<{ assistant: AssistantContextValue; onShowContextUsage?(): void; onOpenSource?(source: SourceReference): void }>) {
-  const { activeAnalysis } = useAppState();
+  const activeAnalysis = assistant.activeAnalysisSummary;
   const conversation = assistant.conversation;
   const latestAssistantId = [...assistant.messages].reverse().find((message) => message.role === "assistant")?.id;
   const latestUsage = [...assistant.messages].reverse().find((message) => message.usage)?.usage;
@@ -38,7 +37,7 @@ export function ConversationTimeline({ assistant, onShowContextUsage, onOpenSour
     ...assistant.messages.map((message) => ({ kind: "message" as const, id: message.id, createdAt: message.createdAt, message })),
   ].sort(compareTimeline);
   const percent = tokenPercent(latestUsage?.inputTokens, selectedModel?.contextWindow);
-  const periods = activeAnalysis?.result.summary.periods ?? [];
+  const periods = activeAnalysis?.periods ?? [];
 
   return (
     <main className="assistant-chat-shell" aria-labelledby="assistant-title">
@@ -50,7 +49,7 @@ export function ConversationTimeline({ assistant, onShowContextUsage, onOpenSour
         {conversation?.type === "analysis" ? (
           <button type="button" className="assistant-linked-analysis" onClick={onShowContextUsage}>
             <FileSpreadsheet aria-hidden="true" className="size-4" />
-            <span><strong>{activeAnalysis?.registroFileName ?? "Análisis retributivo"}</strong><small>{activeAnalysis ? `${activeAnalysis.result.summary.uniquePeople} personas · ${activeAnalysis.pdfCount + 1} documentos` : "Contexto histórico"}</small></span>
+            <span><strong>{activeAnalysis?.registroFileName ?? "Análisis retributivo"}</strong><small>{activeAnalysis ? `${activeAnalysis.uniquePeople} personas · ${activeAnalysis.pdfCount + 1} documentos` : "Contexto histórico"}</small></span>
             <ChevronDown aria-hidden="true" className="size-4" />
           </button>
         ) : conversation ? (
@@ -72,6 +71,13 @@ export function ConversationTimeline({ assistant, onShowContextUsage, onOpenSour
             <span>Uso del contexto</span><i><b style={{ width: `${percent}%` }} /></i><strong>{percent || 0}%</strong>
           </button>
           <button type="button" className="assistant-context-sources" onClick={onShowContextUsage}><FileText aria-hidden="true" className="size-4" /><strong>{assistant.sources.length} fuentes</strong></button>
+        </div>
+      ) : null}
+
+      {conversation?.status === "archived_analysis_deleted" ? (
+        <div role="alert" className="assistant-historical-notice">
+          <ArchiveX aria-hidden="true" className="size-4" />
+          <span><strong>El análisis original fue eliminado.</strong> Esta conversación conserva evidencia histórica y es de solo lectura.</span>
         </div>
       ) : null}
 
