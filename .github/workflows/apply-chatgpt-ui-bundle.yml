@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - chatgpt/reference-ui-final
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   contents: write
@@ -13,7 +20,7 @@ jobs:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout branch
+      - name: Checkout staging branch
         uses: actions/checkout@v4
         with:
           ref: chatgpt/reference-ui-final
