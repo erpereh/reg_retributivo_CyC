@@ -27,7 +27,7 @@ const activeAnalysis = { id: "analysis-1", result, createdAt: "2026-07-13T10:00:
 
 async function getEnabledComposer(): Promise<HTMLTextAreaElement> {
   const composer = await screen.findByRole("textbox", { name: /Pregunta/i });
-  await waitFor(() => expect(composer).toBeEnabled());
+  await waitFor(() => expect(composer.disabled).toBe(false));
   return composer as HTMLTextAreaElement;
 }
 
