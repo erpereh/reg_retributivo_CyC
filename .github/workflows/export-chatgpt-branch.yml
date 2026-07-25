@@ -1,0 +1,33 @@
+name: Export validation branch snapshot
+
+on:
+  push:
+    branches:
+      - chatgpt/reference-ui-final
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@v4
+        with:
+          ref: chatgpt/reference-ui-final
+          fetch-depth: 0
+
+      - name: Create source snapshot
+        shell: bash
+        run: |
+          git rev-parse HEAD > BRANCH_HEAD_SHA.txt
+          tar --exclude=.git --exclude=node_modules --exclude=.next --exclude=artifacts --exclude=test-results --exclude=playwright-report -czf /tmp/reg-retributivo-branch.tar.gz .
+
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: reg-retributivo-branch-snapshot
+          path: /tmp/reg-retributivo-branch.tar.gz
+          if-no-files-found: error
+          retention-days: 1
