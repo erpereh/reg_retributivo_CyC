@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - chatgpt/reference-ui-final
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
