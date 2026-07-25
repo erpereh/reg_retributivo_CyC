@@ -1,0 +1,71 @@
+name: Publish final artifacts
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Verify Gemini production connection
+        shell: bash
+        run: |
+          curl --fail-with-body --silent --show-error -X POST \
+            https://registro-retributivo-cyc-git-test.vercel.app/api/ai/test \
+            -H 'content-type: application/json' \
+            -o /tmp/gemini-smoke.json
+          cat /tmp/gemini-smoke.json
+          node -e "const x=require('/tmp/gemini-smoke.json'); if(!x.ok) process.exit(1)"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Run focused real-source flow
+        run: pnpm exec playwright test tests/e2e/real-fixtures-app.spec.ts --project=chromium
+      - name: Package captures
+        shell: bash
+        run: |
+          test "$(find artifacts/final-screenshots -maxdepth 1 -type f -name '*.png' | wc -l)" -ge 17
+          cd artifacts/final-screenshots
+          zip -9 -r /tmp/capturas-finales-registro-retributivo.zip .
+          cd -
+          cp /tmp/gemini-smoke.json /tmp/final-smoke.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const p='/tmp/final-smoke.json';
+          const x=JSON.parse(fs.readFileSync(p,'utf8'));
+          x.screenshots=fs.readdirSync('artifacts/final-screenshots').filter(n=>n.endsWith('.png')).sort();
+          x.screenshotCount=x.screenshots.length;
+          x.productionUrl='https://registro-retributivo-cyc-git-test.vercel.app';
+          fs.writeFileSync(p, JSON.stringify(x,null,2));
+          NODE
+      - name: Publish temporary artifact branch
+        shell: bash
+        run: |
+          mkdir -p /tmp/final-publish
+          cp /tmp/capturas-finales-registro-retributivo.zip /tmp/final-publish/
+          cp /tmp/final-smoke.json /tmp/final-publish/
+          git switch --orphan chatgpt/final-artifacts
+          git rm -rf .
+          cp /tmp/final-publish/* .
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'artifacts: publish final screenshots and Gemini smoke'
+          git push --force origin HEAD:chatgpt/final-artifacts
