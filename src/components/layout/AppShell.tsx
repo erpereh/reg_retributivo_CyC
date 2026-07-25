@@ -164,17 +164,6 @@ function Sidebar({
         <button type="button" className="app-icon-button app-sidebar__mobile-close" onClick={onCloseMobile} aria-label="Cerrar navegación"><X className="size-4" /></button>
       </div>
 
-      <div className="app-sidebar__context" aria-label="Contexto del análisis">
-        <span className="app-sidebar__context-icon">RR</span>
-        {!collapsed ? (
-          <span className="min-w-0">
-            <small>ANÁLISIS ACTUAL</small>
-            <strong>{activeAnalysis?.registroFileName ?? "Sin análisis cargado"}</strong>
-            <em>{activeAnalysis ? `${activeAnalysis.pdfCount} recibos · Registro retributivo` : "Carga los archivos para comenzar"}</em>
-          </span>
-        ) : null}
-      </div>
-
       <nav className="app-nav" role="tablist" aria-label="Vistas principales" aria-orientation="vertical">
         <NavGroup label="Operativa" items={OPERATIVE_NAVIGATION} collapsed={collapsed} view={view} selectAt={selectAt} onKeyDown={onKeyDown} refs={refs} />
         <NavGroup label="Inteligencia" items={INTELLIGENCE_NAVIGATION} collapsed={collapsed} view={view} selectAt={selectAt} onKeyDown={onKeyDown} refs={refs} />
@@ -238,8 +227,8 @@ function Topbar({ onOpenMobile, onToggleSidebar }: Readonly<{ onOpenMobile: () =
         <button type="button" className="btn-secondary app-topbar__assistant" onClick={() => setView("asistente")}>
           <Bot className="size-4" /><span>Preguntar al asistente</span>
         </button>
-        <button type="button" className="btn-primary app-topbar__export" aria-label="Exportar Excel" disabled={!result || exporting} onClick={() => void exportActiveAnalysis()}>
-          <Download className="size-4" aria-hidden="true" /><span>{exporting ? "Exportando…" : "Exportar"}</span>
+        <button type="button" className="btn-primary app-topbar__export" aria-label={exporting ? "Exportando Excel" : "Exportar Excel"} title={exporting ? "Exportando…" : "Exportar Excel"} disabled={!result || exporting} onClick={() => void exportActiveAnalysis()}>
+          <Download className="size-4" aria-hidden="true" />
         </button>
       </div>
     </header>
