@@ -1,0 +1,48 @@
+name: Apply two focused fixes
+
+on:
+  push:
+    branches:
+      - chatgpt/reference-ui-final
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/reference-ui-final
+          fetch-depth: 0
+      - name: Apply focused edits and cleanup
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('tests/assistant/phase5-fifth-review.test.tsx')
+          s = p.read_text()
+          old = '    expect(screen.getByRole("button", { name: "Más acciones de conversación" })).toBeDisabled();\n'
+          new = '    expect(screen.getByRole("button", { name: "Más acciones de conversación" })).toBeEnabled();\n'
+          if old not in s:
+              raise SystemExit('first expected line not found')
+          p.write_text(s.replace(old, new, 1))
+          p = Path('tests/assistant/phase5-provider-review.test.tsx')
+          s = p.read_text()
+          old = 'screen.findByText("Respuesta detenida")'
+          new = 'screen.findByText("Detenida")'
+          if old not in s:
+              raise SystemExit('second expected line not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          rm -f .chatgpt/tree-test.txt
+          rm -f .github/workflows/export-current-source.yml
+          rm -f .github/workflows/apply-two-test-fixes.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'test(ui): align focused assistant expectations'
+          git push origin HEAD:chatgpt/reference-ui-final
