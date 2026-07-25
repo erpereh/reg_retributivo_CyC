@@ -1,0 +1,41 @@
+name: Restore AppState and chunked upload
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Restore exact AppState and apply focused change
+        run: |
+          git checkout 47fa9916fc7ccfd77ad7a83dcaf7b0f20593200c -- src/components/app/AppState.tsx
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('src/components/app/AppState.tsx')
+          s=p.read_text()
+          old='''    const currentView = view;\n    const config = buildConfig(settingsForAnalysis);\n    const formData = new FormData();\n    formData.append("registro", registroFile);\n    formData.append("tolerance", String(config.tolerance));\n    formData.append("enableAI", String(config.enableAI));\n    formData.append("reviewThreshold", String(config.thresholds.reviewThreshold));\n    formData.append("incidentThreshold", String(config.thresholds.incidentThreshold));\n    formData.append("conceptMap", JSON.stringify(config.conceptMap ?? []));\n    formData.append("excludedEmployeeIds", JSON.stringify(config.excludedEmployeeIds ?? []));\n    pdfFiles.forEach((file) => formData.append("pdfs", file));\n\n    setAnalyzing(true);\n'''
+          new='''    const currentView = view;\n    const config = buildConfig(settingsForAnalysis);\n\n    setAnalyzing(true);\n'''
+          if old not in s: raise SystemExit('form block not found')
+          s=s.replace(old,new,1)
+          old2='''      const response = await fetch("/api/analyze", { method: "POST", body: formData });\n      if (!response.ok) {\n        const payload = (await response.json()) as { error?: string };\n        throw new Error(payload.error ?? "No se pudo analizar.");\n      }\n\n      const result = (await response.json()) as AnalysisResult;\n'''
+          new2='''      const readJson = async <T,>(response: Response): Promise<T> => {\n        const text = await response.text();\n        let payload: unknown;\n        try { payload = text ? JSON.parse(text) : undefined; }\n        catch { throw new Error(response.status === 413 ? "Los archivos superan el límite de subida." : `Respuesta no válida del servidor (${response.status}).`); }\n        if (!response.ok) throw new Error((payload as { error?: string } | undefined)?.error ?? `No se pudo analizar (${response.status}).`);\n        return payload as T;\n      };\n\n      setStatus("Procesando Excel...");\n      const registroForm = new FormData();\n      registroForm.append("registro", registroFile);\n      const registroParsed = await readJson<Record<string, unknown>>(await fetch("/api/analyze/registro", { method: "POST", body: registroForm }));\n      const payrollRecords: unknown[] = [];\n      const pdfErrors: unknown[] = [];\n      for (let index = 0; index < pdfFiles.length; index += 1) {\n        const file = pdfFiles[index];\n        setStatus(`Procesando recibo ${index + 1} de ${pdfFiles.length}...`);\n        const pdfForm = new FormData();\n        pdfForm.append("pdf", file);\n        const parsed = await readJson<{ records: unknown[]; errors: unknown[] }>(await fetch("/api/analyze/pdf", { method: "POST", body: pdfForm }));\n        payrollRecords.push(...parsed.records);\n        pdfErrors.push(...parsed.errors);\n      }\n      setStatus("Comparando resultados...");\n      const result = await readJson<AnalysisResult>(await fetch("/api/analyze/finalize", {\n        method: "POST", headers: { "content-type": "application/json" },\n        body: JSON.stringify({ registroParsed, payrollRecords, pdfErrors, config }),\n      }));\n'''
+          if old2 not in s: raise SystemExit('request block not found')
+          p.write_text(s.replace(old2,new2,1))
+          PY
+          rm -f .github/workflows/restore-appstate-chunked.yml .github/workflows/fix-query-export.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'fix(upload): restore app state and split large uploads'
+          git push origin HEAD:main
