@@ -1,6 +1,12 @@
 name: Apply verified final patch
 
 on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - synchronize
+      - reopened
   push:
     branches:
       - chatgpt/reference-ui-final
