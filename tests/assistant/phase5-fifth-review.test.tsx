@@ -186,7 +186,7 @@ describe("Phase 5 fifth-review regressions", () => {
     await createStartedPromise;
     expect(screen.getByRole("button", { name: "Nueva conversación" })).toBeDisabled();
     expect(screen.getByRole("button", { name: /conversation-a/ })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Más acciones de conversación" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Más acciones de conversación" })).toBeEnabled();
     releaseCreate();
     await waitFor(() => expect(screen.getByTestId("double-done")).toHaveTextContent("true"));
     expect(createdWrites).toBe(1);

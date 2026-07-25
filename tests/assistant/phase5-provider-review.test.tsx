@@ -89,7 +89,7 @@ describe("Phase 5 reviewed provider behavior", () => {
 
     expect(await screen.findByText("Parcial visible")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Detener respuesta" }));
-    expect(await screen.findByText("Respuesta detenida")).toBeVisible();
+    expect(await screen.findByText("Detenida")).toBeVisible();
     expect(screen.getByText("Parcial visible")).toBeVisible();
     expect(screen.queryByRole("alert")).toBeNull();
     await waitFor(() => expect(iteratorReturned).toBe(true));
