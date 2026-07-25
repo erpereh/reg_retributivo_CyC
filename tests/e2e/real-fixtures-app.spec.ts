@@ -76,9 +76,12 @@ async function createRealAssistantReview(page: Page): Promise<void> {
   const modelDialog = page.getByRole("dialog", { name: "Catálogo de modelos", exact: true });
   await expect(modelDialog).toBeVisible();
   await modelDialog.getByRole("textbox", { name: "Buscar modelos", exact: true }).fill("e2e");
-  await expect(modelDialog.getByRole("button", { name: /^e2e-default-model\b/u })).toBeVisible();
+  const defaultModelButton = modelDialog.getByRole("button").filter({
+    has: modelDialog.getByText("e2e-default-model", { exact: true }),
+  });
+  await expect(defaultModelButton).toBeVisible();
   await captureFinal(page, "07-selector-de-modelos-abierto");
-  await modelDialog.getByRole("button", { name: /^e2e-default-model\b/u }).click();
+  await defaultModelButton.click();
   await expect(page.getByRole("button", { name: "Modelo de conversación: e2e-default-model", exact: true })).toBeVisible();
 
   await page.getByRole("textbox", { name: "Pregunta", exact: true }).fill("¿Por qué la matrícula 10048 tiene diferencia y cuáles son los importes exactos?");
