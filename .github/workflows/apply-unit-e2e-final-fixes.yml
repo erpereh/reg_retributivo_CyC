@@ -1,0 +1,42 @@
+name: Apply final unit and E2E fixes
+
+on:
+  push:
+    branches:
+      - chatgpt/reference-ui-final
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout staging branch
+        uses: actions/checkout@v4
+        with:
+          ref: chatgpt/reference-ui-final
+          fetch-depth: 0
+
+      - name: Decode and apply verified patch
+        shell: bash
+        run: |
+          tr -d '[:space:]' < .chatgpt/unit-e2e-final-fixes.patch.gz.b64 | base64 --decode > /tmp/unit-e2e-final-fixes.patch.gz
+          echo "3cb877b0c9d6411ca946055aad81e473be5e04d86deaf69412d0f0a76d747a0a  /tmp/unit-e2e-final-fixes.patch.gz" | sha256sum --check
+          gzip -dc /tmp/unit-e2e-final-fixes.patch.gz > /tmp/unit-e2e-final-fixes.patch
+          echo "7d9309d8aa22387a902cfca6d893a1615000dacdc4c03efa4f7143c3be2f388e  /tmp/unit-e2e-final-fixes.patch" | sha256sum --check
+          git apply --check /tmp/unit-e2e-final-fixes.patch
+          git apply /tmp/unit-e2e-final-fixes.patch
+          rm -rf .chatgpt
+          rm -f .github/workflows/apply-unit-e2e-final-fixes.yml
+
+      - name: Commit final fixes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix(test): restore final unit and real-source validation"
+          git push origin HEAD:chatgpt/reference-ui-final
