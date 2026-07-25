@@ -1,0 +1,62 @@
+name: Apply small mobile UI changes
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Update sidebar and export button
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/components/layout/AppShell.tsx')
+          source = path.read_text()
+
+          context_block = '''      <div className="app-sidebar__context" aria-label="Contexto del análisis">
+        <span className="app-sidebar__context-icon">RR</span>
+        {!collapsed ? (
+          <span className="min-w-0">
+            <small>ANÁLISIS ACTUAL</small>
+            <strong>{activeAnalysis?.registroFileName ?? "Sin análisis cargado"}</strong>
+            <em>{activeAnalysis ? `${activeAnalysis.pdfCount} recibos · Registro retributivo` : "Carga los archivos para comenzar"}</em>
+          </span>
+        ) : null}
+      </div>
+
+'''
+          if context_block not in source:
+              raise SystemExit('No se encontró la tarjeta superior de análisis')
+          source = source.replace(context_block, '', 1)
+
+          export_button = '''        <button type="button" className="btn-primary app-topbar__export" aria-label="Exportar Excel" disabled={!result || exporting} onClick={() => void exportActiveAnalysis()}>
+          <Download className="size-4" aria-hidden="true" /><span>{exporting ? "Exportando…" : "Exportar"}</span>
+        </button>'''
+          export_icon_only = '''        <button type="button" className="btn-primary app-topbar__export" aria-label={exporting ? "Exportando Excel" : "Exportar Excel"} title={exporting ? "Exportando…" : "Exportar Excel"} disabled={!result || exporting} onClick={() => void exportActiveAnalysis()}>
+          <Download className="size-4" aria-hidden="true" />
+        </button>'''
+          if export_button not in source:
+              raise SystemExit('No se encontró el botón de exportación')
+          source = source.replace(export_button, export_icon_only, 1)
+
+          path.write_text(source)
+          PY
+          rm -f .github/workflows/apply-small-mobile-ui-changes.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'style(ui): simplify mobile sidebar and export action'
+          git push origin HEAD:main
