@@ -1,4 +1,4 @@
-name: Apply ChatGPT UI bundle
+name: Diagnose ChatGPT UI bundle
 
 on:
   push:
@@ -16,7 +16,7 @@ permissions:
   contents: write
 
 jobs:
-  apply:
+  diagnose:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
@@ -26,27 +26,18 @@ jobs:
           ref: chatgpt/reference-ui-final
           fetch-depth: 0
 
-      - name: Verify staged bundle parts
+      - name: Write reproducible hash report
         shell: bash
         run: |
-          sha256sum .chatgpt/part-*.txt
+          sha256sum .chatgpt/part-*.txt > .chatgpt/github-hashes.txt
+          set +e
           cat .chatgpt/part-*.txt | tr -d '[:space:]' | base64 --decode > /tmp/changes.tar.gz
-          sha256sum /tmp/changes.tar.gz
-          echo "13aaf372174a1ee8de5b70b0d87eedc65ceae8b241f53f6a384676a648cfe624  /tmp/changes.tar.gz" | sha256sum --check
-
-      - name: Apply files and remove staging helpers
-        shell: bash
-        run: |
-          tar -xzf /tmp/changes.tar.gz
-          rm -rf .chatgpt
-          rm -f .github/workflows/apply-chatgpt-ui-bundle.yml
-
-      - name: Commit applied changes
-        shell: bash
-        run: |
+          decode_status=$?
+          set -e
+          printf 'decode_status=%s\n' "$decode_status" >> .chatgpt/github-hashes.txt
+          sha256sum /tmp/changes.tar.gz >> .chatgpt/github-hashes.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git diff --cached --check
-          git commit -m "feat(ui): clone reference assistant and shell"
+          git add .chatgpt/github-hashes.txt
+          git commit -m "chore: record staged bundle hashes"
           git push origin HEAD:chatgpt/reference-ui-final
